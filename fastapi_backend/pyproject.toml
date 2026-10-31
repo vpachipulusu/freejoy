@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "Your App FastAPI backend (adapted from vintasoftware/nextjs-fastapi-template, see TEMPLATE_LICENSE.txt)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi[standard]>=0.143.0,<0.144",
+    "fastapi[standard]>=0.143.0,<0.163",
     "asyncpg>=0.32.0,<0.33",
     "sqlalchemy[asyncio]>=2.1.4,<3",
     "pydantic-settings>=2.15.0,<3",
     "upstash-ratelimit==1.2.0",
     "upstash-redis==1.8.0",
-    "sentry-sdk[fastapi]==2.72.0",
-    "cuid2==2.0.1",
+    "sentry-sdk[fastapi]==2.73.0",
+    "cuid2==2.1.0",
     "firebase-admin==7.7.0",
     "cryptography==50.0.2",
     "httpx>=0.28.1,<0.29",
