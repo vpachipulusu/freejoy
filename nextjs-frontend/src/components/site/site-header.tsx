@@ -34,8 +34,8 @@ export function SiteHeader() {
   const [searchOpen, setSearchOpen] = useState(false);
   const signedIn = useSignedIn();
   const account = signedIn
-    ? { href: '/dashboard', label: 'Dashboard' }
-    : { href: '/login', label: 'Log in' };
+    ? { href: '/dashboard', label: 'Dashboard', prefetch: false }
+    : { href: '/login', label: 'Log in', prefetch: undefined };
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -68,7 +68,9 @@ export function SiteHeader() {
           <SearchForm className="w-full max-w-[280px]" />
           <Link
             href={account.href}
-            className="inline-flex min-h-11 items-center rounded-pill px-3 text-sm font-semibold text-foreground hover:bg-muted"
+            // The dashboard layout verifies the session and loads the profile: never prefetch it from public pages.
+            prefetch={account.prefetch}
+            className="inline-flex min-h-11 min-w-[6.5rem] items-center justify-center rounded-pill px-3 text-sm font-semibold text-foreground hover:bg-muted"
           >
             {account.label}
           </Link>
@@ -136,6 +138,7 @@ export function SiteHeader() {
                   </Link>
                   <Link
                     href={account.href}
+                    prefetch={account.prefetch}
                     onClick={() => setMenuOpen(false)}
                     className="inline-flex min-h-11 items-center justify-center rounded-pill border border-border px-5 text-sm font-semibold hover:bg-muted"
                   >
