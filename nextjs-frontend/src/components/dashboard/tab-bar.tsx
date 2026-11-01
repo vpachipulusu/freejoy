@@ -4,10 +4,11 @@ import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { MoreHorizontal, X } from 'lucide-react';
+import { House, MoreHorizontal, X } from 'lucide-react';
 import { DialogOverlay } from '@/components/ui/dialog';
+import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
-import { MORE_ITEMS, TAB_ITEMS, activeNavHref } from './nav-items';
+import { MORE_ITEMS, SITE_HOME_HREF, TAB_ITEMS, activeNavHref, backToSiteLabel } from './nav-items';
 
 const TAB_CLASS =
   'relative flex h-full flex-1 flex-col items-center justify-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground';
@@ -90,6 +91,16 @@ export function TabBar() {
               </DialogPrimitive.Close>
             </div>
             <ul className="mt-2 flex flex-col">
+              <li className="mb-1 border-b border-border pb-1">
+                <Link
+                  href={SITE_HOME_HREF}
+                  onClick={() => setMoreOpen(false)}
+                  className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm font-medium hover:bg-secondary"
+                >
+                  <House className="h-[18px] w-[18px]" aria-hidden="true" />
+                  {backToSiteLabel(siteConfig.name)}
+                </Link>
+              </li>
               {MORE_ITEMS.map(({ href, label, icon: Icon }) => (
                 <li key={href}>
                   <Link

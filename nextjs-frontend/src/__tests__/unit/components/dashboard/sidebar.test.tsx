@@ -63,4 +63,38 @@ describe('Sidebar', () => {
       expect(link.className).toContain('min-h-11');
     }
   });
+
+  it('puts the link back to the public home page first in the nav, once, as a plain item', () => {
+    render(<Sidebar />);
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const links = within(nav).getAllByRole('link');
+    const home = links[0];
+    expect(home).toHaveTextContent('Back to Acme Shop');
+    expect(home).toHaveAttribute('href', '/');
+    expect(home).not.toHaveAttribute('aria-current');
+    expect(links.slice(1).map((link) => link.getAttribute('href'))).toEqual(
+      NAV_ITEMS.map((item) => item.href)
+    );
+    expect(screen.getAllByRole('link', { name: 'Back to Acme Shop' })).toHaveLength(1);
+  });
+
+  it('keeps the brand pointing at the dashboard, above the home link', () => {
+    render(<Sidebar />);
+    const brand = screen.getByRole('link', { name: 'Acme Shop' });
+    const home = screen.getByRole('link', { name: 'Back to Acme Shop' });
+    expect(brand).toHaveAttribute('href', '/dashboard');
+    expect(brand.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('never marks the home link current, even on "/" or any nav page', () => {
+    const paths = ['/', ...NAV_ITEMS.map((item) => item.href)];
+    for (const path of paths) {
+      mocks.pathname = path;
+      const { unmount } = render(<Sidebar />);
+      expect(screen.getByRole('link', { name: 'Back to Acme Shop' })).not.toHaveAttribute(
+        'aria-current'
+      );
+      unmount();
+    }
+  });
 });

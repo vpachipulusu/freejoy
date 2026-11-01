@@ -31,6 +31,7 @@ describe('DashboardHeader account menu', () => {
       'Dashboard',
       'Profile',
       'Security',
+      'Back to Freejoy',
       'Log out',
     ]);
     expect(screen.queryByRole('menuitem', { name: 'Admin' })).not.toBeInTheDocument();
@@ -45,12 +46,13 @@ describe('DashboardHeader account menu', () => {
       'Profile',
       'Security',
       'Admin',
+      'Back to Freejoy',
       'Log out',
     ]);
     const separators = screen.getAllByRole('separator');
     const lastSeparator = separators[separators.length - 1];
     const logOut = items[items.length - 1];
-    const admin = items[items.length - 2];
+    const admin = items[items.length - 3];
     expect(
       lastSeparator.compareDocumentPosition(logOut) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
@@ -78,7 +80,16 @@ describe('DashboardHeader account menu', () => {
     render(<DashboardHeader user={{ ...base, isAdmin: true }} />);
     const items = await openMenu(userEvent.setup());
 
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     for (const item of items) expect(item.className).toContain('min-h-11');
+  });
+
+  it('links back to the public home page', async () => {
+    render(<DashboardHeader user={base} />);
+    await openMenu(userEvent.setup());
+    expect(await screen.findByRole('menuitem', { name: 'Back to Freejoy' })).toHaveAttribute(
+      'href',
+      '/'
+    );
   });
 });
