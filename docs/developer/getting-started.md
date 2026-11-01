@@ -140,9 +140,21 @@ built on the server from `NEXT_PUBLIC_APP_URL` (required in production; Vercel p
 
 ## First admin
 
-Admin pages need an admin grant in the backend. The first admin is granted in the database (SQL in
-[local-e2e.md](local-e2e.md)); after that an existing admin grants others through
-`PUT /v1/admin/users/{user_id}/admin` (the Users page in the admin area).
+Admin pages need an admin grant in the backend. The first admin is granted with a command, run by hand from
+`fastapi_backend/` against the database in `DATABASE_URL`:
+
+```bash
+uv run python -m commands.make_admin someone@example.com --dry-run   # report only, change nothing
+uv run python -m commands.make_admin someone@example.com             # grant the admin role
+uv run python -m commands.make_admin someone@example.com --role super_admin
+```
+
+The person must have signed in once first: users are created by their first Firebase sign-in, and the command
+never creates one. It trims the email and compares it ignoring case, prints which database it used (host, port and
+name, never the password) and exits 1 with "no user found" when nobody matches. It is idempotent: a user who
+already holds the role is left alone, a user with another role is moved to the requested one. After that an
+existing admin grants others through `PUT /v1/admin/users/{user_id}/admin` (the Users page in the admin area).
+Details, the permissions it writes and the audit row: [backend-admin-users.md](backend-admin-users.md#bootstrapping-the-first-admin).
 
 ## The whole stack in Docker
 

@@ -55,9 +55,40 @@ Ban and delete call Firebase after the audit row is staged and before the commit
 the change back; a commit failure after a successful Firebase call leaves the same residue as account
 deletion (see [backend-profile.md](backend-profile.md)).
 
+## Bootstrapping the first admin
+
+The API needs an admin to call it, so the first one is granted from the command line. Run it from `fastapi_backend/`
+against the database in `DATABASE_URL` (the owner runs it by hand; nothing schedules it):
+
+```bash
+uv run python -m commands.make_admin someone@example.com            # role admin
+uv run python -m commands.make_admin someone@example.com --dry-run  # report only, change nothing
+uv run python -m commands.make_admin someone@example.com --role super_admin
+```
+
+- **Who.** An existing user, found by email (trimmed, case-insensitive). Users are created by Firebase sign-in, so the
+  person signs in once first; with no match it prints "no user found", changes nothing and exits 1. Two users whose
+  emails differ only in case are refused (exit 1). An invalid email or option exits 2.
+- **What it writes.** The same single `admin_users` row as `PUT /{user_id}/admin`. `admin` gets every permission in
+  `ADMIN_PERMISSIONS` (no smaller preset exists in the app); `super_admin` gets exactly `["*"]`. Trim the list afterwards
+  through the API if a narrower admin is wanted.
+- **Idempotent.** The same role again prints "already ... No change." (exit 0, nothing written, existing permissions
+  kept). A different role is updated and reported as `changed from X to Y`. A `super_admin` row without the wildcard is
+  repaired. The last `super_admin` is never demoted (exit 1), as in the API.
+- **Audit.** Each change stages an `admin.users.grant_admin` row (resource `admin_users`, `before` and `after`) in the same
+  transaction. A command has no signed-in admin, so `user_id` is null (the admin audit list shows an empty actor) and
+  `metadata.actor` is `commands.make_admin`. Dry runs, refusals and no-ops write no row.
+- **Output.** The first line names the database as `host:port/name` (never the user or password); the result line has
+  the email as typed and never lists other users. A database failure prints the error type only and exits 1.
+
+Code: `commands/make_admin.py` (rules, on a small `AdminStore` protocol), `AdminUsersRepository.find_user_ids_by_email`
+and `AuditService.record_system_action`.
+
 ## Tests
 
 - `tests/services/test_admin_users.py`: rules with in-memory fakes.
+- `tests/commands/test_make_admin.py`: the bootstrap command on fakes; `tests/commands/test_make_admin_e2e.py`: the same
+  against real Postgres (same `TEST_DATABASE_URL` contract).
 - `tests/api/test_admin_users.py`: routes through the real `require_admin` chain.
 - `tests/api/test_admin_users_e2e.py`: real Postgres through the real app (same `TEST_DATABASE_URL` contract
   as the Stripe webhook e2e); asserts 401, 403, self-escalation refusal, audit rows, rollback and the
