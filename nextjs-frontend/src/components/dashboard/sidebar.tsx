@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
-import { Home } from 'lucide-react';
+import { House } from 'lucide-react';
 import { NAV_ITEMS, SITE_HOME_HREF, activeNavHref, backToSiteLabel } from './nav-items';
 
 const ITEM_CLASS = cn(
@@ -39,7 +39,7 @@ export function Sidebar({ children }: { children?: ReactNode }) {
         <ul className="flex flex-col gap-1">
           <li>
             <Link href={SITE_HOME_HREF} className={ITEM_CLASS}>
-              <Home className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+              <House className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
               {backToSiteLabel(siteConfig.name)}
             </Link>
           </li>

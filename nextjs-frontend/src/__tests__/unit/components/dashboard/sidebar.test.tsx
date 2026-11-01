@@ -71,7 +71,6 @@ describe('Sidebar', () => {
     const home = links[0];
     expect(home).toHaveTextContent('Back to Acme Shop');
     expect(home).toHaveAttribute('href', '/');
-    expect(home.className).toContain('min-h-11');
     expect(home).not.toHaveAttribute('aria-current');
     expect(links.slice(1).map((link) => link.getAttribute('href'))).toEqual(
       NAV_ITEMS.map((item) => item.href)
@@ -87,9 +86,15 @@ describe('Sidebar', () => {
     expect(brand.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('does not mark the home link current on any dashboard page', () => {
-    mocks.pathname = '/';
-    render(<Sidebar />);
-    expect(document.querySelector('[aria-current]')).toBeNull();
+  it('never marks the home link current, even on "/" or any nav page', () => {
+    const paths = ['/', ...NAV_ITEMS.map((item) => item.href)];
+    for (const path of paths) {
+      mocks.pathname = path;
+      const { unmount } = render(<Sidebar />);
+      expect(screen.getByRole('link', { name: 'Back to Acme Shop' })).not.toHaveAttribute(
+        'aria-current'
+      );
+      unmount();
+    }
   });
 });

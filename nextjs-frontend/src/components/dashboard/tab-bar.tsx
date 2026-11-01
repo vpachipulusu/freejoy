@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Home, MoreHorizontal, X } from 'lucide-react';
+import { House, MoreHorizontal, X } from 'lucide-react';
 import { DialogOverlay } from '@/components/ui/dialog';
 import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
@@ -97,7 +97,7 @@ export function TabBar() {
                   onClick={() => setMoreOpen(false)}
                   className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm font-medium hover:bg-secondary"
                 >
-                  <Home className="h-[18px] w-[18px]" aria-hidden="true" />
+                  <House className="h-[18px] w-[18px]" aria-hidden="true" />
                   {backToSiteLabel(siteConfig.name)}
                 </Link>
               </li>
