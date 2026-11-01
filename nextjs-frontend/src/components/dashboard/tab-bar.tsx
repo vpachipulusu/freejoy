@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { ArrowLeft, MoreHorizontal, X } from 'lucide-react';
+import { Home, MoreHorizontal, X } from 'lucide-react';
 import { DialogOverlay } from '@/components/ui/dialog';
 import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
@@ -91,6 +91,16 @@ export function TabBar() {
               </DialogPrimitive.Close>
             </div>
             <ul className="mt-2 flex flex-col">
+              <li className="mb-1 border-b border-border pb-1">
+                <Link
+                  href={SITE_HOME_HREF}
+                  onClick={() => setMoreOpen(false)}
+                  className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm font-medium hover:bg-secondary"
+                >
+                  <Home className="h-[18px] w-[18px]" aria-hidden="true" />
+                  {backToSiteLabel(siteConfig.name)}
+                </Link>
+              </li>
               {MORE_ITEMS.map(({ href, label, icon: Icon }) => (
                 <li key={href}>
                   <Link
@@ -108,16 +118,6 @@ export function TabBar() {
                   </Link>
                 </li>
               ))}
-              <li className="mt-1 border-t border-border pt-1">
-                <Link
-                  href={SITE_HOME_HREF}
-                  onClick={() => setMoreOpen(false)}
-                  className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm font-medium hover:bg-secondary"
-                >
-                  <ArrowLeft className="h-[18px] w-[18px]" aria-hidden="true" />
-                  {backToSiteLabel(siteConfig.name)}
-                </Link>
-              </li>
             </ul>
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>

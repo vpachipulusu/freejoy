@@ -5,13 +5,20 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
-import { ArrowLeft } from 'lucide-react';
+import { Home } from 'lucide-react';
 import { NAV_ITEMS, SITE_HOME_HREF, activeNavHref, backToSiteLabel } from './nav-items';
+
+const ITEM_CLASS = cn(
+  'relative flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors',
+  'text-background/75 hover:bg-background/10 hover:text-background',
+  'dark:text-foreground/75 dark:hover:bg-foreground/10 dark:hover:text-foreground'
+);
 
 /**
  * Desktop navigation: a 240px inverse panel from 900px up. Below that the TabBar takes over.
  * Text uses background/foreground tokens so it stays light on --feature in both colour modes.
- * `children` is an optional slot rendered between the brand and the main nav.
+ * `children` is an optional slot rendered between the brand and the main nav. The first nav item is the way
+ * back to the public home page (the brand links to /dashboard, so it cannot be the route home).
  */
 export function Sidebar({ children }: { children?: ReactNode }) {
   const current = activeNavHref(usePathname());
@@ -30,6 +37,12 @@ export function Sidebar({ children }: { children?: ReactNode }) {
       {children}
       <nav aria-label="Main">
         <ul className="flex flex-col gap-1">
+          <li>
+            <Link href={SITE_HOME_HREF} className={ITEM_CLASS}>
+              <Home className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+              {backToSiteLabel(siteConfig.name)}
+            </Link>
+          </li>
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const isCurrent = href === current;
             return (
@@ -38,9 +51,7 @@ export function Sidebar({ children }: { children?: ReactNode }) {
                   href={href}
                   aria-current={isCurrent ? 'page' : undefined}
                   className={cn(
-                    'relative flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors',
-                    'text-background/75 hover:bg-background/10 hover:text-background',
-                    'dark:text-foreground/75 dark:hover:bg-foreground/10 dark:hover:text-foreground',
+                    ITEM_CLASS,
                     isCurrent &&
                       'bg-background/15 text-background before:absolute before:inset-y-1 before:start-0 before:w-[3px] before:rounded-full before:bg-cta dark:bg-foreground/15 dark:text-foreground'
                   )}
@@ -53,13 +64,6 @@ export function Sidebar({ children }: { children?: ReactNode }) {
           })}
         </ul>
       </nav>
-      <Link
-        href={SITE_HOME_HREF}
-        className="mt-auto flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-background/75 transition-colors hover:bg-background/10 hover:text-background dark:text-foreground/75 dark:hover:bg-foreground/10 dark:hover:text-foreground"
-      >
-        <ArrowLeft className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-        {backToSiteLabel(siteConfig.name)}
-      </Link>
     </aside>
   );
 }
