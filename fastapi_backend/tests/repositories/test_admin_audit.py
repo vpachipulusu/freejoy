@@ -112,6 +112,9 @@ async def test_email_lookup_compares_lower_case_and_is_bounded():
     assert ids == ["user-1"]
     compiled = session.statements[0].compile(dialect=postgresql.dialect())
     sql = str(compiled)
-    assert "lower(users.email) = lower(%(lower_1)s::VARCHAR)" in sql
-    assert "LIMIT %(param_1)s::INTEGER" in sql
-    assert compiled.params == {"lower_1": "Ann@Example.com", "param_1": 2}
+    assert (
+        'lower(users.email COLLATE "C") = lower(%(param_1)s::VARCHAR COLLATE "C")'
+        in sql
+    )
+    assert "LIMIT %(param_2)s::INTEGER" in sql
+    assert compiled.params == {"param_1": "Ann@Example.com", "param_2": 2}

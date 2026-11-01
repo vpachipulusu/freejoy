@@ -5,7 +5,9 @@
     uv run python -m commands.make_admin someone@example.com --role super_admin   # full access
 
 The user must already exist: users are created by their first Firebase sign-in, so ask the
-person to sign in once before running this. The email is trimmed and compared ignoring case.
+person to sign in once before running this. The email must be plain printable ASCII (exit 2 otherwise), is trimmed and compared ignoring
+ASCII case; an account whose stored email is not ASCII is never acted on (use the admin Users
+page, which works by user id).
 Run it with ``--dry-run`` first: every run (dry or not) prints the matched user's id, stored
 email, ``email_verified``, ``created_at`` and ``last_login_at`` (that one user only), so you can
 confirm it is the person you meant before anything is written.
@@ -23,14 +25,16 @@ Idempotent, and it never silently narrows or widens an existing grant:
 * Same role again: "already ..., no change" (exit 0). An ``admin`` holding fewer than all permissions
   is left as it is and reported ("N of M"); ``--refresh-permissions`` grants the full set (admin only).
 * An existing ``super_admin`` already covers the default ``--role admin``: no change (exit 0).
-  Demoting one to ``admin`` needs ``--allow-demote`` and is still refused for the last super admin.
+  Changing any ``super_admin`` to ``admin`` needs ``--allow-demote`` and is still refused for the
+  last super admin.
 * Another role is changed to the requested one and the report says so.
 * A hollow row (``super_admin`` whose list is not exactly ``["*"]``, or an ``admin`` with no usable
   permission) is repaired and reported as a repair.
-* A user whose email is not verified is refused unless ``--allow-unverified`` is given.
+* A user whose email is not verified is refused when a change would be made, unless
+  ``--allow-unverified`` is given; a no-op on such an account exits 0 with a warning line.
 
 The target row is locked before it is read, as the API does, so the decision and the audit ``before``
-cannot go stale. Each change also writes an ``audit_logs`` row (``admin.users.grant_admin``, resource
+cannot go stale; the transaction sets ``lock_timeout`` to 5s so a held row fails fast. Each change also writes an ``audit_logs`` row (``admin.users.grant_admin``, resource
 ``admin_users``) with no ``user_id`` (nobody is signed in) and ``metadata.actor`` set to
 ``commands.make_admin``.
 
@@ -51,6 +55,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
@@ -72,6 +77,7 @@ SOURCE = "commands.make_admin"
 AUDIT_ACTION = "admin.users.grant_admin"
 AUDIT_RESOURCE = "admin_users"
 MAX_EMAIL_LENGTH = 254
+LOCK_TIMEOUT = "5s"  # fail fast instead of waiting on a row another session holds
 EMAIL_SHAPE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
@@ -114,6 +120,8 @@ class Outcome(StrEnum):
     NOT_FOUND = "not_found"
     AMBIGUOUS = "ambiguous"
     UNVERIFIED = "unverified"
+    NOT_ASCII = "not_ascii"
+    DEMOTE_REFUSED = "demote_refused"
     LAST_SUPER_ADMIN = "last_super_admin"
 
 
@@ -168,9 +176,18 @@ def normalise_email(raw: str) -> str:
     return raw.strip().lower()
 
 
+def is_plain_ascii(value: str) -> bool:
+    """ASCII and printable: no accents, look-alike letters or control/ANSI characters."""
+    return value.isascii() and value.isprintable()
+
+
 def is_valid_email(raw: str) -> bool:
     value = raw.strip()
-    return len(value) <= MAX_EMAIL_LENGTH and EMAIL_SHAPE.fullmatch(value) is not None
+    return (
+        len(value) <= MAX_EMAIL_LENGTH
+        and is_plain_ascii(value)
+        and EMAIL_SHAPE.fullmatch(value) is not None
+    )
 
 
 def permissions_for(role: str) -> list[str]:
@@ -194,9 +211,10 @@ def _unchanged(record: AdminUserRecord, options: Options, held: int) -> _Plan | 
     previous, stored = record.admin_role, record.admin_permissions
     if previous == ROLE_SUPER_ADMIN and options.role == ROLE_SUPER_ADMIN:
         return _Plan(Outcome.ALREADY_ADMIN, held) if stored == [WILDCARD] else None
-    if previous == ROLE_SUPER_ADMIN:  # asked for admin
-        covered = _counts_as_super_admin(stored) and not options.allow_demote
-        return _Plan(Outcome.ALREADY_COVERED, held) if covered else None
+    if previous == ROLE_SUPER_ADMIN and not options.allow_demote:  # asked for admin
+        covered = _counts_as_super_admin(stored)
+        outcome = Outcome.ALREADY_COVERED if covered else Outcome.DEMOTE_REFUSED
+        return _Plan(outcome, held)
     if previous == ROLE_ADMIN and options.role == ROLE_ADMIN and held:
         complete = held == len(ADMIN_PERMISSIONS)
         if complete or not options.refresh_permissions:
@@ -236,17 +254,35 @@ def _plan(record: AdminUserRecord, options: Options) -> _Plan:
     return _Plan(_change_outcome(record, options.role), held, demotes)
 
 
-async def _match(store: AdminStore, email: str) -> AdminUserRecord | Outcome:
-    """The single locked user whose stored email equals ``email``, or why there is none."""
+async def _match(
+    store: AdminStore, email: str
+) -> tuple[AdminUserRecord | None, Outcome | None]:
+    """The single locked user whose stored email equals ``email``, or why there is none.
+
+    A user is returned with ``NOT_ASCII`` so the report can show the look-alike; every
+    other refusal returns no user.
+    """
     wanted = normalise_email(email)
     user_ids = await store.find_user_ids_by_email(wanted)
     if len(user_ids) > 1:
-        return Outcome.AMBIGUOUS
+        return None, Outcome.AMBIGUOUS
     record = await store.get_user(user_ids[0], lock=True) if user_ids else None
-    # The database folds case by its own locale rules; insist on Python's too.
+    # The database folds case ASCII-only; insist on Python's fold and plain ASCII too.
     if record is None or record.email.lower() != wanted:
-        return Outcome.NOT_FOUND
-    return record
+        return None, Outcome.NOT_FOUND
+    if not record.email.isascii():
+        return record, Outcome.NOT_ASCII
+    return record, None
+
+
+def _matched(record: AdminUserRecord) -> MatchedUser:
+    return MatchedUser(
+        record.id,
+        record.email,
+        record.email_verified,
+        record.created_at,
+        record.last_login_at,
+    )
 
 
 async def make_admin(
@@ -259,9 +295,12 @@ async def make_admin(
     """Grant ``options.role`` to the user with ``email``; change nothing on a dry run."""
     if options.role not in ROLES:
         raise ValueError("Unknown role")
-    found = await _match(store, email)
-    if isinstance(found, Outcome):
-        return MakeAdminResult(found, options.role, None, options.dry_run)
+    found, refusal = await _match(store, email)
+    if found is None or refusal is not None:
+        user = _matched(found) if found else None
+        return MakeAdminResult(
+            refusal or Outcome.NOT_FOUND, options.role, None, options.dry_run, user
+        )
     plan = _plan(found, options)
     outcome = plan.outcome
     if plan.demotes_counted_super_admin and await store.lock_super_admin_count() <= 1:
@@ -280,15 +319,13 @@ async def make_admin(
             after={"role": options.role, "permissions": stored},
         )
         await session.commit()
-    user = MatchedUser(
-        found.id,
-        found.email,
-        found.email_verified,
-        found.created_at,
-        found.last_login_at,
-    )
     return MakeAdminResult(
-        outcome, options.role, found.admin_role, options.dry_run, user, plan.held
+        outcome,
+        options.role,
+        found.admin_role,
+        options.dry_run,
+        _matched(found),
+        plan.held,
     )
 
 
@@ -318,9 +355,22 @@ def describe_target(environment: str, vercel_env: str | None, url: str) -> str:
 def _user_line(user: MatchedUser) -> str:
     last = user.last_login_at.isoformat() if user.last_login_at else "never"
     return (
-        f"make-admin: matched user id={user.id} email={user.email} "
+        f"make-admin: matched user id={user.id!a} email={user.email!a} "
         f"email_verified={str(user.email_verified).lower()} "
         f"created_at={user.created_at.isoformat()} last_login_at={last}"
+    )
+
+
+def _repair_message(email: str, result: MakeAdminResult, would: str) -> str:
+    role = result.role
+    if role == ROLE_SUPER_ADMIN and result.held == len(ADMIN_PERMISSIONS):
+        return (
+            f"{email} had super_admin with a list that already granted everything; "
+            f'{would}normalised to ["*"].'
+        )
+    return (
+        f"{email} had {role} without its permissions; {would}repaired "
+        f"to the standard {role} grant."
     )
 
 
@@ -341,10 +391,7 @@ def _messages(email: str, result: MakeAdminResult) -> dict[Outcome, str]:
     return {
         Outcome.GRANTED: f"{email} {would}made {role}.",
         Outcome.UPDATED: f"{email} {would}changed from {previous} to {role}.",
-        Outcome.REPAIRED: (
-            f"{email} had {role} without its permissions; {would}repaired "
-            f"to the standard {role} grant."
-        ),
+        Outcome.REPAIRED: _repair_message(email, result, would),
         Outcome.REFRESHED: (
             f"{email} {would}refreshed from {result.held} to the full {total} "
             "admin permissions."
@@ -356,6 +403,16 @@ def _messages(email: str, result: MakeAdminResult) -> dict[Outcome, str]:
         Outcome.NOT_FOUND: (
             f"no user found for {email}. Nothing changed. Ask them to sign in once "
             "first: users are created by their first sign-in."
+        ),
+        Outcome.NOT_ASCII: (
+            f"the account matching {email} has a stored email that is not plain ASCII "
+            "(see the matched user above), so this command will not act on it. Nothing "
+            "changed. Grant it from the admin Users page, which works by user id."
+        ),
+        Outcome.DEMOTE_REFUSED: (
+            f"{email} is a super_admin without the standard wildcard list; changing it "
+            "to admin needs --allow-demote (or use --role super_admin to repair it). "
+            "Nothing changed."
         ),
         Outcome.AMBIGUOUS: (
             f"more than one user matches {email} ignoring case. Nothing changed."
@@ -376,7 +433,13 @@ def report(email: str, result: MakeAdminResult) -> str:
     line = f"make-admin: {_messages(email, result)[result.outcome]}"
     if result.dry_run and result.outcome in WRITING_OUTCOMES:
         line += " (dry run, nothing written)"
-    return f"{_user_line(result.user)}\n{line}" if result.user else line
+    if not result.user:
+        return line
+    lines = [_user_line(result.user), line]
+    no_op = result.outcome in {Outcome.ALREADY_ADMIN, Outcome.ALREADY_COVERED}
+    if no_op and not result.user.email_verified:
+        lines.append("make-admin: warning: this account's email is not verified")
+    return "\n".join(lines)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -407,6 +470,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     args.email = args.email.strip()
+    if not is_plain_ascii(args.email):
+        parser.error(
+            "email must be plain printable ASCII (no accents, look-alike letters "
+            "or control characters); use the admin Users page for such an account"
+        )
     if not is_valid_email(args.email):
         parser.error("email must look like name@domain.tld")
     if args.refresh_permissions and args.role != ROLE_ADMIN:
@@ -416,6 +484,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 async def _run(email: str, options: Options) -> MakeAdminResult:
     async with async_session_maker() as session:
+        # Inside the transaction, so it also covers the FOR UPDATE reads below.
+        await session.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
         result = await make_admin(
             AdminUsersRepository(session),
             AuditService(AuditRepository(session)),
@@ -451,11 +521,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_request:  # argparse: 2 for bad arguments, 0 for --help
         return exit_request.code if isinstance(exit_request.code, int) else 2
     options = Options(
-        args.role,
-        args.dry_run,
-        args.allow_demote,
-        args.allow_unverified,
-        args.refresh_permissions,
+        role=args.role,
+        dry_run=args.dry_run,
+        allow_demote=args.allow_demote,
+        allow_unverified=args.allow_unverified,
+        refresh_permissions=args.refresh_permissions,
     )
     print(
         describe_target(

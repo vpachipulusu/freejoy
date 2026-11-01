@@ -48,15 +48,18 @@ class FakeStore:
         self.extra_super_admins = extra_super_admins
         self.locked: list[str] = []
         self.count_calls = 0
+        self.calls: list[tuple[Any, ...]] = []
         self.writes: list[tuple[str, str, list[str]]] = []
 
     async def find_user_ids_by_email(self, email: str, limit: int = 2) -> list[str]:
+        self.calls.append(("find", email))
         found = [u.id for u in self.users.values() if u.email.lower() == email.lower()]
         return found[:limit]
 
     async def get_user(
         self, user_id: str, *, lock: bool = False
     ) -> AdminUserRecord | None:
+        self.calls.append(("get_user", user_id, lock))
         if lock:
             self.locked.append(user_id)
         return self.users.get(user_id)
@@ -67,13 +70,15 @@ class FakeStore:
             1
             for u in self.users.values()
             if u.admin_role == ROLE_SUPER_ADMIN
-            and WILDCARD in (u.admin_permissions or [])
+            and isinstance(u.admin_permissions, list)
+            and WILDCARD in u.admin_permissions
         )
         return own + self.extra_super_admins
 
     async def upsert_admin(
         self, user_id: str, role: str, permissions: list[str]
     ) -> None:
+        self.calls.append(("upsert", user_id, role))
         self.writes.append((user_id, role, permissions))
         self.users[user_id] = replace(
             self.users[user_id], admin_role=role, admin_permissions=permissions
@@ -366,7 +371,7 @@ async def test_a_hollow_super_admin_can_be_changed_without_the_last_admin_guard(
 ):
     store = FakeStore(ann("super_admin", ["users.read"]))  # not counted: no wildcard
 
-    result, _, _ = await run(store)
+    result, _, _ = await run(store, allow_demote=True)
 
     assert result.outcome is Outcome.UPDATED
     assert store.writes == [("u1", "admin", ALL_PERMISSIONS)]
@@ -429,6 +434,8 @@ def test_permissions_match_what_the_app_stores_for_each_role() -> None:
         ("ann example@x.com", False),
         ("@example.com", False),
         ("ann@@example.com", False),
+        ("\u212aelvin@example.com", False),
+        ("ann\x1b[0m@example.com", False),
         ("", False),
         (f"{'a' * 250}@x.com", False),
     ],
@@ -544,14 +551,14 @@ def test_the_report_shows_the_matched_user_for_every_outcome_that_has_one() -> N
         matched = outcome not in {Outcome.NOT_FOUND, Outcome.AMBIGUOUS}
         text = report("ann@example.com", result_for(outcome, matched=matched))
 
-        assert ("matched user id=u1" in text) is matched
+        assert ("matched user id='u1'" in text) is matched
 
 
 def test_the_matched_user_line_has_the_stored_email_and_dates() -> None:
     text = report("ann@example.com", result_for(Outcome.GRANTED))
 
     assert text.splitlines()[0] == (
-        "make-admin: matched user id=u1 email=Ann@Example.com email_verified=true "
+        "make-admin: matched user id='u1' email='Ann@Example.com' email_verified=true "
         "created_at=2026-10-30T09:15:00+00:00 last_login_at=never"
     )
 
@@ -560,6 +567,17 @@ def test_the_matched_user_line_has_the_stored_email_and_dates() -> None:
 
 
 class RecordingSession(FakeCommitter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.store = FakeStore(ann(last_login_at=None))
+        self.executed: list[str] = []
+        self.execute_error: Exception | None = None
+
+    async def execute(self, statement: Any) -> None:
+        self.executed.append(str(statement))
+        if self.execute_error:
+            raise self.execute_error
+
     async def __aenter__(self) -> Self:
         return self
 
@@ -574,9 +592,7 @@ SETTINGS = SimpleNamespace(ENVIRONMENT="local", VERCEL_ENV=None, DATABASE_URL=DB
 def session(monkeypatch: pytest.MonkeyPatch) -> RecordingSession:
     opened = RecordingSession()
     monkeypatch.setattr(command, "async_session_maker", lambda: opened)
-    monkeypatch.setattr(
-        command, "AdminUsersRepository", lambda _s: FakeStore(ann(last_login_at=None))
-    )
+    monkeypatch.setattr(command, "AdminUsersRepository", lambda _s: opened.store)
     monkeypatch.setattr(command, "AuditService", lambda _repository: FakeAuditor())
     monkeypatch.setattr(command, "AuditRepository", lambda _session: object())
     monkeypatch.setattr(command, "settings", SETTINGS)
@@ -593,7 +609,7 @@ def test_main_grants_commits_and_prints_where_it_ran(
     assert out.splitlines()[0] == (
         "make-admin: environment local, database db.example.com:5432/freejoy"
     )
-    assert "matched user id=u1 email=ann@example.com" in out
+    assert "matched user id='u1' email='ann@example.com'" in out
     assert "ann@example.com made admin." in out
     assert "hunter2" not in out and "owner" not in out
     assert (session.commits, session.rollbacks) == (1, 0)
@@ -638,6 +654,9 @@ def test_main_passes_the_flags_through(
         ["ann@example.com", "--bogus"],
         ["ann@example.com", "bob@example.com"],
         ["ann@example.com", "--role", "super_admin", "--refresh-permissions"],
+        ["\u212aelvin@example.com"],  # KELVIN SIGN: lower-cases to a plain k
+        ["j\u00f6rg@example.com"],
+        ["ann\x1b[31m@example.com"],
     ],
 )
 def test_main_rejects_bad_arguments_with_exit_2_before_touching_the_database(
@@ -728,3 +747,232 @@ def test_main_lets_a_programming_error_surface(
 
     with pytest.raises(KeyError):
         command.main(["ann@example.com"])
+
+
+# Review round 3 ------------------------------------------------------------------------------
+
+
+async def test_the_target_is_locked_before_any_grant_decision_or_write() -> None:
+    store = FakeStore(ann())
+
+    await run(store)
+
+    assert store.calls == [
+        ("find", "ann@example.com"),
+        ("get_user", "u1", True),
+        ("upsert", "u1", "admin"),
+    ]
+
+
+async def test_a_wildcard_in_a_non_list_is_not_counted_as_a_super_admin() -> None:
+    store = FakeStore(ann("super_admin", "*"), extra_super_admins=0)
+
+    assert await store.lock_super_admin_count() == 0
+
+
+async def test_the_kelvin_sign_does_not_match_a_plain_k() -> None:
+    store = FakeStore(ann(email="\u212aelvin@example.com"))  # lower() gives "kelvin"
+
+    result, auditor, session = await run(store, email="kelvin@example.com")
+
+    assert (result.outcome, result.exit_code) == (Outcome.NOT_ASCII, 1)
+    assert result.user is not None
+    assert_untouched(store, auditor, session)
+    text = report("kelvin@example.com", result)
+    assert "\\u212aelvin@example.com" in text  # escaped, so the look-alike is visible
+    assert "admin Users page" in text
+
+
+def test_the_matched_line_makes_control_and_lookalike_characters_visible() -> None:
+    nasty = command.MatchedUser("u1", "a\x1b[31m\u0430@x.com", True, LAST_LOGIN, None)
+    result = MakeAdminResult(Outcome.NOT_ASCII, "admin", None, False, nasty)
+
+    text = report("a@x.com", result)
+
+    assert "\x1b" not in text
+    assert "\\x1b[31m\\u0430@x.com" in text
+
+
+async def test_a_super_admin_is_still_covered_when_refresh_permissions_is_given() -> (
+    None
+):
+    store = FakeStore(ann("super_admin", ["*"]))
+
+    result, auditor, session = await run(store, refresh_permissions=True)
+
+    assert result.outcome is Outcome.ALREADY_COVERED
+    assert store.count_calls == 0
+    assert_untouched(store, auditor, session)
+
+
+async def test_a_list_with_the_wildcard_and_more_still_covers_admin() -> None:
+    store = FakeStore(ann("super_admin", ["*", "users.read"]))
+
+    result, _, _ = await run(store)
+
+    assert result.outcome is Outcome.ALREADY_COVERED
+    assert store.writes == []
+
+
+async def test_covers_admin_is_reported_the_same_way_in_a_dry_run() -> None:
+    store = FakeStore(ann("super_admin", ["*"]))
+
+    result, _, _ = await run(store, dry_run=True)
+
+    assert (result.outcome, result.dry_run) == (Outcome.ALREADY_COVERED, True)
+
+
+async def test_demoting_an_unverified_super_admin_needs_both_flags() -> None:
+    store = FakeStore(ann("super_admin", ["*"], email_verified=False))
+
+    refused, _, _ = await run(store, allow_demote=True)
+    allowed, _, _ = await run(
+        FakeStore(
+            ann("super_admin", ["*"], email_verified=False), extra_super_admins=1
+        ),
+        allow_demote=True,
+        allow_unverified=True,
+    )
+
+    assert refused.outcome is Outcome.UNVERIFIED
+    assert store.count_calls == 0
+    assert allowed.outcome is Outcome.UPDATED
+
+
+async def test_a_hollow_super_admin_cannot_be_changed_to_admin_without_the_flag() -> (
+    None
+):
+    store = FakeStore(ann("super_admin", ["users.read"]))
+
+    result, auditor, session = await run(store)
+
+    assert (result.outcome, result.exit_code) == (Outcome.DEMOTE_REFUSED, 1)
+    assert store.count_calls == 0
+    assert_untouched(store, auditor, session)
+    assert "--allow-demote" in report("ann@example.com", result)
+
+
+async def test_a_super_admin_list_that_already_granted_everything_is_normalised() -> (
+    None
+):
+    store = FakeStore(ann("super_admin", ["*", "users.read"]))
+
+    result, _, _ = await run(store, role="super_admin")
+
+    assert (result.outcome, result.held) == (Outcome.REPAIRED, TOTAL)
+    assert store.writes == [("u1", "super_admin", [WILDCARD])]
+    text = report("ann@example.com", result)
+    assert 'normalised to ["*"]' in text and "without its permissions" not in text
+
+
+async def test_a_narrow_super_admin_row_is_still_described_as_missing_permissions() -> (
+    None
+):
+    store = FakeStore(ann("super_admin", ["users.read"]))
+
+    result, _, _ = await run(store, role="super_admin")
+
+    assert "without its permissions" in report("ann@example.com", result)
+
+
+@pytest.mark.parametrize("verified", [True, False])
+async def test_an_unverified_account_gets_a_warning_on_no_op_outcomes(
+    verified: bool,
+) -> None:
+    for record in (
+        ann("admin", ALL_PERMISSIONS, email_verified=verified),
+        ann("super_admin", ["*"], email_verified=verified),
+    ):
+        result, _, _ = await run(FakeStore(record))
+
+        text = report("ann@example.com", result)
+
+        assert result.exit_code == 0
+        assert ("warning: this account's email is not verified" in text) is not verified
+
+
+async def test_the_unverified_refusal_needs_no_extra_warning_line() -> None:
+    result, _, _ = await run(FakeStore(ann(email_verified=False)))
+
+    assert "warning:" not in report("ann@example.com", result)
+
+
+# Flags, end to end through main ----------------------------------------------------------------
+
+
+def test_main_allow_demote_changes_a_super_admin_when_another_exists(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.store = FakeStore(ann("super_admin", ["*"]), extra_super_admins=1)
+
+    plain = command.main(["ann@example.com"])
+    plain_out = capsys.readouterr().out
+    demoted = command.main(["ann@example.com", "--allow-demote"])
+
+    assert plain == 0 and "covers admin" in plain_out
+    assert demoted == 0
+    assert "changed from super_admin to admin" in capsys.readouterr().out
+    assert session.store.writes == [("u1", "admin", ALL_PERMISSIONS)]
+
+
+def test_main_allow_unverified_grants_an_unverified_user(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.store = FakeStore(ann(email_verified=False))
+
+    refused = command.main(["ann@example.com"])
+    capsys.readouterr()
+    granted = command.main(["ann@example.com", "--allow-unverified"])
+
+    assert refused == 1 and granted == 0
+    assert "made admin" in capsys.readouterr().out
+    assert len(session.store.writes) == 1
+
+
+def test_main_refresh_permissions_widens_a_partial_admin(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.store = FakeStore(ann("admin", ["users.read"]))
+
+    plain = command.main(["ann@example.com"])
+    plain_out = capsys.readouterr().out
+    refreshed = command.main(["ann@example.com", "--refresh-permissions"])
+
+    assert plain == 0 and "already admin with 1 of" in plain_out
+    assert refreshed == 0
+    assert "refreshed from 1 to the full" in capsys.readouterr().out
+    assert session.store.writes == [("u1", "admin", ALL_PERMISSIONS)]
+
+
+def test_main_prints_the_warning_for_an_unverified_no_op(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.store = FakeStore(ann("admin", ALL_PERMISSIONS, email_verified=False))
+
+    code = command.main(["ann@example.com"])
+
+    assert code == 0
+    assert "warning: this account's email is not verified" in capsys.readouterr().out
+
+
+# The lock timeout --------------------------------------------------------------------------------
+
+
+def test_the_first_statement_of_the_transaction_sets_a_short_lock_timeout(
+    session: RecordingSession,
+) -> None:
+    command.main(["ann@example.com", "--dry-run"])
+
+    assert session.executed == ["SET LOCAL lock_timeout = '5s'"]
+
+
+def test_a_lock_timeout_fails_fast_through_the_normal_failure_path(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.execute_error = OperationalError("SET", {}, Exception("lock timeout"))
+
+    code = command.main(["ann@example.com"])
+
+    assert code == 1
+    assert "failed (OperationalError)" in capsys.readouterr().err
+    assert session.store.writes == []

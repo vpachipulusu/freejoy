@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.database import build_engine
@@ -23,6 +24,7 @@ from app.repositories.admin import AdminRepository
 from app.repositories.admin_users import AdminUsersRepository
 from app.repositories.audit import AuditRepository
 from app.services.audit import AuditService
+from commands import make_admin as command
 from commands.make_admin import MakeAdminResult, Options, Outcome, make_admin
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -249,3 +251,69 @@ async def test_an_unverified_user_is_refused_until_allowed(engine: AsyncEngine) 
     assert refused.user is not None and refused.user.email == "ann@example.com"
     assert allowed.outcome is Outcome.GRANTED
     assert len(await rows(engine, "SELECT 1 FROM admin_users")) == 1
+
+
+async def test_a_super_admin_is_demoted_only_with_the_flag_and_another_super_admin(
+    engine: AsyncEngine,
+) -> None:
+    first = await add_user(engine, "ann@example.com")
+    second = await add_user(engine, "bob@example.com")
+    await set_grant(engine, first, "super_admin", '["*"]')
+    await set_grant(engine, second, "super_admin", '["*"]')
+
+    covered = await run(engine, "ann@example.com")
+    demoted = await run(engine, "ann@example.com", allow_demote=True)
+    refused = await run(engine, "bob@example.com", allow_demote=True)
+
+    assert covered.outcome is Outcome.ALREADY_COVERED
+    assert demoted.outcome is Outcome.UPDATED
+    assert refused.outcome is Outcome.LAST_SUPER_ADMIN
+    assert sorted(await rows(engine, "SELECT role FROM admin_users")) == [
+        ("admin",),
+        ("super_admin",),
+    ]
+
+
+async def test_refresh_permissions_widens_a_partial_admin(engine: AsyncEngine) -> None:
+    user_id = await add_user(engine, "ann@example.com")
+    await set_grant(engine, user_id, "admin", '["users.read"]')
+
+    kept = await run(engine, "ann@example.com")
+    refreshed = await run(engine, "ann@example.com", refresh_permissions=True)
+
+    assert (kept.outcome, kept.held) == (Outcome.ALREADY_ADMIN, 1)
+    assert (refreshed.outcome, refreshed.held) == (Outcome.REFRESHED, 1)
+    stored = await rows(engine, "SELECT permissions FROM admin_users")
+    assert sorted(stored[0][0]) == sorted(ADMIN_PERMISSIONS)
+
+
+async def test_the_database_lookup_folds_only_ascii_case(engine: AsyncEngine) -> None:
+    await add_user(engine, "\u212aelvin@example.com")  # KELVIN SIGN, not a plain k
+    await add_user(engine, "ann@example.com")
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with maker() as session:
+        repository = AdminUsersRepository(session)
+        kelvin = await repository.find_user_ids_by_email("kelvin@example.com")
+        ann = await repository.find_user_ids_by_email("ANN@Example.com")
+
+    assert kelvin == []
+    assert len(ann) == 1
+
+
+async def test_a_row_locked_by_another_session_fails_fast(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id = await add_user(engine, "ann@example.com")
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(command, "async_session_maker", maker)
+    monkeypatch.setattr(command, "LOCK_TIMEOUT", "1s")
+
+    async with maker() as holder:
+        await holder.execute(
+            text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": user_id}
+        )
+        with pytest.raises(DBAPIError):
+            await command._run("ann@example.com", Options())
+
+    assert await rows(engine, "SELECT 1 FROM admin_users") == []
