@@ -4,3 +4,4 @@ fastapi_backend/Dockerfile text eol=lf
 nextjs-frontend/openapi.json text eol=lf
 nextjs-frontend/src/lib/api/generated/** text eol=lf linguist-generated
 nextjs-frontend/Dockerfile text eol=lf
+docs/user-guide/Freejoy-User-Guide.docx binary
