@@ -71,3 +71,47 @@ async def test_audit_repository_stages_one_row_and_flushes_without_committing():
 def test_audit_repository_exposes_no_update_or_delete():
     public = {name for name in dir(AuditRepository) if not name.startswith("_")}
     assert public == {"add"}
+
+
+async def test_audit_repository_accepts_a_row_with_no_actor_user():
+    session = Session()
+    await AuditRepository(session).add(  # type: ignore[arg-type]
+        user_id=None,
+        organization_id=None,
+        action="admin.users.grant_admin",
+        resource="admin_users",
+        resource_id="user-9",
+        metadata={"actor": "commands.make_admin"},
+        ip_address=None,
+        user_agent=None,
+    )
+    assert session.added[0].user_id is None
+
+
+class IdsResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return ["user-1"]
+
+
+class IdsSession:
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+        return IdsResult()
+
+
+async def test_email_lookup_compares_lower_case_and_is_bounded():
+    from app.repositories.admin_users import AdminUsersRepository
+
+    session = IdsSession()
+    ids = await AdminUsersRepository(session).find_user_ids_by_email("Ann@Example.com")  # type: ignore[arg-type]
+    assert ids == ["user-1"]
+    compiled = session.statements[0].compile(dialect=postgresql.dialect())
+    assert "lower(users.email)" in str(compiled)
+    assert "ann@example.com" in compiled.params.values()
+    assert 2 in compiled.params.values()  # limit

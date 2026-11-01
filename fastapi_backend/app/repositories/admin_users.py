@@ -91,6 +91,20 @@ class AdminUsersRepository(BaseRepository):
         total = (await self._session.execute(count)).scalar_one()
         return AdminUserPage([AdminUserRecord(*row) for row in rows], total)
 
+    async def find_user_ids_by_email(self, email: str, limit: int = 2) -> list[str]:
+        """Ids of users whose stored email equals ``email`` ignoring case.
+
+        ``email`` must already be trimmed. The column is unique but case-sensitive, so
+        more than one id is possible; the caller decides what that means.
+        """
+        statement = (
+            select(User.id)
+            .where(func.lower(User.email) == email.lower())
+            .order_by(User.id)
+            .limit(limit)
+        )
+        return list((await self._session.execute(statement)).scalars().all())
+
     async def get_user(
         self, user_id: str, *, lock: bool = False
     ) -> AdminUserRecord | None:
