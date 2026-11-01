@@ -55,9 +55,70 @@ Ban and delete call Firebase after the audit row is staged and before the commit
 the change back; a commit failure after a successful Firebase call leaves the same residue as account
 deletion (see [backend-profile.md](backend-profile.md)).
 
+## Bootstrapping the first admin
+
+The API needs an admin to call it, so the first one is granted from the command line. Run it from `fastapi_backend/`
+against the database in `DATABASE_URL` (the owner runs it by hand; nothing schedules it). Setup, environment and the
+`--dry-run` first habit: [getting-started.md](getting-started.md#first-admin).
+
+```bash
+uv run python -m commands.make_admin someone@example.com --dry-run   # report only, change nothing
+uv run python -m commands.make_admin someone@example.com             # role admin
+uv run python -m commands.make_admin someone@example.com --role super_admin
+```
+
+Flags: `--role admin|super_admin` (default `admin`), `--dry-run`, `--allow-demote`, `--allow-unverified`,
+`--refresh-permissions` (`--role admin` only), `--verbose` (traceback on stderr).
+
+- **Who.** An existing user, found by email. The email argument must be plain printable ASCII (otherwise exit 2); it
+  is trimmed and folded to lower case ASCII-only, in the database with the `C` collation (so the server locale cannot
+  change the result and a look-alike such as KELVIN SIGN never matches a plain `k`) and again in Python, and the stored
+  email must itself be ASCII (otherwise the command refuses and points at the admin Users page, which works by user
+  id). The target row is locked before it is read, as the API does. Users are created by Firebase sign-in, so
+  the person signs in once first; with no match it prints "no user found", changes nothing and exits 1. Two users whose
+  emails differ only in case are refused (exit 1). A user whose email is not verified is refused (exit 1) when a change
+  would be made, unless `--allow-unverified`; for a no-op (already admin, or a super admin covering admin) the exit code
+  stays 0 and a `warning: this account's email is not verified` line is added. An invalid email or option exits 2.
+- **What it prints.** Line 1: the environment (`ENVIRONMENT`, and `VERCEL_ENV` when set) and the database as
+  `host:port/name`, never the user or password (a URL whose password contains an unencoded `@` prints "an unreadable
+  DATABASE_URL"). Then, for every outcome once exactly one user matched, that user's id, email as stored,
+  `email_verified`, `created_at` and `last_login_at` (id and email are shown Python-escaped, so look-alike letters and
+  control or ANSI characters are visible); then the result, which names the email in its trimmed form. No
+  other user is ever listed.
+- **What it writes.** The same single `admin_users` row as `PUT /{user_id}/admin`. `admin` gets every permission in
+  `ADMIN_PERMISSIONS` (no smaller preset exists in the app); `super_admin` gets exactly `["*"]`. Trim the list afterwards
+  through the API if a narrower admin is wanted.
+- **Idempotent, and it does not silently narrow or widen.**
+  - Same role again: "already ... No change." (exit 0, nothing written). A `super_admin` is "already" only when the
+    stored list is exactly `["*"]`. An `admin` holding fewer than all permissions is reported as "already admin with N of
+    M permissions", kept as is, and widened only with `--refresh-permissions`.
+  - An existing `super_admin` whose list contains `*` covers the default `--role admin`: "already super_admin (covers
+    admin). No change." Moving any `super_admin` to `admin` needs `--allow-demote` (without it a row that does not
+    contain `*` is refused, exit 1), and the last `super_admin` is never demoted (exit 1), as in the API. A
+    `super_admin` row without the wildcard is not counted as one, so changing it (with the flag) is never blocked by
+    that rule.
+  - Another role is updated and reported as `changed from X to Y`.
+  - A hollow row (a `super_admin` whose list is not exactly `["*"]`, or an `admin` with no usable permission) is
+    repaired and reported as a repair, not as a role change (a `super_admin` list that already granted everything, such
+    as `["*", "users.read"]`, is reported as normalised to `["*"]`).
+- **Audit.** Each change stages an `admin.users.grant_admin` row (resource `admin_users`, with `before` and `after`
+  role and permissions) in the same transaction. A command has no signed-in admin, so `user_id` is null (the admin audit
+  list shows an empty actor) and `metadata.actor` is `commands.make_admin`. Dry runs, refusals and no-ops write no row.
+- **Lock timeout.** The transaction starts with `SET LOCAL lock_timeout = '5s'`, so a row held by another session makes
+  the command fail fast instead of waiting: it prints "the row is locked by another session; retry shortly", exits 1
+  and has committed nothing (detected by SQLSTATE `55P03`).
+- **Failures.** Database and connection errors (SQLAlchemy, OS) print the error type only, on stderr, and exit 1; a
+  real write run says the change "may not have been written; re-run with --dry-run to check", a dry run says nothing was
+  written. Other (programming) errors are not caught. `--verbose` adds the traceback on stderr.
+
+Code: `commands/make_admin.py` (rules, on a small `AdminStore` protocol), `AdminUsersRepository.find_user_ids_by_email`
+and `AuditService.record_system_action`.
+
 ## Tests
 
 - `tests/services/test_admin_users.py`: rules with in-memory fakes.
+- `tests/commands/test_make_admin.py`: the bootstrap command on fakes; `tests/commands/test_make_admin_e2e.py`: the same
+  against real Postgres (same `TEST_DATABASE_URL` contract).
 - `tests/api/test_admin_users.py`: routes through the real `require_admin` chain.
 - `tests/api/test_admin_users_e2e.py`: real Postgres through the real app (same `TEST_DATABASE_URL` contract
   as the Stripe webhook e2e); asserts 401, 403, self-escalation refusal, audit rows, rollback and the

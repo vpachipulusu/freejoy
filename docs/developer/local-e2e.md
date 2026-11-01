@@ -92,7 +92,7 @@ In the shell you run the tests from:
 export BACKEND_API_URL=http://127.0.0.1:8170 BACKEND_INTERNAL_KEY=<the same key>
 ```
 
-The admin specs need an admin grant in the backend database for the `TEST_ADMIN_EMAIL` account. The user row exists only after that account has logged in once (the first run does it), so grant it after the first run and run again:
+The admin specs need an admin grant in the backend database for the `TEST_ADMIN_EMAIL` account. The user row exists only after that account has logged in once (the first run does it), so grant it after the first run and run again. The SQL below does it for this container. The same grant also works with `uv run python -m commands.make_admin <TEST_ADMIN_EMAIL> --role super_admin` from `fastapi_backend/`, with `ENVIRONMENT=local` and `DATABASE_URL` pointing at this database (see [getting-started.md](getting-started.md#first-admin)):
 
 ```bash
 docker exec my-e2e-pg psql -U postgres -d my_e2e -c "insert into admin_users(id,user_id,role,permissions) select 'adm_e2e', id, 'super_admin', '[\"*\"]'::jsonb from users where email = '<TEST_ADMIN_EMAIL>' on conflict do nothing"

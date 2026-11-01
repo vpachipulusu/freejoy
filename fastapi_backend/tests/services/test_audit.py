@@ -184,3 +184,41 @@ async def test_target_ids_must_be_plain_identifiers(bad):
 async def test_user_agent_control_characters_are_removed():
     row = await record(user_agent="agent\r\nforged: line\x00")
     assert row["user_agent"] == "agentforged: line"
+
+
+async def test_system_action_has_no_actor_user_and_names_its_source():
+    writer = RecordingWriter()
+    await AuditService(writer).record_system_action(
+        "commands.make_admin",
+        action="admin.users.grant_admin",
+        resource="admin_users",
+        resource_id="user-9",
+        before=None,
+        after={"role": "admin", "permissions": ["users.read"]},
+    )
+    row = writer.rows[0]
+    assert row["user_id"] is None
+    assert (row["organization_id"], row["ip_address"], row["user_agent"]) == (
+        None,
+        None,
+        None,
+    )
+    assert (row["action"], row["resource"], row["resource_id"]) == (
+        "admin.users.grant_admin",
+        "admin_users",
+        "user-9",
+    )
+    assert row["metadata"] == {
+        "actor": "commands.make_admin",
+        "after": {"role": "admin", "permissions": ["users.read"]},
+    }
+
+
+async def test_system_action_validates_names_like_an_admin_action():
+    service = AuditService(RecordingWriter())
+    with pytest.raises(ValueError):
+        await service.record_system_action("cli", action="nodot", resource="users")
+    with pytest.raises(ValueError):
+        await service.record_system_action(
+            "cli", action="admin.users.update", resource="users", resource_id="a b"
+        )

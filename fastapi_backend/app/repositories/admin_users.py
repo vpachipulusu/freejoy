@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import String, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +90,25 @@ class AdminUsersRepository(BaseRepository):
         rows = (await self._session.execute(statement)).all()
         total = (await self._session.execute(count)).scalar_one()
         return AdminUserPage([AdminUserRecord(*row) for row in rows], total)
+
+    async def find_user_ids_by_email(self, email: str, limit: int = 2) -> list[str]:
+        """Ids of users whose stored email equals ``email`` ignoring case.
+
+        ``email`` must already be trimmed. Both sides are folded in the ``C`` collation, so
+        only ASCII letters change case whatever the server locale (an accented or
+        look-alike letter never matches its ASCII twin); the caller re-checks in Python. The column is unique but case-sensitive, so
+        more than one id is possible; the caller decides what that means.
+        """
+        statement = (
+            select(User.id)
+            .where(
+                func.lower(User.email.collate("C"))
+                == func.lower(literal(email, String).collate("C"))
+            )
+            .order_by(User.id)
+            .limit(limit)
+        )
+        return list((await self._session.execute(statement)).scalars().all())
 
     async def get_user(
         self, user_id: str, *, lock: bool = False

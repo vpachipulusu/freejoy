@@ -140,9 +140,38 @@ built on the server from `NEXT_PUBLIC_APP_URL` (required in production; Vercel p
 
 ## First admin
 
-Admin pages need an admin grant in the backend. The first admin is granted in the database (SQL in
-[local-e2e.md](local-e2e.md)); after that an existing admin grants others through
-`PUT /v1/admin/users/{user_id}/admin` (the Users page in the admin area).
+Admin pages need an admin grant in the backend. The first admin is granted with a command, run by hand from
+`fastapi_backend/`. Look first, then grant:
+
+```bash
+uv run python -m commands.make_admin someone@example.com --dry-run   # report only, change nothing
+uv run python -m commands.make_admin someone@example.com             # grant the admin role
+uv run python -m commands.make_admin someone@example.com --role super_admin
+```
+
+- **Environment.** The command imports the app settings, so the environment it runs in must be valid for the app:
+  `ENVIRONMENT=local` (or `test`) with a `DATABASE_URL` for local work, or the full production configuration
+  (`ENVIRONMENT` unset means production, which also needs the Upstash, Firebase Admin and internal key values) to
+  grant on a deployed database. It uses `DATABASE_URL`, the app's connection; unlike Alembic it does not prefer
+  `DATABASE_URL_DIRECT`. The first line it prints names the environment and the database (`host:port/name`, never the
+  password), so check that before reading the rest.
+- **Who.** The person must have signed in once: users are created by their first Firebase sign-in and the command never
+  creates one. The email is trimmed and matched ignoring ASCII case; no match prints "no user found" and exits 1.
+  Only plain printable ASCII emails are accepted (an accented or look-alike letter is exit 2; grant such an account from
+  the admin Users page, which works by user id). Every run
+  prints the matched user's id, stored email, `email_verified`, `created_at` and `last_login_at` (that user only), which
+  is why `--dry-run` first is the recommended habit (the email is shown escaped, so look-alike and control
+  characters are visible). A user whose email is not verified is refused when a change would be made, unless
+  `--allow-unverified` is passed; a no-op on an unverified account succeeds with a warning line.
+- **Idempotent.** A user who already holds the role is left alone. A `super_admin` covers the default `admin` role
+  (no change) only when its list contains `*`; a hollow `super_admin` (no `*`) on the default role is refused, and is
+  repaired with `--role super_admin` or changed to `admin` with `--allow-demote`. Changing any `super_admin` to
+  `admin` needs `--allow-demote`, and the last super admin is never demoted. An `admin` holding fewer
+  than all permissions is reported ("N of M") and kept as is; `--refresh-permissions` grants the full set. Hollow rows
+  (a `super_admin` whose list is not exactly `["*"]`, or an `admin` with no usable permission) are repaired.
+
+After that an existing admin grants others through `PUT /v1/admin/users/{user_id}/admin` (the Users page in the admin
+area). Details, the permissions it writes and the audit row: [backend-admin-users.md](backend-admin-users.md#bootstrapping-the-first-admin).
 
 ## The whole stack in Docker
 

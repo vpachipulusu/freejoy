@@ -144,11 +144,43 @@ def sanitize(value: Any, depth: int = 0) -> Any:
     return f"<{type(value).__name__}>"
 
 
+def _check_names(
+    action: str, resource: str, resource_id: str | None, organization_id: str | None
+) -> None:
+    if not _ACTION_RE.fullmatch(action):
+        raise ValueError("Invalid audit action")
+    if not _RESOURCE_RE.fullmatch(resource):
+        raise ValueError("Invalid audit resource")
+    for target in (resource_id, organization_id):
+        if target is not None and not _TARGET_ID_RE.fullmatch(target):
+            raise ValueError("Invalid audit target id")
+
+
+def _metadata(
+    base: dict[str, Any],
+    *,
+    request_id: str | None,
+    before: Any,
+    after: Any,
+    details: Any,
+) -> dict[str, Any]:
+    metadata = dict(base)
+    for key, value in (
+        ("request_id", request_id),
+        ("before", before),
+        ("after", after),
+        ("details", details),
+    ):
+        if value is not None:
+            metadata[key] = sanitize(value)
+    return metadata
+
+
 class AuditWriter(Protocol):
     async def add(
         self,
         *,
-        user_id: str,
+        user_id: str | None,
         organization_id: str | None,
         action: str,
         resource: str,
@@ -184,22 +216,14 @@ class AuditService:
         ``resource`` the table-like target name, ``resource_id`` the target id.
         A malformed action or resource is a programming error and raises.
         """
-        if not _ACTION_RE.fullmatch(action):
-            raise ValueError("Invalid audit action")
-        if not _RESOURCE_RE.fullmatch(resource):
-            raise ValueError("Invalid audit resource")
-        for target in (resource_id, organization_id):
-            if target is not None and not _TARGET_ID_RE.fullmatch(target):
-                raise ValueError("Invalid audit target id")
-        metadata: dict[str, Any] = {"actor_role": admin.role}
-        for key, value in (
-            ("request_id", request_id),
-            ("before", before),
-            ("after", after),
-            ("details", details),
-        ):
-            if value is not None:
-                metadata[key] = sanitize(value)
+        _check_names(action, resource, resource_id, organization_id)
+        metadata = _metadata(
+            {"actor_role": admin.role},
+            request_id=request_id,
+            before=before,
+            after=after,
+            details=details,
+        )
         await self.repository.add(
             user_id=admin.user_id,
             organization_id=organization_id,
@@ -209,4 +233,41 @@ class AuditService:
             metadata=metadata,
             ip_address=ip_address,
             user_agent=CONTROL_CHARS.sub("", user_agent)[:512] if user_agent else None,
+        )
+
+    async def record_system_action(
+        self,
+        source: str,
+        *,
+        action: str,
+        resource: str,
+        resource_id: str | None = None,
+        before: Any = None,
+        after: Any = None,
+        details: Any = None,
+    ) -> None:
+        """Stage one audit row for a change made outside a request (an operator command).
+
+        There is no signed-in admin, so ``user_id`` is null (the column allows it and the
+        admin audit list shows an empty actor) and ``metadata.actor`` names the ``source``
+        instead, for example ``commands.make_admin``. Same validation and redaction as
+        ``record_admin_action``; the caller commits.
+        """
+        _check_names(action, resource, resource_id, None)
+        metadata = _metadata(
+            {"actor": sanitize(source)},
+            request_id=None,
+            before=before,
+            after=after,
+            details=details,
+        )
+        await self.repository.add(
+            user_id=None,
+            organization_id=None,
+            action=action,
+            resource=resource,
+            resource_id=resource_id,
+            metadata=metadata,
+            ip_address=None,
+            user_agent=None,
         )

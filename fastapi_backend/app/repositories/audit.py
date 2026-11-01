@@ -17,7 +17,7 @@ class AuditRepository:
     async def add(
         self,
         *,
-        user_id: str,
+        user_id: str | None,
         organization_id: str | None,
         action: str,
         resource: str,
@@ -26,7 +26,10 @@ class AuditRepository:
         ip_address: str | None,
         user_agent: str | None,
     ) -> None:
-        """Stage the row in the caller's transaction; the caller commits."""
+        """Stage the row in the caller's transaction; the caller commits.
+
+        ``user_id`` is null for a change made by an operator command, not a signed-in admin.
+        """
         self.session.add(
             AuditLog(
                 user_id=user_id,
