@@ -1,5 +1,9 @@
 # Freejoy user guide
 
+**Word version:** the whole guide, with a contents page and every screenshot, is one file:
+[Freejoy-User-Guide.docx](Freejoy-User-Guide.docx). It is built from these pages by
+[build-docx](build-docx/README.md); these pages stay the source of truth.
+
 A step-by-step guide to what Freejoy does and how to use it, written for people who are not developers.
 Every step has a real screenshot of the app. Pages are plain English; where the app shows a word or label,
 the guide uses the same word in **bold**.
