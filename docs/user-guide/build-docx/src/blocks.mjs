@@ -21,7 +21,7 @@ import {
   WidthType,
 } from 'docx';
 import { IMAGE, TEXT_WIDTH_TW, TWIPS_PER_CM } from './config.mjs';
-import { fitImage, isDesktopShot, isMobileShot, loadImage, shotBase } from './figures.mjs';
+import { isDesktopShot, isMobileShot, layoutImage, loadImage, shotBase } from './figures.mjs';
 import { renderInline } from './inline.mjs';
 import { closeIndex, plainText } from './markdown.mjs';
 import { COLORS } from './styles.mjs';
@@ -40,7 +40,7 @@ const SHORT_LABEL_MAX = 40;
 
 /** Mutable counters shared by the whole build. */
 export function createState() {
-  return { figure: 0, numbering: [], images: [], tables: 0 };
+  return { figure: 0, pictures: 0, sliced: 0, numbering: [], images: [], tables: 0, imageCache: new Map() };
 }
 
 const at = (ctx) => `${ctx.page}:${ctx.cursor.line}`;
@@ -63,25 +63,46 @@ function figuresOf(tokens, i) {
 
 const nextIsFigure = (tokens, i) => figuresOf(tokens, i) !== null;
 
-function pictureAndCaption(figure, ctx, widthCapCm) {
+function cachedImage(figure, ctx) {
   if (!figure.alt) throw new Error(`${at(ctx)}: image "${figure.src}" has no alt text`);
-  const image = loadImage(figure.src, ctx.dir, at(ctx));
-  const fit = fitImage(figure.src, image.size, widthCapCm);
+  const key = path.resolve(ctx.dir, figure.src);
+  if (!ctx.state.imageCache.has(key)) {
+    ctx.state.imageCache.set(key, loadImage(figure.src, ctx.dir, at(ctx)));
+  }
+  return ctx.state.imageCache.get(key);
+}
+
+/** One ImageRun paragraph per slice (a single one for a screenshot that fits a page), then ONE caption. */
+function pictureAndCaption(figure, ctx, widthCapCm) {
+  const image = cachedImage(figure, ctx);
+  const layout = layoutImage(figure.src, image.size, widthCapCm);
   ctx.state.figure += 1;
+  ctx.state.pictures += layout.count;
+  if (layout.count > 1) ctx.state.sliced += 1;
   const number = ctx.state.figure;
-  ctx.state.images.push({ src: figure.src, alt: figure.alt, page: ctx.page, ...fit });
-  const picture = new Paragraph({
-    alignment: AlignmentType.CENTER,
-    keepNext: true,
-    spacing: { before: 120, after: 60 },
-    children: [
-      new ImageRun({
-        type: 'png',
-        data: image.data,
-        transformation: { width: fit.widthPx, height: fit.heightPx },
-        altText: { name: path.basename(figure.src), title: figure.alt, description: figure.alt },
-      }),
-    ],
+  ctx.state.images.push({ src: figure.src, alt: figure.alt, page: ctx.page, ...layout });
+  const pictures = layout.slices.map((slice) => {
+    const sliced = layout.count > 1;
+    const description = sliced ? `${figure.alt} (part ${slice.part} of ${layout.count})` : figure.alt;
+    return new Paragraph({
+      alignment: AlignmentType.CENTER,
+      keepNext: true,
+      // Single line spacing, or Word adds a gap between slices.
+      spacing: {
+        before: slice.part === 1 ? 120 : 0,
+        after: slice.part === layout.count ? 60 : 0,
+        line: 240,
+      },
+      children: [
+        new ImageRun({
+          type: 'png',
+          data: image.data,
+          transformation: { width: layout.widthPx, height: slice.heightPx },
+          crop: sliced ? { top: slice.topPct, bottom: slice.bottomPct } : undefined,
+          altText: { name: path.basename(figure.src), title: description, description },
+        }),
+      ],
+    });
   });
   const caption = new Paragraph({
     style: 'Caption',
@@ -91,7 +112,12 @@ function pictureAndCaption(figure, ctx, widthCapCm) {
       new TextRun(`. ${figure.alt}`),
     ],
   });
-  return [picture, caption];
+  return [...pictures, caption];
+}
+
+/** True when the screenshot fits one page at this width, so it may sit in the side-by-side table. */
+function fitsUnsliced(figure, ctx, widthCapCm) {
+  return layoutImage(figure.src, cachedImage(figure, ctx).size, widthCapCm).count === 1;
 }
 
 const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'auto' };
@@ -156,7 +182,8 @@ function shortLabelAt(tokens, i) {
 
 /**
  * Emits the figure paragraph at `i` (a desktop shot immediately followed, optionally after a short
- * label, by the phone shot of the same screen becomes one borderless two-column table).
+ * label, by the phone shot of the same screen becomes one borderless two-column table, unless one
+ * of them is too tall for a page and has to be sliced: a table row cannot span pages).
  * Returns the index of the next unprocessed token.
  */
 function renderFigureRun(tokens, i, figures, ctx, out) {
@@ -168,7 +195,9 @@ function renderFigureRun(tokens, i, figures, ctx, out) {
     if (
       next?.length === 1 &&
       isMobileShot(next[0].src) &&
-      shotBase(next[0].src) === shotBase(figures[0].src)
+      shotBase(next[0].src) === shotBase(figures[0].src) &&
+      fitsUnsliced(figures[0], ctx, IMAGE.pairDesktopCellCm - 2 * IMAGE.cellPaddingCm) &&
+      fitsUnsliced(next[0], ctx, IMAGE.pairMobileCellCm - 2 * IMAGE.cellPaddingCm)
     ) {
       out.push(...pairTable(figures[0], next[0], label, ctx));
       return j + 3;
@@ -372,6 +401,9 @@ export function renderBlocks(tokens, ctx) {
       }
       case 'bullet_list_open':
       case 'ordered_list_open':
+        if (ctx.quote) {
+          throw new Error(`${at(ctx)}: a list inside a blockquote is not supported (its numbering would be lost); move the list out of the quote`);
+        }
         out.push(...list(tokens, i, ctx));
         i = closeIndex(tokens, i) + 1;
         break;

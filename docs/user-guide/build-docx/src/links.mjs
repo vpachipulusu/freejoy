@@ -13,7 +13,9 @@ function bookmarkName(counter) {
 }
 
 export class LinkRegistry {
-  constructor(pageNames) {
+  constructor(pageNames, guideDir = GUIDE_DIR, indexFile = INDEX_FILE) {
+    this.guideDir = guideDir;
+    this.indexFile = indexFile;
     this.pageNames = new Set(pageNames);
     this.entries = []; // every heading, in document order
     this.byAnchor = new Map(); // "<page>#<slug>" -> entry
@@ -52,8 +54,8 @@ export class LinkRegistry {
     const hashAt = href.indexOf('#');
     const rawPath = hashAt === -1 ? href : href.slice(0, hashAt);
     const fragment = hashAt === -1 ? '' : decodeURIComponent(href.slice(hashAt + 1));
-    const targetPath = rawPath === '' ? path.join(GUIDE_DIR, fromPage) : path.resolve(GUIDE_DIR, rawPath);
-    const inGuide = path.dirname(targetPath) === GUIDE_DIR;
+    const targetPath = rawPath === '' ? path.join(this.guideDir, fromPage) : path.resolve(this.guideDir, rawPath);
+    const inGuide = path.dirname(targetPath) === this.guideDir;
     const page = path.basename(targetPath);
 
     if (!inGuide) {
@@ -65,7 +67,7 @@ export class LinkRegistry {
     if (!this.pageNames.has(page)) {
       throw new Error(`Broken link "${href}" at ${where}: ${page} is not a page of the guide`);
     }
-    if (page === INDEX_FILE && fragment === '') {
+    if (page === this.indexFile && fragment === '') {
       return { kind: 'internal', bookmark: CONTENTS_BOOKMARK };
     }
     if (fragment === '') {

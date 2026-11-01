@@ -22,7 +22,7 @@ import docx  # python-docx
 from markdown_it import MarkdownIt
 
 GUIDE = Path(__file__).resolve().parent.parent
-DOCX = GUIDE / "Freejoy-User-Guide.docx"
+DOCX = Path(sys.argv[1]) if len(sys.argv) > 1 else GUIDE / "Freejoy-User-Guide.docx"
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
@@ -43,9 +43,12 @@ PARTS = {
     ],
 }
 failures: list[str] = []
+CHECKS = 0
 
 
 def check(ok: bool, message: str) -> None:
+    global CHECKS
+    CHECKS += 1
     print(("PASS  " if ok else "FAIL  ") + message)
     if not ok:
         failures.append(message)
@@ -117,10 +120,17 @@ def main() -> int:
 
     with zipfile.ZipFile(DOCX) as z:
         check(z.testzip() is None, "zip container is intact")
+        malformed = []
         for name in z.namelist():
             if name.endswith((".xml", ".rels")):
-                ET.fromstring(z.read(name))
-        check(True, "every XML part is well formed")
+                try:
+                    ET.fromstring(z.read(name))
+                except ET.ParseError as error:
+                    malformed.append(f"{name}: {error}")
+        check(not malformed, f"every XML part is well formed {malformed}")
+        if malformed:
+            print(f"{len(failures)} check(s) failed")
+            return 1
         document = ET.fromstring(z.read("word/document.xml"))
         settings = z.read("word/settings.xml").decode("utf8")
         header_xml = "".join(z.read(n).decode("utf8") for n in z.namelist() if re.match(r"word/header\d*\.xml", n))
@@ -180,26 +190,75 @@ def main() -> int:
     begins = [f for f in body.iter(q("w:fldChar")) if f.get(q("w:fldCharType")) == "begin"]
     check(len(ends) == len(begins), "field begin/end characters balance")
 
-    # ---- images
+    # ---- images: figures (one per Markdown reference) and the pictures (slices) that make them up
     drawings = list(body.iter(q("w:drawing")))
-    docpr = [d.find(".//wp:docPr", NS) for d in drawings]
-    names = [d.get("name") for d in docpr]
-    check(len(drawings) == len(exp_images), f"{len(drawings)} images in docx = {len(exp_images)} image references in Markdown")
-    check(names == [Path(s).name for s in exp_images], "image order and file names match the Markdown")
-    check(all((d.get("descr") or "").strip() for d in docpr), "every image has alt text")
+    parent = {child: p for p in body.iter() for child in p}
+    in_pair = set()
+    for tbl in body.iter(q("w:tbl")):
+        for d in tbl.iter(q("w:drawing")):
+            in_pair.add(d)
+    pictures = []
+    for d in drawings:
+        pr = d.find(".//wp:docPr", NS)
+        rect = d.find(".//a:srcRect", NS)
+        pictures.append({
+            "d": d, "name": pr.get("name"), "descr": (pr.get("descr") or "").strip(),
+            "cm": int(d.find(".//wp:extent", NS).get("cx")) / EMU_PER_CM,
+            "hcm": int(d.find(".//wp:extent", NS).get("cy")) / EMU_PER_CM,
+            "top": int((rect.get("t") if rect is not None else None) or 0),
+            "bottom": int((rect.get("b") if rect is not None else None) or 0),
+            "embed": d.find(".//a:blip", NS).get(q("r:embed")),
+        })
+    figures, problems, i = [], [], 0
+    part_re = re.compile(r"^(.*) \(part (\d+) of (\d+)\)$")
+    while i < len(pictures):
+        first = pictures[i]
+        m = part_re.match(first["descr"])
+        if not m:
+            figures.append([first])
+            i += 1
+            continue
+        count = int(m.group(3))
+        group = pictures[i:i + count]
+        for k, pic in enumerate(group, start=1):
+            mk = part_re.match(pic["descr"])
+            ok = (mk and mk.group(1) == m.group(1) and int(mk.group(2)) == k and int(mk.group(3)) == count
+                  and pic["name"] == first["name"] and pic["embed"] == first["embed"]
+                  and abs(pic["top"] - round(100000 * (k - 1) / count)) <= 1
+                  and abs(pic["bottom"] - round(100000 * (count - k) / count)) <= 1)
+            if not ok:
+                problems.append(f"{first['name']} slice {k}/{count}")
+        figures.append(group)
+        i += count
+    sliced = [g for g in figures if len(g) > 1]
+    print(f"Figures: {len(figures)} ({len(pictures)} pictures, {len(sliced)} figures cut into slices of the same media file)")
+    check(len(figures) == len(exp_images), f"{len(figures)} figures in docx = {len(exp_images)} image references in Markdown")
+    check(not problems, f"slices are numbered, contiguous crops of one embedded file {problems}")
+    check([g[0]["name"] for g in figures] == [Path(s_).name for s_ in exp_images], "figure order and file names match the Markdown")
+    check(all(p["descr"] for p in pictures), "every picture and slice has alt text")
     media_hashes = Counter(media.values())
-    src_hashes = Counter(hashlib.sha256((GUIDE / s).read_bytes()).hexdigest() for s in set(exp_images))
+    src_hashes = Counter(hashlib.sha256((GUIDE / s_).read_bytes()).hexdigest() for s_ in set(exp_images))
     check(set(media_hashes) == set(src_hashes), f"embedded pictures are byte-identical to images/ ({len(src_hashes)} distinct files)")
-    too_wide = []
-    for d, name in zip(drawings, names):
-        ext = d.find(".//wp:extent", NS)
-        cm = int(ext.get("cx")) / EMU_PER_CM
-        limit = 6.0 if name.endswith("-m.png") else 16.0
-        if cm > limit + 0.01:
-            too_wide.append((name, round(cm, 2)))
+    too_wide, too_narrow, too_tall, unkept = [], [], [], []
+    for pic in pictures:
+        phone = pic["name"].endswith("-m.png")
+        if pic["cm"] > (6.0 if phone else 16.0) + 0.01:
+            too_wide.append((pic["name"], round(pic["cm"], 2)))
+        minimum = 5.0 if phone else (None if pic["d"] in in_pair else 8.0)
+        if minimum is not None and pic["cm"] < minimum - 0.01:
+            too_narrow.append((pic["name"], round(pic["cm"], 2)))
+        if pic["hcm"] > 22.01:
+            too_tall.append((pic["name"], round(pic["hcm"], 1)))
+        para = parent[parent[pic["d"]]]
+        if para.find("w:pPr/w:keepNext", NS) is None:
+            unkept.append(pic["name"])
     check(not too_wide, f"no picture exceeds its width limit (16 cm desktop, 6 cm phone) {too_wide}")
-    tall = [(n, round(int(d.find('.//wp:extent', NS).get('cy')) / EMU_PER_CM, 1)) for d, n in zip(drawings, names)]
-    check(all(h <= 22.01 for _, h in tall), "no picture is taller than 22 cm (fits one page)")
+    check(not too_narrow, f"every phone picture is >= 5 cm wide, every desktop picture outside a pair >= 8 cm {too_narrow}")
+    check(not too_tall, f"no picture or slice is taller than 22 cm (fits one page) {too_tall}")
+    check(not unkept, f"every picture and slice paragraph is keepNext (stays with its caption) {unkept}")
+    widths = sorted(p["cm"] for p in pictures if p["name"].endswith("-m.png"))
+    print(f"      narrowest phone picture {widths[0]:.2f} cm; narrowest desktop picture outside a pair "
+          f"{min(p['cm'] for p in pictures if not p['name'].endswith('-m.png') and p['d'] not in in_pair):.2f} cm")
 
     # ---- tables, captions, styles
     tables = list(body.iter(q("w:tbl")))
@@ -213,15 +272,22 @@ def main() -> int:
           "keepNext is set on picture paragraphs and the text before them")
 
     # ---- python-docx load
-    doc = docx.Document(str(DOCX))
-    check(len(doc.inline_shapes) == len(exp_images), f"python-docx loads it: {len(doc.paragraphs)} paragraphs, "
-          f"{len(doc.tables)} tables, {len(doc.inline_shapes)} inline pictures, "
-          f"{len(doc.sections)} section(s), core title '{doc.core_properties.title}'")
+    try:
+        doc = docx.Document(str(DOCX))
+    except Exception as error:  # any load failure is a failed check, not a crash
+        check(False, f"python-docx can load the file: {error}")
+    else:
+        check(len(doc.inline_shapes) == len(pictures), f"python-docx loads it: {len(doc.paragraphs)} paragraphs, "
+              f"{len(doc.tables)} tables, {len(doc.inline_shapes)} inline pictures, "
+              f"{len(doc.sections)} section(s), core title '{doc.core_properties.title}'")
     print("\nNot checked here: appearance in Word, real page numbers (see README).")
     if failures:
         print(f"\n{len(failures)} check(s) failed")
         return 1
-    print("\nAll checks passed")
+    if CHECKS == 0:
+        print("\nNo checks ran")
+        return 1
+    print(f"\nAll {CHECKS} checks passed")
     return 0
 
 

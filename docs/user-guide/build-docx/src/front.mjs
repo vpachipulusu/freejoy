@@ -16,7 +16,7 @@ import {
   XmlAttributeComponent,
   XmlComponent,
 } from 'docx';
-import { GUIDE_TITLE, LEGAL_CHAPTER_FILE, TEXT_WIDTH_TW } from './config.mjs';
+import { GUIDE_TITLE, TEXT_WIDTH_TW } from './config.mjs';
 import { CONTENTS_BOOKMARK } from './links.mjs';
 import { COLORS } from './styles.mjs';
 
@@ -61,8 +61,9 @@ function formatLongDate(isoDate) {
   );
 }
 
-export function titlePage({ version, registry }) {
-  const legal = registry.chapterEntry(LEGAL_CHAPTER_FILE);
+export function titlePage({ version, registry, legalChapterFile }) {
+  const legal = registry.chapterEntry(legalChapterFile);
+  if (!legal) throw new Error(`Legal chapter ${legalChapterFile} has no heading`);
   return [
     new Paragraph({ spacing: { before: 3600 }, children: [] }),
     new Paragraph({ style: 'Title', children: [new TextRun(GUIDE_TITLE)] }),

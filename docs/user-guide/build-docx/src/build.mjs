@@ -5,18 +5,58 @@ import { pathToFileURL } from 'node:url';
 import { Bookmark, Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import JSZip from 'jszip';
 import { createState, renderBlocks } from './blocks.mjs';
-import {
-  GUIDE_TITLE,
-  MAX_OUTPUT_BYTES,
-  OUTPUT_FILE,
-  PAGE,
-} from './config.mjs';
+import { GUIDE_TITLE, MAX_OUTPUT_BYTES, PAGE, defaultConfig } from './config.mjs';
 import { contentsPage, emptyFooter, emptyHeader, pageFooter, pageHeader, titlePage } from './front.mjs';
 import { buildPlan } from './plan.mjs';
 import { styles } from './styles.mjs';
 
+const HYPERLINK_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
+
+/**
+ * docx gives every external hyperlink a random relationship id. Rename them to rIdLink1, rIdLink2...
+ * in order of appearance so the same sources always give the same bytes.
+ * Returns the rewritten [document.xml, document.xml.rels].
+ */
+export function sequentialHyperlinkIds(documentXml, relsXml) {
+  const hyperlinkRels = new Set();
+  for (const rel of relsXml.match(/<Relationship [^>]*\/>/g) ?? []) {
+    if (rel.includes(`Type="${HYPERLINK_TYPE}"`)) hyperlinkRels.add(/Id="([^"]+)"/.exec(rel)[1]);
+  }
+  const renamed = new Map();
+  const newDocument = documentXml.replace(/(<w:hyperlink [^>]*?r:id=")([^"]+)(")/g, (all, before, id, after) => {
+    if (!hyperlinkRels.has(id)) return all;
+    if (!renamed.has(id)) renamed.set(id, `rIdLink${renamed.size + 1}`);
+    return `${before}${renamed.get(id)}${after}`;
+  });
+  const newRels = relsXml.replace(/<Relationship [^>]*\/>/g, (rel) => {
+    const id = /Id="([^"]+)"/.exec(rel)[1];
+    return renamed.has(id) ? rel.replace(`Id="${id}"`, `Id="${renamed.get(id)}"`) : rel;
+  });
+  return [newDocument, newRels];
+}
+
+/**
+ * docx numbers bookmarks and pictures from counters that live for the whole process, so a second
+ * build in one process would differ. Renumber both 1, 2, 3... in document order.
+ */
+export function sequentialDrawingAndBookmarkIds(documentXml) {
+  const bookmarkIds = new Map();
+  const withBookmarks = documentXml.replace(/(<w:bookmarkStart [^>]*?w:id=")(\d+)(")/g, (all, before, id, after) => {
+    bookmarkIds.set(id, String(bookmarkIds.size + 1));
+    return `${before}${bookmarkIds.get(id)}${after}`;
+  });
+  const withEnds = withBookmarks.replace(/(<w:bookmarkEnd [^>]*?w:id=")(\d+)(")/g, (all, before, id, after) =>
+    bookmarkIds.has(id) ? `${before}${bookmarkIds.get(id)}${after}` : all,
+  );
+  let picture = 0;
+  return withEnds.replace(/(<wp:docPr id=")(\d+)(")/g, (all, before, id, after) => {
+    picture += 1;
+    return `${before}${picture}${after}`;
+  });
+}
+
 /** The generated file must not change from run to run unless the sources do. */
-async function normaliseZip(buffer, isoDate) {
+export async function normaliseZip(buffer, isoDate) {
   const fixed = new Date(`${isoDate}T00:00:00Z`);
   const zip = await JSZip.loadAsync(buffer);
   const out = new JSZip();
@@ -26,19 +66,34 @@ async function normaliseZip(buffer, isoDate) {
     if (b === '[Content_Types].xml') return 1;
     return a < b ? -1 : a > b ? 1 : 0;
   });
+  const text = async (name) => (await zip.file(name).async('nodebuffer')).toString('utf8');
+  const [linkedXml, relsXml] = sequentialHyperlinkIds(
+    await text('word/document.xml'),
+    await text('word/_rels/document.xml.rels'),
+  );
+  const documentXml = sequentialDrawingAndBookmarkIds(linkedXml);
+  const replaced = {
+    'word/document.xml': documentXml,
+    'word/_rels/document.xml.rels': relsXml,
+  };
   for (const name of names) {
     const entry = zip.files[name];
     if (entry.dir) continue;
-    let data = await entry.async('nodebuffer');
-    if (name === 'docProps/core.xml') {
-      const stamp = `${isoDate}T00:00:00Z`;
-      data = Buffer.from(
-        data
-          .toString('utf8')
-          .replace(/(<dcterms:created[^>]*>)[^<]*/, `$1${stamp}`)
-          .replace(/(<dcterms:modified[^>]*>)[^<]*/, `$1${stamp}`),
-        'utf8',
-      );
+    let data;
+    if (name in replaced) {
+      data = Buffer.from(replaced[name], 'utf8');
+    } else {
+      data = await entry.async('nodebuffer');
+      if (name === 'docProps/core.xml') {
+        const stamp = `${isoDate}T00:00:00Z`;
+        data = Buffer.from(
+          data
+            .toString('utf8')
+            .replace(/(<dcterms:created[^>]*>)[^<]*/, `$1${stamp}`)
+            .replace(/(<dcterms:modified[^>]*>)[^<]*/, `$1${stamp}`),
+          'utf8',
+        );
+      }
     }
     out.file(name, data, { date: fixed, createFolders: false });
   }
@@ -71,8 +126,8 @@ function renderSegments(segments, registry, state) {
   return children;
 }
 
-export async function build() {
-  const { segments, registry, version } = buildPlan();
+export async function build(config = defaultConfig) {
+  const { segments, registry, version } = buildPlan(config);
   const state = createState();
   const body = renderSegments(segments, registry, state);
 
@@ -101,7 +156,11 @@ export async function build() {
         },
         headers: { default: pageHeader(), first: emptyHeader() },
         footers: { default: pageFooter(), first: emptyFooter() },
-        children: [...titlePage({ version, registry }), ...contentsPage(registry), ...body],
+        children: [
+          ...titlePage({ version, registry, legalChapterFile: config.legalChapterFile }),
+          ...contentsPage(registry),
+          ...body,
+        ],
       },
     ],
   });
@@ -114,17 +173,17 @@ export async function build() {
         'Downscale or recompress the PNGs inside this build (never in images/).',
     );
   }
-  fs.writeFileSync(OUTPUT_FILE, buffer);
-  return { file: OUTPUT_FILE, bytes: buffer.length, state, registry };
+  fs.writeFileSync(config.outputFile, buffer);
+  return { file: config.outputFile, bytes: buffer.length, state, registry };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   build()
     .then(({ file, bytes, state, registry }) => {
-      const headings = registry.entries.length;
       console.log(
-        `Wrote ${file}\n  ${(bytes / 1048576).toFixed(2)} MB, ${headings} headings, ` +
-          `${state.images.length} figures, ${state.tables} tables, ${state.numbering.length} lists`,
+        `Wrote ${file}\n  ${(bytes / 1048576).toFixed(2)} MB, ${registry.entries.length} headings, ` +
+          `${state.figure} figures (${state.pictures} pictures, ${state.sliced} cut into slices), ` +
+          `${state.tables} tables, ${state.numbering.length} lists`,
       );
     })
     .catch((error) => {

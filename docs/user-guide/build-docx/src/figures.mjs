@@ -20,12 +20,16 @@ export const isDesktopShot = (src) => /-d\.png$/i.test(src);
 export const shotBase = (src) => src.replace(/-[dm]\.png$/i, '');
 
 /**
- * Display size in pixels (96 dpi, what docx expects) for a screenshot.
- * Phone shots get up to 6 cm of width, desktop shots up to 16 cm (less when the capture itself is
- * narrower than the 1440 px reference), never taller than one page, aspect ratio untouched.
- * `widthCapCm` lowers the width limit (used inside the side-by-side table).
+ * Page layout of one screenshot. Phone shots get up to 6 cm of width, desktop shots up to 16 cm
+ * (less when the capture itself is narrower than the 1440 px reference, never under 8 cm), aspect
+ * ratio untouched. `widthCapCm` lowers the width limit (used inside the side-by-side table).
+ *
+ * A screenshot taller than one page (IMAGE.maxHeightCm) is first shrunk to fit, but only while it
+ * keeps at least IMAGE.minShrink of its width. Beyond that it would become unreadable, so it is cut
+ * into equal slices that are each at most one page tall and keep the full width. Every slice is the
+ * same embedded picture cropped with top/bottom percentages.
  */
-export function fitImage(src, size, widthCapCm = Infinity) {
+export function layoutImage(src, size, widthCapCm = Infinity) {
   let widthCm;
   if (isMobileShot(src)) {
     widthCm = IMAGE.mobileMaxWidthCm;
@@ -38,17 +42,36 @@ export function fitImage(src, size, widthCapCm = Infinity) {
     );
   }
   widthCm = Math.min(widthCm, widthCapCm);
-  let heightCm = (widthCm * size.height) / size.width;
-  if (heightCm > IMAGE.maxHeightCm) {
-    widthCm = (widthCm * IMAGE.maxHeightCm) / heightCm;
-    heightCm = IMAGE.maxHeightCm;
+  const heightCm = (widthCm * size.height) / size.width;
+  const shrink = IMAGE.maxHeightCm / heightCm;
+  const minShrink = isMobileShot(src) ? IMAGE.minShrinkMobile : IMAGE.minShrinkDesktop;
+  if (heightCm <= IMAGE.maxHeightCm || shrink >= minShrink) {
+    const scale = Math.min(1, shrink);
+    const fitted = {
+      part: 1,
+      topPct: 0,
+      bottomPct: 0,
+      heightCm: heightCm * scale,
+      heightPx: Math.round(heightCm * scale * PX_PER_CM),
+    };
+    return {
+      widthCm: widthCm * scale,
+      heightCm: heightCm * scale,
+      widthPx: Math.round(widthCm * scale * PX_PER_CM),
+      count: 1,
+      slices: [fitted],
+    };
   }
-  return {
-    widthPx: Math.round(widthCm * PX_PER_CM),
-    heightPx: Math.round(heightCm * PX_PER_CM),
-    widthCm,
-    heightCm,
-  };
+  const count = Math.ceil(heightCm / IMAGE.maxHeightCm - 1e-9);
+  const sliceCm = heightCm / count;
+  const slices = Array.from({ length: count }, (_, k) => ({
+    part: k + 1,
+    topPct: (100 * k) / count,
+    bottomPct: (100 * (count - k - 1)) / count,
+    heightCm: sliceCm,
+    heightPx: Math.round(sliceCm * PX_PER_CM),
+  }));
+  return { widthCm, heightCm, widthPx: Math.round(widthCm * PX_PER_CM), count, slices };
 }
 
 /** Loads an image referenced from a page; throws a clear error when it is missing. */

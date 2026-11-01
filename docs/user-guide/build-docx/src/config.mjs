@@ -68,12 +68,26 @@ export const IMAGE = {
   desktopMaxWidthCm: 16,
   mobileMaxWidthCm: 6,
   /** Desktop shots narrower than the 1440 px reference scale down in proportion, but not below this. */
-  desktopMinWidthCm: 7,
+  desktopMinWidthCm: 8,
   desktopReferencePx: 1440,
-  /** Tallest an image may be, so it always fits on one page with its caption. */
+  /** Tallest one picture may be. Taller screenshots are cut into equal slices of at most this height. */
   maxHeightCm: 22,
+  /** A too-tall shot may shrink to fit a page only down to this fraction of its width; below that it is sliced. */
+  minShrinkDesktop: 0.85,
+  minShrinkMobile: 0.92,
   /** Side-by-side desktop + phone pair: width of the two table cells. */
   pairDesktopCellCm: 10.6,
   pairMobileCellCm: TEXT_WIDTH_CM - 10.6,
   cellPaddingCm: 0.3,
+};
+
+/** Everything that identifies one guide. Tests build small fixture guides by passing their own. */
+export const defaultConfig = {
+  guideDir: GUIDE_DIR,
+  outputFile: OUTPUT_FILE,
+  indexFile: INDEX_FILE,
+  prefaceSection: PREFACE_SECTION,
+  skippedSections: SKIPPED_INDEX_SECTIONS,
+  parts: PARTS,
+  legalChapterFile: LEGAL_CHAPTER_FILE,
 };
