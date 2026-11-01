@@ -19,6 +19,14 @@ export const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: '/dashboard/security', label: 'Security', icon: Shield },
 ];
 
+/** The public home page. The dashboard is a separate area, so every nav surface links back to it. */
+export const SITE_HOME_HREF = '/';
+
+/** Plain label for the link back to the public site, using the configured brand name. */
+export function backToSiteLabel(brandName: string): string {
+  return `Back to ${brandName}`;
+}
+
 const TAB_COUNT = 3;
 
 export const TAB_ITEMS: ReadonlyArray<NavItem> = NAV_ITEMS.slice(0, TAB_COUNT);

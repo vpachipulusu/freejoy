@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { siteConfig } from '@/config/site';
 import { cn } from '@/lib/utils';
-import { NAV_ITEMS, activeNavHref } from './nav-items';
+import { ArrowLeft } from 'lucide-react';
+import { NAV_ITEMS, SITE_HOME_HREF, activeNavHref, backToSiteLabel } from './nav-items';
 
 /**
  * Desktop navigation: a 240px inverse panel from 900px up. Below that the TabBar takes over.
@@ -52,6 +53,13 @@ export function Sidebar({ children }: { children?: ReactNode }) {
           })}
         </ul>
       </nav>
+      <Link
+        href={SITE_HOME_HREF}
+        className="mt-auto flex min-h-11 items-center gap-3 rounded-md px-3 text-sm font-medium text-background/75 transition-colors hover:bg-background/10 hover:text-background dark:text-foreground/75 dark:hover:bg-foreground/10 dark:hover:text-foreground"
+      >
+        <ArrowLeft className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+        {backToSiteLabel(siteConfig.name)}
+      </Link>
     </aside>
   );
 }
