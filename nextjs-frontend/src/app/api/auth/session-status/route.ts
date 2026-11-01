@@ -1,7 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-
-export const dynamic = 'force-dynamic';
+import { SESSION_COOKIE_NAME } from '@/lib/auth/session-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
@@ -16,6 +15,6 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
  */
 export async function GET() {
   const cookieStore = await cookies();
-  const signedIn = Boolean(cookieStore.get('session')?.value);
+  const signedIn = Boolean(cookieStore.get(SESSION_COOKIE_NAME)?.value);
   return NextResponse.json({ signedIn }, { headers: NO_STORE });
 }

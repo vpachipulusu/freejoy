@@ -3,6 +3,7 @@ import 'server-only';
 import { isIP } from 'node:net';
 import { cookies, headers } from 'next/headers';
 import { BACKEND_NOT_CONFIGURED_CODE } from '@/lib/auth/auth-error-messages';
+import { SESSION_COOKIE_NAME } from '@/lib/auth/session-cookie';
 import { createClient, createConfig, type Client } from './generated/client';
 
 /**
@@ -17,7 +18,7 @@ import { createClient, createConfig, type Client } from './generated/client';
  * Public health endpoints remain callable without it; auth endpoints reject missing keys.
  */
 
-export const SESSION_COOKIE_NAME = 'session';
+export { SESSION_COOKIE_NAME };
 export const SESSION_HEADER = 'X-Session-Token';
 export const INTERNAL_KEY_HEADER = 'X-Internal-Key';
 
