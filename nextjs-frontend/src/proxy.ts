@@ -17,6 +17,14 @@ import {
 /** The first-party affiliate redirect. Rate limited with the general policy; never part of the /api allowlist. */
 const OUTBOUND_PREFIX = '/go/';
 
+/**
+ * Cosmetic session hint polled by the public header on every full page load. It reads one cookie and does no
+ * I/O, so it is unauthenticated (signed-out visitors must get `{"signedIn":false}`, not 401) and outside the rate
+ * limiter: under `/api/auth/` it would otherwise spend the 5-per-15-minutes sign-in bucket, and off Vercel every
+ * visitor shares one bucket. Exact match only.
+ */
+const SESSION_STATUS_PATH = '/api/auth/session-status';
+
 /** Security headers shared by every response the proxy lets through. */
 function applySecurityHeaders(response: NextResponse): void {
   response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -65,7 +73,10 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Apply rate limiting to API routes and to the outbound redirect (`/go/`, general policy)
-  if (pathname.startsWith('/api/') || pathname.startsWith(OUTBOUND_PREFIX)) {
+  if (
+    (pathname.startsWith('/api/') && pathname !== SESSION_STATUS_PATH) ||
+    pathname.startsWith(OUTBOUND_PREFIX)
+  ) {
     const rateLimitResponse = applyRateLimit(request, pathname);
     if (rateLimitResponse) {
       return rateLimitResponse;
@@ -119,7 +130,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Public API routes (no auth required)
-  const publicApiExact = ['/api/health'];
+  const publicApiExact = ['/api/health', SESSION_STATUS_PATH];
   const isPublicApiRoute = publicApiExact.includes(pathname);
 
   // Protected API routes (require authentication)
