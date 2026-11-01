@@ -58,28 +58,47 @@ deletion (see [backend-profile.md](backend-profile.md)).
 ## Bootstrapping the first admin
 
 The API needs an admin to call it, so the first one is granted from the command line. Run it from `fastapi_backend/`
-against the database in `DATABASE_URL` (the owner runs it by hand; nothing schedules it):
+against the database in `DATABASE_URL` (the owner runs it by hand; nothing schedules it). Setup, environment and the
+`--dry-run` first habit: [getting-started.md](getting-started.md#first-admin).
 
 ```bash
-uv run python -m commands.make_admin someone@example.com            # role admin
-uv run python -m commands.make_admin someone@example.com --dry-run  # report only, change nothing
+uv run python -m commands.make_admin someone@example.com --dry-run   # report only, change nothing
+uv run python -m commands.make_admin someone@example.com             # role admin
 uv run python -m commands.make_admin someone@example.com --role super_admin
 ```
 
-- **Who.** An existing user, found by email (trimmed, case-insensitive). Users are created by Firebase sign-in, so the
-  person signs in once first; with no match it prints "no user found", changes nothing and exits 1. Two users whose
-  emails differ only in case are refused (exit 1). An invalid email or option exits 2.
+Flags: `--role admin|super_admin` (default `admin`), `--dry-run`, `--allow-demote`, `--allow-unverified`,
+`--refresh-permissions` (`--role admin` only), `--verbose` (traceback on stderr).
+
+- **Who.** An existing user, found by email (trimmed, case-insensitive in the database, then confirmed with Python's
+  lower-casing). The target row is locked before it is read, as the API does. Users are created by Firebase sign-in, so
+  the person signs in once first; with no match it prints "no user found", changes nothing and exits 1. Two users whose
+  emails differ only in case are refused (exit 1). A user whose email is not verified is refused (exit 1) unless
+  `--allow-unverified`. An invalid email or option exits 2.
+- **What it prints.** Line 1: the environment (`ENVIRONMENT`, and `VERCEL_ENV` when set) and the database as
+  `host:port/name`, never the user or password (a URL whose password contains an unencoded `@` prints "an unreadable
+  DATABASE_URL"). Then, for every outcome once exactly one user matched, that user's id, email as stored,
+  `email_verified`, `created_at` and `last_login_at`; then the result, which names the email in its trimmed form. No
+  other user is ever listed.
 - **What it writes.** The same single `admin_users` row as `PUT /{user_id}/admin`. `admin` gets every permission in
   `ADMIN_PERMISSIONS` (no smaller preset exists in the app); `super_admin` gets exactly `["*"]`. Trim the list afterwards
   through the API if a narrower admin is wanted.
-- **Idempotent.** The same role again prints "already ... No change." (exit 0, nothing written, existing permissions
-  kept). A different role is updated and reported as `changed from X to Y`. A `super_admin` row without the wildcard is
-  repaired. The last `super_admin` is never demoted (exit 1), as in the API.
-- **Audit.** Each change stages an `admin.users.grant_admin` row (resource `admin_users`, `before` and `after`) in the same
-  transaction. A command has no signed-in admin, so `user_id` is null (the admin audit list shows an empty actor) and
-  `metadata.actor` is `commands.make_admin`. Dry runs, refusals and no-ops write no row.
-- **Output.** The first line names the database as `host:port/name` (never the user or password); the result line has
-  the email as typed and never lists other users. A database failure prints the error type only and exits 1.
+- **Idempotent, and it does not silently narrow or widen.**
+  - Same role again: "already ... No change." (exit 0, nothing written). A `super_admin` is "already" only when the
+    stored list is exactly `["*"]`. An `admin` holding fewer than all permissions is reported as "already admin with N of
+    M permissions", kept as is, and widened only with `--refresh-permissions`.
+  - An existing `super_admin` covers the default `--role admin`: "already super_admin (covers admin). No change." Moving
+    one to `admin` needs `--allow-demote`, and the last `super_admin` is never demoted (exit 1), as in the API. A
+    `super_admin` row without the wildcard is not counted as one, so changing it is never blocked by that rule.
+  - Another role is updated and reported as `changed from X to Y`.
+  - A hollow row (a `super_admin` whose list is not exactly `["*"]`, or an `admin` with no usable permission) is
+    repaired and reported as a repair, not as a role change.
+- **Audit.** Each change stages an `admin.users.grant_admin` row (resource `admin_users`, with `before` and `after`
+  role and permissions) in the same transaction. A command has no signed-in admin, so `user_id` is null (the admin audit
+  list shows an empty actor) and `metadata.actor` is `commands.make_admin`. Dry runs, refusals and no-ops write no row.
+- **Failures.** Database and connection errors (SQLAlchemy, OS) print the error type only, on stderr, and exit 1; a
+  real write run says the change "may not have been written; re-run with --dry-run to check", a dry run says nothing was
+  written. Other (programming) errors are not caught. `--verbose` adds the traceback on stderr.
 
 Code: `commands/make_admin.py` (rules, on a small `AdminStore` protocol), `AdminUsersRepository.find_user_ids_by_email`
 and `AuditService.record_system_action`.
