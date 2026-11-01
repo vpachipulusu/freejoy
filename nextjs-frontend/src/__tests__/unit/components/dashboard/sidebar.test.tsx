@@ -63,4 +63,12 @@ describe('Sidebar', () => {
       expect(link.className).toContain('min-h-11');
     }
   });
+
+  it('links back to the public home page with the configured brand name', () => {
+    render(<Sidebar />);
+    const link = screen.getByRole('link', { name: 'Back to Acme Shop' });
+    expect(link).toHaveAttribute('href', '/');
+    expect(link.className).toContain('min-h-11');
+    expect(link).not.toHaveAttribute('aria-current');
+  });
 });
