@@ -23,7 +23,7 @@ from app.repositories.admin import AdminRepository
 from app.repositories.admin_users import AdminUsersRepository
 from app.repositories.audit import AuditRepository
 from app.services.audit import AuditService
-from commands.make_admin import MakeAdminResult, Outcome, make_admin
+from commands.make_admin import MakeAdminResult, Options, Outcome, make_admin
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -64,22 +64,25 @@ async def engine(database_url: str) -> AsyncIterator[AsyncEngine]:
     await built.dispose()
 
 
-async def add_user(engine: AsyncEngine, email: str) -> str:
+async def add_user(engine: AsyncEngine, email: str, *, verified: bool = True) -> str:
     user_id = new_id()
     async with engine.begin() as connection:
         await connection.execute(
             text(
                 "INSERT INTO users (id, firebase_uid, email, email_verified) "
-                "VALUES (:id, :uid, :email, true)"
+                "VALUES (:id, :uid, :email, :verified)"
             ),
-            {"id": user_id, "uid": f"fb-{user_id}", "email": email},
+            {
+                "id": user_id,
+                "uid": f"fb-{user_id}",
+                "email": email,
+                "verified": verified,
+            },
         )
     return user_id
 
 
-async def run(
-    engine: AsyncEngine, email: str, role: str = "admin", *, dry_run: bool = False
-) -> MakeAdminResult:
+async def run(engine: AsyncEngine, email: str, **options: Any) -> MakeAdminResult:
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         result = await make_admin(
@@ -87,11 +90,21 @@ async def run(
             AuditService(AuditRepository(session)),
             session,
             email,
-            role,
-            dry_run=dry_run,
+            Options(**options),
         )
         await session.rollback()  # a no-op after a commit; releases any lock otherwise
         return result
+
+
+async def set_grant(engine: AsyncEngine, user_id: str, role: str, perms: str) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO admin_users (id, user_id, role, permissions) "
+                "VALUES (:id, :u, :role, CAST(:perms AS jsonb))"
+            ),
+            {"id": new_id(), "u": user_id, "role": role, "perms": perms},
+        )
 
 
 async def rows(engine: AsyncEngine, sql: str, **params: Any) -> list[Any]:
@@ -124,7 +137,7 @@ async def test_grant_writes_the_row_the_app_authorises_from(
 async def test_grant_writes_an_audit_row_with_no_actor(engine: AsyncEngine) -> None:
     user_id = await add_user(engine, "ann@example.com")
 
-    await run(engine, "ann@example.com", "super_admin")
+    await run(engine, "ann@example.com", role="super_admin")
 
     audit = await rows(
         engine,
@@ -150,7 +163,7 @@ async def test_a_second_run_changes_nothing_and_a_role_change_updates_in_place(
     await run(engine, "ann@example.com")
 
     again = await run(engine, "ann@example.com")
-    promoted = await run(engine, "ann@example.com", "super_admin")
+    promoted = await run(engine, "ann@example.com", role="super_admin")
 
     assert again.outcome is Outcome.ALREADY_ADMIN
     assert (promoted.outcome, promoted.previous_role) == (Outcome.UPDATED, "admin")
@@ -174,9 +187,9 @@ async def test_unknown_email_and_dry_run_write_nothing(engine: AsyncEngine) -> N
 
 async def test_the_last_super_admin_cannot_be_demoted(engine: AsyncEngine) -> None:
     await add_user(engine, "ann@example.com")
-    await run(engine, "ann@example.com", "super_admin")
+    await run(engine, "ann@example.com", role="super_admin")
 
-    refused = await run(engine, "ann@example.com", "admin")
+    refused = await run(engine, "ann@example.com", role="admin", allow_demote=True)
 
     assert refused.outcome is Outcome.LAST_SUPER_ADMIN
     assert await rows(engine, "SELECT role FROM admin_users") == [("super_admin",)]
@@ -192,3 +205,47 @@ async def test_two_users_differing_only_in_case_are_refused(
 
     assert result.outcome is Outcome.AMBIGUOUS
     assert await rows(engine, "SELECT 1 FROM admin_users") == []
+
+
+async def test_a_super_admin_row_without_the_wildcard_is_repaired(
+    engine: AsyncEngine,
+) -> None:
+    user_id = await add_user(engine, "ann@example.com")
+    await set_grant(engine, user_id, "super_admin", '["users.read"]')
+
+    result = await run(engine, "ann@example.com", role="super_admin")
+
+    assert result.outcome is Outcome.REPAIRED
+    assert await rows(engine, "SELECT role, permissions FROM admin_users") == [
+        ("super_admin", ["*"])
+    ]
+    audit = await rows(engine, "SELECT metadata FROM audit_logs")
+    assert audit[0][0]["before"] == {
+        "role": "super_admin",
+        "permissions": ["users.read"],
+    }
+
+
+async def test_a_super_admin_already_covers_admin_and_is_not_touched(
+    engine: AsyncEngine,
+) -> None:
+    user_id = await add_user(engine, "ann@example.com")
+    await set_grant(engine, user_id, "super_admin", '["*"]')
+
+    result = await run(engine, "ann@example.com")
+
+    assert result.outcome is Outcome.ALREADY_COVERED
+    assert await rows(engine, "SELECT role FROM admin_users") == [("super_admin",)]
+    assert await rows(engine, "SELECT 1 FROM audit_logs") == []
+
+
+async def test_an_unverified_user_is_refused_until_allowed(engine: AsyncEngine) -> None:
+    await add_user(engine, "ann@example.com", verified=False)
+
+    refused = await run(engine, "ann@example.com")
+    allowed = await run(engine, "ann@example.com", allow_unverified=True)
+
+    assert refused.outcome is Outcome.UNVERIFIED
+    assert refused.user is not None and refused.user.email == "ann@example.com"
+    assert allowed.outcome is Outcome.GRANTED
+    assert len(await rows(engine, "SELECT 1 FROM admin_users")) == 1

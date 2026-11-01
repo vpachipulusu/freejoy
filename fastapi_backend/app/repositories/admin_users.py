@@ -94,12 +94,13 @@ class AdminUsersRepository(BaseRepository):
     async def find_user_ids_by_email(self, email: str, limit: int = 2) -> list[str]:
         """Ids of users whose stored email equals ``email`` ignoring case.
 
-        ``email`` must already be trimmed. The column is unique but case-sensitive, so
+        ``email`` must already be trimmed; the database folds both sides, and the caller
+        re-checks the match in Python. The column is unique but case-sensitive, so
         more than one id is possible; the caller decides what that means.
         """
         statement = (
             select(User.id)
-            .where(func.lower(User.email) == email.lower())
+            .where(func.lower(User.email) == func.lower(email))
             .order_by(User.id)
             .limit(limit)
         )

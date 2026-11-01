@@ -2,6 +2,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.models.platform.audit_log import AuditLog
 from app.repositories.admin import AdminGrant, AdminRepository
+from app.repositories.admin_users import AdminUsersRepository
 from app.repositories.audit import AuditRepository
 
 
@@ -106,12 +107,11 @@ class IdsSession:
 
 
 async def test_email_lookup_compares_lower_case_and_is_bounded():
-    from app.repositories.admin_users import AdminUsersRepository
-
     session = IdsSession()
     ids = await AdminUsersRepository(session).find_user_ids_by_email("Ann@Example.com")  # type: ignore[arg-type]
     assert ids == ["user-1"]
     compiled = session.statements[0].compile(dialect=postgresql.dialect())
-    assert "lower(users.email)" in str(compiled)
-    assert "ann@example.com" in compiled.params.values()
-    assert 2 in compiled.params.values()  # limit
+    sql = str(compiled)
+    assert "lower(users.email) = lower(%(lower_1)s::VARCHAR)" in sql
+    assert "LIMIT %(param_1)s::INTEGER" in sql
+    assert compiled.params == {"lower_1": "Ann@Example.com", "param_1": 2}
