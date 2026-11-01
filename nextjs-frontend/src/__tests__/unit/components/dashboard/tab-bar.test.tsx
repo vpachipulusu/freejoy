@@ -175,7 +175,7 @@ describe('TabBar', () => {
     expect(screen.getByRole('button', { name: 'More' })).not.toHaveAttribute('data-current');
   });
 
-  it('offers a link back to the public home page inside the More sheet and closes it on use', async () => {
+  it('offers the link back to the public home page first in the More sheet and closes it on use', async () => {
     const user = userEvent.setup();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
@@ -183,6 +183,8 @@ describe('TabBar', () => {
     const back = within(dialog).getByRole('link', { name: 'Back to Freejoy' });
     expect(back).toHaveAttribute('href', '/');
     expect(back.className).toContain('min-h-11');
+    expect(within(dialog).getAllByRole('link')[0]).toBe(back);
+    expect(within(dialog).getAllByRole('link', { name: 'Back to Freejoy' })).toHaveLength(1);
 
     await user.click(back);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

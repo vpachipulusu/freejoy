@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, User, Shield, ShieldCheck, LogOut, ArrowLeft } from 'lucide-react';
+import { LayoutDashboard, User, Shield, ShieldCheck, LogOut, House } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,7 +85,7 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
           )}
           <DropdownMenuItem asChild>
             <Link href={SITE_HOME_HREF} className="cursor-pointer">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+              <House className="mr-2 h-4 w-4" />
               <span>{backToSiteLabel(siteConfig.name)}</span>
             </Link>
           </DropdownMenuItem>
