@@ -20,7 +20,8 @@ repos:
         exclude: >
           (?x)^(
               nextjs-frontend/package-lock\.json|
-              fastapi_backend/uv\.lock
+              fastapi_backend/uv\.lock|
+              docs/user-guide/Freejoy-User-Guide\.docx
           )$
       - id: fix-byte-order-marker
       - id: check-case-conflict

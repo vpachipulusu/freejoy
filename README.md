@@ -108,7 +108,8 @@ Keeping a project in step with this template later: [`docs/developer/template-sy
 ## Documentation
 
 - [`docs/user-guide/README.md`](docs/user-guide/README.md): the end-user guide with screenshots (public site and admin
-  area), written for non-developers.
+  area), written for non-developers. Also as one Word file:
+  [`docs/user-guide/Freejoy-User-Guide.docx`](docs/user-guide/Freejoy-User-Guide.docx).
 - [`docs/developer/README.md`](docs/developer/README.md): index of developer docs (architecture, auth,
   organisations, billing, testing, security, local e2e).
 - [`docs/adr/README.md`](docs/adr/README.md): architecture decision records and the ADR template.

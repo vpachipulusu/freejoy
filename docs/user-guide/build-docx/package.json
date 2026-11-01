@@ -1,0 +1,20 @@
+{
+  "name": "freejoy-user-guide-docx",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Builds docs/user-guide/Freejoy-User-Guide.docx from the Markdown pages. Not part of the app.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node --no-warnings src/build.mjs",
+    "test": "node --no-warnings --test test/"
+  },
+  "dependencies": {
+    "docx": "9.8.1",
+    "jszip": "3.10.1",
+    "markdown-it": "14.3.3"
+  }
+}
