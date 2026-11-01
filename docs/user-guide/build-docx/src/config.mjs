@@ -74,7 +74,7 @@ export const IMAGE = {
   maxHeightCm: 22,
   /** A too-tall shot may shrink to fit a page only down to this fraction of its width; below that it is sliced. */
   minShrinkDesktop: 0.85,
-  minShrinkMobile: 0.92,
+  minShrinkMobile: 0.85,
   /** Side-by-side desktop + phone pair: width of the two table cells. */
   pairDesktopCellCm: 10.6,
   pairMobileCellCm: TEXT_WIDTH_CM - 10.6,

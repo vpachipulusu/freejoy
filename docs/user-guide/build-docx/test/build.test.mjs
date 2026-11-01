@@ -199,3 +199,49 @@ test('a missing image or link target in a page fails the build with the position
     link.cleanup();
   }
 });
+
+test('a desktop+phone pair whose phone shot must be sliced is not put in a table', async () => {
+  const chapter = [
+    '# 1. One',
+    '',
+    '## Lists',
+    '',
+    'Desktop:',
+    '',
+    '![Home on desktop](images/home-d.png)',
+    '',
+    'Phone:',
+    '',
+    '![Home on a phone with a',
+    'two-line description](images/home-m.png)',
+    '',
+  ].join('\n');
+  const fixture = makeFixture({ chapter });
+  try {
+    const { state } = await build(fixture.config);
+    const xml = await readPart(fixture.config.outputFile);
+
+    const tables = xml.match(/<w:tbl>.*?<\/w:tbl>/gs) ?? [];
+    for (const table of tables) {
+      assert.ok(!table.includes('<w:drawing>'), 'a picture ended up inside a table');
+    }
+    assert.equal(state.figure, 2);
+    assert.ok(state.pictures > 2, 'the phone shot should be sliced');
+
+    // order: desktop picture, then the "Phone:" label, then the slices
+    const desktopAt = xml.indexOf('descr="Home on desktop"');
+    const labelAt = xml.indexOf('>Phone:<');
+    const firstSliceAt = xml.indexOf('(part 1 of ');
+    assert.ok(desktopAt > 0 && desktopAt < labelAt && labelAt < firstSliceAt, 'unexpected order');
+
+    // the label paragraph stays with the slices that follow it
+    const labelParagraph = xml.slice(xml.lastIndexOf('<w:p>', labelAt), xml.indexOf('</w:p>', labelAt));
+    assert.ok(labelParagraph.includes('<w:keepNext/>'), 'label paragraph lacks keepNext');
+
+    // alt text and caption have no line break from the two-line Markdown description
+    assert.ok(xml.includes('Home on a phone with a two-line description (part 1 of '));
+    assert.ok(xml.includes('. Home on a phone with a two-line description</w:t>'));
+  } finally {
+    fixture.cleanup();
+  }
+});

@@ -53,7 +53,7 @@ function figuresOf(tokens, i) {
   const parts = tokens[i + 1].children ?? [];
   const figures = [];
   for (const child of parts) {
-    if (child.type === 'image') figures.push({ src: child.attrGet('src'), alt: child.content.trim() });
+    if (child.type === 'image') figures.push({ src: child.attrGet('src'), alt: child.content.replace(/\s+/g, ' ').trim() });
     else if (child.type === 'softbreak') continue;
     else if (child.type === 'text' && child.content.trim() === '') continue;
     else return null;

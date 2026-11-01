@@ -71,7 +71,7 @@ fenced code
 export function makeFixture({ chapter = CHAPTER, extraFiles = {}, readme = README } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freejoy-docx-test-'));
   fs.mkdirSync(path.join(dir, 'images'));
-  for (const name of ['404-d.png', '404-m.png', 'home-m.png']) {
+  for (const name of ['404-d.png', '404-m.png', 'home-d.png', 'home-m.png']) {
     fs.copyFileSync(path.join(GUIDE_DIR, 'images', name), path.join(dir, 'images', name));
   }
   fs.writeFileSync(path.join(dir, 'README.md'), readme);

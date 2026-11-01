@@ -254,6 +254,8 @@ def main() -> int:
             unkept.append(pic["name"])
     check(not too_wide, f"no picture exceeds its width limit (16 cm desktop, 6 cm phone) {too_wide}")
     check(not too_narrow, f"every phone picture is >= 5 cm wide, every desktop picture outside a pair >= 8 cm {too_narrow}")
+    sliced_in_table = [p["name"] for p in pictures if p["d"] in in_pair and (p["top"] or p["bottom"])]
+    check(not sliced_in_table, f"no sliced (cropped) picture sits inside a table {sliced_in_table}")
     check(not too_tall, f"no picture or slice is taller than 22 cm (fits one page) {too_tall}")
     check(not unkept, f"every picture and slice paragraph is keepNext (stays with its caption) {unkept}")
     widths = sorted(p["cm"] for p in pictures if p["name"].endswith("-m.png"))
