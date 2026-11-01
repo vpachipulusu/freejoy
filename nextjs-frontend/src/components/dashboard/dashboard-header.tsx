@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, User, Shield, ShieldCheck, LogOut } from 'lucide-react';
+import { LayoutDashboard, User, Shield, ShieldCheck, LogOut, ArrowLeft } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { logoutAction } from '@/app/actions/auth-actions';
+import { siteConfig } from '@/config/site';
+import { SITE_HOME_HREF, backToSiteLabel } from './nav-items';
 
 interface DashboardHeaderProps {
   user: {
@@ -81,6 +83,12 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
               </Link>
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem asChild>
+            <Link href={SITE_HOME_HREF} className="cursor-pointer">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              <span>{backToSiteLabel(siteConfig.name)}</span>
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={handleLogout}

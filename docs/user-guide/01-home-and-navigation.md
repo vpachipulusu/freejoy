@@ -38,7 +38,7 @@ Phone (390 wide):
 | **Categories** | The full list, scrolled to the category choices |
 | **Just added** | The full list sorted **Newest first** |
 | **How it works** | The About page, "how it works" section |
-| **Log in** | The sign-in page. You never need it to browse or to sign up for alerts |
+| **Log in** | The sign-in page. You never need it to browse or to sign up for alerts. When you are signed in it reads **Dashboard** and opens your dashboard instead |
 | **Get free alerts** | The alerts sign-up form ([page 4](04-email-alerts.md)) |
 
 The menu item for the page you are on is highlighted in mint.

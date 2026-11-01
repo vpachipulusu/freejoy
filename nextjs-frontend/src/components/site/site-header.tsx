@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { BrandMark } from './brand-mark';
 import { SITE_NAV_ITEMS } from './nav-items';
 import { SearchForm } from './search-form';
+import { useSignedIn } from './use-signed-in';
 
 export const PILL_CTA_CLASS =
   'inline-flex min-h-11 items-center justify-center rounded-pill bg-cta px-5 text-sm font-bold text-cta-foreground shadow-sm transition-colors hover:bg-cta-hover';
@@ -23,12 +24,18 @@ function isCurrentNav(href: string, pathname: string | null): boolean {
 /**
  * Public header (design screens 01-04 desktop, 05-07 mobile). Desktop: wordmark, nav, search pill,
  * Log in, coral alerts pill. Below 1024px: wordmark, a search toggle and a menu sheet (Radix
- * dialog, focus-trapped). Sign-in is optional everywhere: "Log in" is a plain link to /login.
+ * dialog, focus-trapped). Sign-in is optional everywhere: "Log in" is a plain link to /login. The markup is
+ * session-blind (static pages); after hydration `useSignedIn` swaps "Log in" for a "Dashboard" link when a
+ * session cookie exists. Any failure leaves "Log in".
  */
 export function SiteHeader() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const signedIn = useSignedIn();
+  const account = signedIn
+    ? { href: '/dashboard', label: 'Dashboard', prefetch: false }
+    : { href: '/login', label: 'Log in', prefetch: undefined };
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -60,10 +67,12 @@ export function SiteHeader() {
         <div className="ml-auto hidden flex-1 items-center justify-end gap-3 lg:flex">
           <SearchForm className="w-full max-w-[280px]" />
           <Link
-            href="/login"
-            className="inline-flex min-h-11 items-center rounded-pill px-3 text-sm font-semibold text-foreground hover:bg-muted"
+            href={account.href}
+            // The dashboard layout verifies the session and loads the profile: never prefetch it from public pages.
+            prefetch={account.prefetch}
+            className="inline-flex min-h-11 min-w-[6.5rem] items-center justify-center rounded-pill px-3 text-sm font-semibold text-foreground hover:bg-muted"
           >
-            Log in
+            {account.label}
           </Link>
           <Link href="/alerts" className={PILL_CTA_CLASS}>
             Get free alerts
@@ -128,11 +137,12 @@ export function SiteHeader() {
                     Get free alerts
                   </Link>
                   <Link
-                    href="/login"
+                    href={account.href}
+                    prefetch={account.prefetch}
                     onClick={() => setMenuOpen(false)}
                     className="inline-flex min-h-11 items-center justify-center rounded-pill border border-border px-5 text-sm font-semibold hover:bg-muted"
                   >
-                    Log in
+                    {account.label}
                   </Link>
                 </div>
               </DialogPrimitive.Content>
