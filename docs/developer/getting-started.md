@@ -156,12 +156,16 @@ uv run python -m commands.make_admin someone@example.com --role super_admin
   `DATABASE_URL_DIRECT`. The first line it prints names the environment and the database (`host:port/name`, never the
   password), so check that before reading the rest.
 - **Who.** The person must have signed in once: users are created by their first Firebase sign-in and the command never
-  creates one. The email is trimmed and matched ignoring case; no match prints "no user found" and exits 1. Every run
+  creates one. The email is trimmed and matched ignoring ASCII case; no match prints "no user found" and exits 1.
+  Only plain printable ASCII emails are accepted (an accented or look-alike letter is exit 2; grant such an account from
+  the admin Users page, which works by user id). Every run
   prints the matched user's id, stored email, `email_verified`, `created_at` and `last_login_at` (that user only), which
-  is why `--dry-run` first is the recommended habit. A user whose email is not verified is refused unless
-  `--allow-unverified` is passed.
+  is why `--dry-run` first is the recommended habit (the email is shown escaped, so look-alike and control
+  characters are visible). A user whose email is not verified is refused when a change would be made, unless
+  `--allow-unverified` is passed; a no-op on an unverified account succeeds with a warning line.
 - **Idempotent.** A user who already holds the role is left alone. A `super_admin` already covers the default `admin`
-  role (no change; demoting needs `--allow-demote`, and the last super admin is never demoted). An `admin` holding fewer
+  role (no change). Changing any `super_admin` to `admin` needs `--allow-demote`, and the last super admin is never
+  demoted. An `admin` holding fewer
   than all permissions is reported ("N of M") and kept as is; `--refresh-permissions` grants the full set. Hollow rows
   (a `super_admin` whose list is not exactly `["*"]`, or an `admin` with no usable permission) are repaired.
 
