@@ -1,4 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// React drops a state update on an unmounted component without a warning or a render, so a late answer is only
+// observable at the setter. Wrap useState so every call to a setter is recorded.
+const setterCalls = vi.hoisted(() => [] as unknown[]);
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    useState: (initial: unknown) => {
+      const [value, set] = (actual.useState as (i: unknown) => [unknown, (v: unknown) => void])(
+        initial
+      );
+      return [
+        value,
+        (next: unknown) => {
+          setterCalls.push(next);
+          set(next);
+        },
+      ];
+    },
+  };
+});
 import { renderHook, waitFor } from '@testing-library/react';
 import { SESSION_STATUS_URL, useSignedIn } from '@/components/site/use-signed-in';
 
@@ -16,6 +38,7 @@ describe('useSignedIn', () => {
   afterEach(() => {
     fetchMock.mockReset();
     vi.unstubAllGlobals();
+    setterCalls.length = 0;
   });
 
   it('starts signed out and asks the cosmetic route once, uncached, with the abort signal', async () => {
@@ -36,6 +59,7 @@ describe('useSignedIn', () => {
     fetchMock.mockResolvedValue(jsonResponse({ signedIn: true }));
     const { result } = renderHook(() => useSignedIn());
     await waitFor(() => expect(result.current).toBe(true));
+    expect(setterCalls).toEqual([true]);
   });
 
   it.each([
@@ -70,5 +94,7 @@ describe('useSignedIn', () => {
     resolveFetch(jsonResponse({ signedIn: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(result.current).toBe(false);
+    // The guard must stop the late answer before it reaches the state setter.
+    expect(setterCalls).toEqual([]);
   });
 });
