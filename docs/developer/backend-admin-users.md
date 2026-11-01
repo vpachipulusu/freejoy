@@ -105,7 +105,8 @@ Flags: `--role admin|super_admin` (default `admin`), `--dry-run`, `--allow-demot
   role and permissions) in the same transaction. A command has no signed-in admin, so `user_id` is null (the admin audit
   list shows an empty actor) and `metadata.actor` is `commands.make_admin`. Dry runs, refusals and no-ops write no row.
 - **Lock timeout.** The transaction starts with `SET LOCAL lock_timeout = '5s'`, so a row held by another session makes
-  the command fail fast through the normal failure path instead of waiting.
+  the command fail fast instead of waiting: it prints "the row is locked by another session; retry shortly", exits 1
+  and has committed nothing (detected by SQLSTATE `55P03`).
 - **Failures.** Database and connection errors (SQLAlchemy, OS) print the error type only, on stderr, and exit 1; a
   real write run says the change "may not have been written; re-run with --dry-run to check", a dry run says nothing was
   written. Other (programming) errors are not caught. `--verbose` adds the traceback on stderr.

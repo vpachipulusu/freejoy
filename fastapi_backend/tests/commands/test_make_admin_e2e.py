@@ -4,6 +4,7 @@ Same contract as ``tests/api/test_admin_users_e2e.py``: runs only when ``TEST_DA
 a throwaway local ``*_test`` database, which it rebuilds with the real Alembic migrations.
 """
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -313,7 +314,12 @@ async def test_a_row_locked_by_another_session_fails_fast(
         await holder.execute(
             text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": user_id}
         )
-        with pytest.raises(DBAPIError):
-            await command._run("ann@example.com", Options())
+        with pytest.raises(DBAPIError) as raised:
+            # A hard cap, so a regression in the timeout cannot hang the suite.
+            await asyncio.wait_for(
+                command._run("ann@example.com", Options()), timeout=20
+            )
+
+    assert command._sqlstate(raised.value) == "55P03"
 
     assert await rows(engine, "SELECT 1 FROM admin_users") == []

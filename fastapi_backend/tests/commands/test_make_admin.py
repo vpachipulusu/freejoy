@@ -966,7 +966,7 @@ def test_the_first_statement_of_the_transaction_sets_a_short_lock_timeout(
     assert session.executed == ["SET LOCAL lock_timeout = '5s'"]
 
 
-def test_a_lock_timeout_fails_fast_through_the_normal_failure_path(
+def test_an_error_on_the_first_statement_gets_the_generic_hint_and_no_write(
     session: RecordingSession, capsys: pytest.CaptureFixture[str]
 ) -> None:
     session.execute_error = OperationalError("SET", {}, Exception("lock timeout"))
@@ -976,3 +976,37 @@ def test_a_lock_timeout_fails_fast_through_the_normal_failure_path(
     assert code == 1
     assert "failed (OperationalError)" in capsys.readouterr().err
     assert session.store.writes == []
+
+
+class LockNotAvailable(Exception):
+    sqlstate = "55P03"
+
+
+def test_a_lock_timeout_says_the_row_is_locked_and_nothing_was_written(
+    session: RecordingSession, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session.execute_error = OperationalError("SELECT", {}, LockNotAvailable("busy"))
+
+    code = command.main(["ann@example.com"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "the row is locked by another session; retry shortly" in captured.err
+    assert "Nothing was written." in captured.err
+    assert "DATABASE_URL" not in captured.err and "alembic" not in captured.err
+    assert (session.commits, session.store.writes) == (0, [])
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (OperationalError("SELECT", {}, LockNotAvailable()), "55P03"),
+        (LockNotAvailable(), "55P03"),
+        (OperationalError("SELECT", {}, Exception("plain")), None),
+        (ConnectionRefusedError(), None),
+    ],
+)
+def test_the_sqlstate_is_found_on_the_error_or_its_driver_error(
+    error: Exception, expected: str | None
+) -> None:
+    assert command._sqlstate(error) == expected

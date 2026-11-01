@@ -163,9 +163,10 @@ uv run python -m commands.make_admin someone@example.com --role super_admin
   is why `--dry-run` first is the recommended habit (the email is shown escaped, so look-alike and control
   characters are visible). A user whose email is not verified is refused when a change would be made, unless
   `--allow-unverified` is passed; a no-op on an unverified account succeeds with a warning line.
-- **Idempotent.** A user who already holds the role is left alone. A `super_admin` already covers the default `admin`
-  role (no change). Changing any `super_admin` to `admin` needs `--allow-demote`, and the last super admin is never
-  demoted. An `admin` holding fewer
+- **Idempotent.** A user who already holds the role is left alone. A `super_admin` covers the default `admin` role
+  (no change) only when its list contains `*`; a hollow `super_admin` (no `*`) on the default role is refused, and is
+  repaired with `--role super_admin` or changed to `admin` with `--allow-demote`. Changing any `super_admin` to
+  `admin` needs `--allow-demote`, and the last super admin is never demoted. An `admin` holding fewer
   than all permissions is reported ("N of M") and kept as is; `--refresh-permissions` grants the full set. Hollow rows
   (a `super_admin` whose list is not exactly `["*"]`, or an `admin` with no usable permission) are repaired.
 

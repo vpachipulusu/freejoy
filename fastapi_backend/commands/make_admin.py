@@ -5,9 +5,10 @@
     uv run python -m commands.make_admin someone@example.com --role super_admin   # full access
 
 The user must already exist: users are created by their first Firebase sign-in, so ask the
-person to sign in once before running this. The email must be plain printable ASCII (exit 2 otherwise), is trimmed and compared ignoring
-ASCII case; an account whose stored email is not ASCII is never acted on (use the admin Users
-page, which works by user id).
+person to sign in once before running this. The email must be plain printable ASCII (exit 2
+otherwise), is trimmed and compared ignoring ASCII case; an account whose stored email is not
+ASCII is never acted on (use the admin Users page, which works by user id).
+
 Run it with ``--dry-run`` first: every run (dry or not) prints the matched user's id, stored
 email, ``email_verified``, ``created_at`` and ``last_login_at`` (that one user only), so you can
 confirm it is the person you meant before anything is written.
@@ -24,7 +25,9 @@ Idempotent, and it never silently narrows or widens an existing grant:
 
 * Same role again: "already ..., no change" (exit 0). An ``admin`` holding fewer than all permissions
   is left as it is and reported ("N of M"); ``--refresh-permissions`` grants the full set (admin only).
-* An existing ``super_admin`` already covers the default ``--role admin``: no change (exit 0).
+* An existing ``super_admin`` covers the default ``--role admin`` (no change, exit 0) only when
+  its list contains ``*``. A hollow ``super_admin`` (no ``*``) on the default role is refused:
+  repair it with ``--role super_admin``, or change it to ``admin`` with ``--allow-demote``.
   Changing any ``super_admin`` to ``admin`` needs ``--allow-demote`` and is still refused for the
   last super admin.
 * Another role is changed to the requested one and the report says so.
@@ -34,14 +37,15 @@ Idempotent, and it never silently narrows or widens an existing grant:
   ``--allow-unverified`` is given; a no-op on such an account exits 0 with a warning line.
 
 The target row is locked before it is read, as the API does, so the decision and the audit ``before``
-cannot go stale; the transaction sets ``lock_timeout`` to 5s so a held row fails fast. Each change also writes an ``audit_logs`` row (``admin.users.grant_admin``, resource
-``admin_users``) with no ``user_id`` (nobody is signed in) and ``metadata.actor`` set to
-``commands.make_admin``.
+cannot go stale; the transaction sets ``lock_timeout`` to 5s, so a row held by another session
+fails fast ("retry shortly", nothing committed). Each change also writes an ``audit_logs`` row
+(``admin.users.grant_admin``, resource ``admin_users``) with no ``user_id`` (nobody is signed in)
+and ``metadata.actor`` set to ``commands.make_admin``.
 
-Exit codes: 0 done, already done or dry run; 1 no such user, an ambiguous email, an unverified user,
-a refused demotion or a database failure; 2 bad arguments. The first line names the environment and the
-database (host, port, name; never the password). Failures print the error type only (``--verbose`` adds
-the traceback, on stderr).
+Exit codes: 0 done, already done or dry run; 1 no such user, an ambiguous email, a stored email
+that is not ASCII, an unverified user, a refused demotion or a database failure; 2 bad arguments.
+The first line names the environment and the database (host, port, name; never the password).
+Failures print the error type only (``--verbose`` adds the traceback, on stderr).
 """
 
 import argparse
@@ -77,6 +81,7 @@ SOURCE = "commands.make_admin"
 AUDIT_ACTION = "admin.users.grant_admin"
 AUDIT_RESOURCE = "admin_users"
 MAX_EMAIL_LENGTH = 254
+LOCK_NOT_AVAILABLE = "55P03"  # SQLSTATE lock_not_available, from lock_timeout
 LOCK_TIMEOUT = "5s"  # fail fast instead of waiting on a row another session holds
 EMAIL_SHAPE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
@@ -498,8 +503,28 @@ async def _run(email: str, options: Options) -> MakeAdminResult:
         return result
 
 
+def _sqlstate(error: BaseException) -> str | None:
+    """The SQLSTATE of a driver error, looking through SQLAlchemy's wrapper if any."""
+    for candidate in (error, getattr(error, "orig", None), error.__cause__):
+        for attribute in ("sqlstate", "pgcode"):
+            value = getattr(candidate, attribute, None)
+            if isinstance(value, str):
+                return value
+    return None
+
+
 def _fail(error: Exception, options: Options, *, verbose: bool) -> int:
     # A driver message can carry the host, user or a statement; only the type is safe.
+    if _sqlstate(error) == LOCK_NOT_AVAILABLE:
+        # Raised while taking the row lock, before any write: nothing was committed.
+        print(
+            "make-admin: the row is locked by another session; retry shortly. "
+            "Nothing was written.",
+            file=sys.stderr,
+        )
+        if verbose:
+            traceback.print_exception(error, file=sys.stderr)
+        return 1
     outcome = (
         "Nothing was written."
         if options.dry_run
