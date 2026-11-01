@@ -19,7 +19,7 @@ export function Sidebar({ children }: { children?: ReactNode }) {
   return (
     <aside
       aria-label="Workspace"
-      className="on-inverse fixed inset-y-0 start-0 z-40 flex w-60 flex-col gap-6 bg-feature px-3 py-4 text-background dark:text-foreground max-[899px]:hidden"
+      className="on-inverse fixed inset-y-0 start-0 z-40 flex w-60 flex-col gap-6 overflow-y-auto overscroll-contain bg-feature px-3 py-4 text-background dark:text-foreground max-[899px]:hidden"
     >
       <Link
         href="/dashboard"
