@@ -10,11 +10,13 @@
 2. **Check (report only).** For live offers it requests the offer ``source_url`` and the active
    affiliate links whose provider is ``direct``. It never requests a network provider's tracking
    link (that would record a click at the network). An unreachable destination is reported, never
-   expired or edited. URLs are re-validated, resolved here and pinned to a public address; see
-   ``app/core/url_probe.py``. ``--limit`` caps the URLs per run (least recently verified first).
+   expired or edited. URLs on a network tracking host are never requested either. URLs are
+   re-validated, resolved here and pinned to a public address; see ``app/core/url_probe.py``.
+   ``--limit`` caps the URLs per run (least recently verified first); ``--max-seconds`` bounds the
+   step, and a host that times out three times in a row is skipped.
 
 Output is counts. The offer ids, link ids and reason codes of the problems go to the log (JSON on
-stdout when run as a script) and, when ``SENTRY_DSN`` is set, to ONE Sentry summary event per run.
+stdout when run as a script) and, when ``SENTRY_DSN`` is set, to ONE Sentry summary event per run (a failed run sends one failure event).
 No URL, query string or header is ever printed or logged.
 
 Exit codes: 0 the run completed (also when URLs are unreachable); 1 the run itself failed (stderr

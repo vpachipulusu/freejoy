@@ -23,22 +23,23 @@ the rules live in the services, the SQL in the repository.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--skip-reachability` | off | Only expire. Makes no network request and sends no Sentry event. |
-| `--limit N` | 500 | Most URLs checked in one run. Offers least recently verified (`last_verified_at`, never-verified first) come first. |
-| `--batch-size N` | 200 | Offers per committed expiry batch. |
+| `--limit N` | 500 (1 to 5000) | Most URLs checked in one run. Offers least recently verified (`last_verified_at`) come first. |
+| `--batch-size N` | 200 (1 to 1000) | Offers per committed expiry batch. |
 | `--concurrency N` | 5 (1 to 20) | Requests in flight at once. A single host is never asked twice at the same time. |
+| `--max-seconds N` | 900 (at least 1) | Time limit for the reachability step. Requests still unfinished are cancelled and their targets are reported `inconclusive / not_checked`; the exit code stays 0. |
 
 | Exit | Meaning |
 | --- | --- |
 | `0` | The run completed. Unreachable URLs do **not** change this: they are a report, not a failure. |
-| `1` | The run itself failed (database error, or a failure while reading the URLs to check). stderr names the error **type** and how many offers were already expired before the failure (those batches stay committed; run it again to continue), like `prune_click_events`. |
-| `2` | Bad arguments (a value below 1, `--concurrency` above 20, an unknown flag). |
+| `1` | The run itself failed: any error before or during expiry, while reading the URLs, or while checking them. stderr names the error **type** (never its text) and how many offers were already expired before the failure (those batches stay committed; run it again to continue), like `prune_click_events`. "Check DATABASE_URL" is only added when nothing had been expired yet. A failure to close the database engine afterwards is ignored and cannot turn a finished run into a failure. |
+| `2` | Bad arguments (a value below 1, a value above its cap, an unknown flag). |
 
 stdout is a few count lines, for example:
 
 ```
 check-offer-health: expired 3 offer(s) whose end date had passed.
 check-offer-health: checked 40 URL(s): reachable 35, inconclusive 2, unreachable 2, refused 1.
-check-offer-health: problems by reason: client_error 1, dns_failure 1, blocked_address 1. Offer and link ids are in the log.
+check-offer-health: problems by reason: blocked_address 1, client_error 1, dns_failure 1. Offer and link ids are in the log.
 ```
 
 ## Step 1: expire ended offers
@@ -78,6 +79,14 @@ For offers that are `PUBLISHED` and not ended:
   [freejoy-affiliate.md](freejoy-affiliate.md#provider-host-allowlist)). A `direct` link that points elsewhere is
   skipped and counted, not requested.
 
+**A URL on a network's tracking host is never requested, whichever field holds it.** After the provider filter,
+`collect_targets` drops every source URL and every `direct` link whose validated host is, or is a subdomain of, any host
+in `affiliate_hosts.PROVIDER_HOSTS` (`awin1.com`, `linksynergy.com`, `prf.hn` and the rest, plus `www.awin1.com`,
+`click.linksynergy.com` and so on). That covers a source URL pasted from a tracking link and a `direct` link on a
+merchant whose website was set to a network host. They are counted in `Targets.tracking_host_skipped` and the summary
+line ("N URL(s) on a network tracking host were never requested"). The probe itself stays generic. Tests run every
+registered host and a `www.` subdomain through both fields, plus an e2e case.
+
 **A link of any network provider is never requested**: `awin`, `cj`, `partnerize`, `rakuten`, `tradedoubler`, anything
 not `direct`, and `sample` placeholders as well. Why: a tracking link is how the network counts a click. A request from
 a health check, even a `HEAD`, would register as a visit to the network, skew the click and conversion figures behind
@@ -91,7 +100,7 @@ reporting for those.
 | Status | Reason codes | When |
 | --- | --- | --- |
 | `reachable` | `ok`, `redirect` | 2xx, or 3xx (the redirect is not followed) |
-| `inconclusive` | `auth_required`, `method_not_allowed`, `rate_limited`, `probe_error` | 401 or 403 (usually a bot filter), 405 after a `GET` retry, 429, or our own unexpected error |
+| `inconclusive` | `auth_required`, `method_not_allowed`, `rate_limited`, `probe_error`, `host_skipped`, `not_checked` | 401 or 403 (usually a bot filter), 405 after a `GET` retry, 429, our own unexpected error, a request skipped by the host circuit breaker, or one cut off by `--max-seconds` |
 | `unreachable` | `dns_failure`, `connection_error`, `timeout`, `tls_error`, `client_error`, `server_error` | DNS did not resolve, connection or TLS failed, a deadline passed, any other 4xx, any 5xx |
 | `refused` | `invalid_url`, `blocked_address` | never requested: the stored URL failed validation, or its name resolves to a non-public address |
 
@@ -126,7 +135,11 @@ The URLs are written by admins and the command runs inside your network, so each
    line and headers have arrived.
 7. **Deadlines.** Connect 5 s, read 10 s, and 20 s for the whole check. `--concurrency` bounds requests in flight and a
    per-host lock keeps the load on one merchant to one request at a time.
-8. **Neutral User-Agent:** `<Brand>-LinkCheck/1.0 (+<PUBLIC_SITE_URL>)`, the brand taken from `APP_NAME`.
+8. **Bounded run.** After 3 consecutive `timeout` or `connection_error` results for one host (`MAX_HOST_FAILURES`), that
+   host's remaining targets are not requested and are reported `inconclusive / host_skipped`; any other result resets
+   the count. `--max-seconds` (default 900) caps the whole reachability step with `asyncio.timeout`: what finished is
+   reported, the rest is `inconclusive / not_checked`, and the exit code is still 0. Both counts appear in the summary.
+9. **Neutral User-Agent:** `<Brand>-LinkCheck/1.0 (+<PUBLIC_SITE_URL>)`, the brand taken from `APP_NAME`.
 
 Verified by hand against the real network (not part of the test suite): a public site answers `reachable`, a name that
 resolves to `127.0.0.1` is `refused/blocked_address` with no connection made, an unknown name is `dns_failure` and an
@@ -143,8 +156,12 @@ expired certificate is `tls_error`.
   counts, a reason histogram, and up to 50 problems as offer id, link id, target kind, status and reason code (plus how
   many more were omitted). It goes through `app.core.sentry.report_message`, so `scrub_event` applies as for every other
   event, and Sentry is started only after all requests are done so the HTTP client's breadcrumbs (which hold URLs) can
-  never be attached. No `SENTRY_DSN`, no event, no error. A run that fails sends no event: the exit code is the
-  signal. If sending fails the run still exits 0 and stderr names the error type.
+  never be attached (`HttpxUrlProbe` must not be used in a process where Sentry is already initialised, for the
+  same reason). No `SENTRY_DSN`, no event, no error. If sending fails, stderr names the error type and the run's exit
+  code is unchanged.
+- **Failed run.** A run that exits 1 sends **one** event too, after the last request has finished: constant message
+  `Offer health check run failed`, context `offer_health` holding only `stage`, `cause` (the exception type name) and
+  `expired` (offers already committed). No URL, id or error text. Same no-op when Sentry is off.
 
 ## Scheduling
 
@@ -160,7 +177,12 @@ exists. Pair it with `commands.prune_click_events` and `commands.purge_subscribe
   is reported again on every run until it is fixed.
 - A site that answers every request with a 200 error page, or that blocks bots with a 403, is not detected (the latter
   is `inconclusive`, never a problem).
-- Redirects are not followed (see above), and network-provider links are never checked.
+- A redirect that leads to a dead page reads as reachable: redirects are not followed (see above). Network-provider
+  links and URLs on tracking hosts are never checked.
+- The per-host lock and the failure breaker are keyed on the host **name**, so subdomains of one domain (or two names
+  on one address) can be probed in parallel, bounded by `--concurrency`.
+- The `GET` fallback after a 405 or 501 sends the stored URL including its query string, as `HEAD` does; the response
+  body is never read but the origin's access log will contain the query.
 - `--limit` bounds the work per run and orders by staleness, but with no stored state a run that is cut short always
   starts from the same end of the list. Raise `--limit` rather than expect rotation.
 
