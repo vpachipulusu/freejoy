@@ -144,8 +144,11 @@ describe('activeTabHref', () => {
     expect(activeTabHref(null)).toBeNull();
   });
 
-  it('has no anchor-only tab, which could never be reported as current', () => {
-    expect(SITE_TAB_ITEMS.filter((item) => item.href.includes('#'))).toEqual([]);
-    expect(activeTabHref('/freebies')).toBe('/freebies');
+  it('reports the tab for each tab path and for pages beneath it, whatever the other tabs are', () => {
+    for (const item of SITE_TAB_ITEMS) {
+      expect(activeTabHref(item.href)).toBe(item.href);
+    }
+    expect(activeTabHref('/alerts/confirm')).toBe('/alerts');
+    expect(activeTabHref('/saved/anything')).toBe('/saved');
   });
 });

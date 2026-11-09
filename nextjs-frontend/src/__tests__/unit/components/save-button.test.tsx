@@ -43,10 +43,33 @@ describe('SaveButton', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save Glow cream sample' }));
 
-    const pressed = screen.getByRole('button', { name: 'Remove Glow cream sample from saved' });
+    const pressed = screen.getByRole('button', { name: 'Save Glow cream sample', pressed: true });
     expect(pressed).toHaveAttribute('aria-pressed', 'true');
     expect(storedSlugs()).toEqual(['glow-cream']);
     expect(window.localStorage.getItem(SAVED_STORAGE_KEY)).not.toContain('Glow cream sample');
+  });
+
+  it('keeps one constant name, saved or not: aria-pressed carries the state, the label never flips', async () => {
+    const user = userEvent.setup();
+    render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
+    const button = screen.getByRole('button');
+
+    expect(button).toHaveAttribute('aria-label', 'Save Glow cream sample');
+    await user.click(button);
+
+    expect(button).toHaveAttribute('aria-label', 'Save Glow cream sample');
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument();
+  });
+
+  it('names its own hover group, so hovering the card does not light the heart', () => {
+    render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
+    const button = screen.getByRole('button');
+    const disc = button.querySelector('span')!;
+
+    expect(button).toHaveClass('group/save');
+    expect(disc.className).toContain('group-hover/save:bg-muted');
+    expect(disc.className).not.toMatch(/(^|\s)group-hover:/);
   });
 
   it('removes the offer on a second click', async () => {
@@ -54,7 +77,7 @@ describe('SaveButton', () => {
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
 
     await user.click(screen.getByRole('button', { name: /^Save/ }));
-    await user.click(screen.getByRole('button', { name: /^Remove/ }));
+    await user.click(screen.getByRole('button', { name: /^Save/, pressed: true }));
 
     expect(screen.getByRole('button', { name: 'Save Glow cream sample' })).toHaveAttribute(
       'aria-pressed',
@@ -97,7 +120,9 @@ describe('SaveButton', () => {
 
     await user.click(screen.getAllByRole('button', { name: /^Save Glow/ })[0]);
 
-    expect(screen.getAllByRole('button', { name: /^Remove Glow cream sample/ })).toHaveLength(2);
+    expect(
+      screen.getAllByRole('button', { name: 'Save Glow cream sample', pressed: true })
+    ).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Save Other offer' })).toHaveAttribute(
       'aria-pressed',
       'false'
@@ -154,6 +179,7 @@ describe('SaveButton', () => {
 
     expect(html).toContain('aria-pressed="false"');
     expect(html).toContain('aria-label="Save Glow cream sample"');
+    expect(html).not.toContain('Remove');
   });
 
   it('hydrates server markup without a mismatch, then shows the saved state', async () => {
@@ -185,7 +211,7 @@ describe('SaveButton', () => {
 
     await user.click(screen.getByRole('button', { name: /^Save/ }));
     expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByRole('button', { name: /^Remove/ }));
+    await user.click(screen.getByRole('button', { name: /^Save/, pressed: true }));
     expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'false');
 
     // Leave the shared store as storage-backed for the tests that follow.

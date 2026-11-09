@@ -1,5 +1,7 @@
 /**
- * The saved-offers list (FREEJ-28): a browser-local store of offer slugs. Nothing leaves the browser.
+ * The saved-offers list (FREEJ-28): a browser-local store of offer slugs. It is kept only in this browser:
+ * there is no account and no database. The one place the slugs go is the Saved page, which sends them to the
+ * `loadSavedOffersAction` server action to look the offers up (the action keeps nothing).
  *
  * Contract (documented in docs/developer/freejoy-frontend.md):
  * - One versioned key, `freejoy.saved.v1`, holding `{ "v": 1, "slugs": ["glow-cream", ...] }`: slugs
@@ -12,9 +14,9 @@
  *   list and writes keep the list in memory for this page, so the heart still works until the tab closes.
  * - It is an external store for `useSyncExternalStore`: `subscribeSaved` / `getSavedSnapshot` /
  *   `getServerSavedSnapshot`. The snapshot is a frozen array that keeps its identity until the stored
- *   value changes. Changes made in another tab arrive through the `storage` event.
+ *   value changes. Changes made in another tab arrive through the `storage` event, and a page restored from the
+ *   back/forward cache re-reads on `pageshow`.
  */
-import { z } from 'zod';
 import { isValidSlug } from '@/lib/catalogue/slug';
 
 export const SAVED_STORAGE_KEY = 'freejoy.saved.v1';
@@ -24,7 +26,12 @@ const STORAGE_VERSION = 1;
 /** 200 slugs of at most 100 characters is about 21 000 characters; anything bigger is not ours. */
 const MAX_RAW_LENGTH = 32_768;
 
-const envelopeSchema = z.object({ v: z.literal(STORAGE_VERSION), slugs: z.array(z.unknown()) });
+/** The envelope check, by hand: a schema library would ship to every catalogue page for four conditions. */
+function slugsOf(json: unknown): readonly unknown[] | null {
+  if (typeof json !== 'object' || json === null) return null;
+  const { v, slugs } = json as { v?: unknown; slugs?: unknown };
+  return v === STORAGE_VERSION && Array.isArray(slugs) ? slugs : null;
+}
 
 type SavedList = readonly string[];
 
@@ -54,10 +61,10 @@ function parseStored(raw: string | null): SavedList {
   } catch {
     return EMPTY;
   }
-  const envelope = envelopeSchema.safeParse(json);
-  if (!envelope.success) return EMPTY;
+  const entries = slugsOf(json);
+  if (entries === null) return EMPTY;
   const seen = new Set<string>();
-  for (const entry of envelope.data.slugs) {
+  for (const entry of entries) {
     if (isValidSlug(entry)) seen.add(entry);
   }
   return freeze(newest([...seen]));
@@ -117,13 +124,17 @@ export function removeSaved(slug: string): void {
   removeSavedMany([slug]);
 }
 
-/** Drops every listed slug in one write (used to prune offers that no longer exist). */
-export function removeSavedMany(slugs: readonly string[]): void {
+/**
+ * Drops every listed slug in one write (used to prune offers that no longer exist) and returns how many it
+ * really removed: a slug already gone (the visitor removed it meanwhile) does not count.
+ */
+export function removeSavedMany(slugs: readonly string[]): number {
   const current = getSavedSnapshot();
   const drop = new Set(slugs);
   const kept = current.filter((slug) => !drop.has(slug));
-  if (kept.length === current.length) return;
+  if (kept.length === current.length) return 0;
   commit(kept);
+  return current.length - kept.length;
 }
 
 /** Saves the slug if it is not saved, removes it if it is. Returns whether it is saved now. */
@@ -143,12 +154,23 @@ function onStorageEvent(event: StorageEvent): void {
   notify();
 }
 
+/** A page restored from the back/forward cache missed every event while it was away: read again. */
+function onPageShow(event: PageTransitionEvent): void {
+  if (event.persisted) notify();
+}
+
 /** For `useSyncExternalStore`. Listens for other tabs only while somebody is subscribed. */
 export function subscribeSaved(listener: () => void): () => void {
-  if (listeners.size === 0) window.addEventListener('storage', onStorageEvent);
+  if (listeners.size === 0) {
+    window.addEventListener('storage', onStorageEvent);
+    window.addEventListener('pageshow', onPageShow);
+  }
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) window.removeEventListener('storage', onStorageEvent);
+    if (listeners.size === 0) {
+      window.removeEventListener('storage', onStorageEvent);
+      window.removeEventListener('pageshow', onPageShow);
+    }
   };
 }

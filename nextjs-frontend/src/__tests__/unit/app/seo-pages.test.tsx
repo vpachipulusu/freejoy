@@ -258,6 +258,16 @@ describe('API offers that have ended', () => {
     });
     await expect(OfferPage(offerParams)).rejects.toThrow('NEXT_NOT_FOUND');
   });
+
+  it('treats an offer it cannot read exactly like one that is not found', async () => {
+    mocks.lookup.mockResolvedValue({ kind: 'unreadable' });
+
+    expect(await offerMetadata(offerParams)).toMatchObject({
+      title: 'Offer not found',
+      robots: { index: false },
+    });
+    await expect(OfferPage(offerParams)).rejects.toThrow('NEXT_NOT_FOUND');
+  });
 });
 
 describe('page JSON-LD', () => {

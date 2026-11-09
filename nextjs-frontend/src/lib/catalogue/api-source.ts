@@ -127,7 +127,8 @@ const lookupOnce = cache(async (slug: string): Promise<OfferLookup> => {
   if (result.kind === 'not_found') return { kind: 'not_found' };
   if (result.kind === 'found') {
     const offer = mapOffer(result.offer);
-    return offer ? { kind: 'found', offer } : { kind: 'not_found' };
+    // Not "not found": the API has the offer, this site just cannot read it (yet). Callers must not discard it.
+    return offer ? { kind: 'found', offer } : { kind: 'unreadable' };
   }
   const ended = result.ended ? mapEndedOffer(result.ended) : null;
   return ended ? { kind: 'ended', ended } : { kind: 'not_found' };

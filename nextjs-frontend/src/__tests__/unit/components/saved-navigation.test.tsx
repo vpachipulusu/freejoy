@@ -73,6 +73,33 @@ describe('activeTabHref for the Saved page', () => {
   });
 });
 
+describe('the desktop header at 1024px to 1310px (H3)', () => {
+  it('keeps the search box shrinkable but not squashed, and lets nothing else wrap or shrink', () => {
+    render(<SiteHeader />);
+    const search = screen.getAllByRole('search')[0];
+    const saved = screen.getAllByRole('link', { name: 'Saved' })[0];
+    const cta = screen.getAllByRole('link', { name: 'Get free alerts' })[0];
+    const account = screen.getAllByRole('link', { name: 'Log in' })[0];
+
+    expect(search).toHaveClass('min-w-0', 'flex-1', 'max-w-[280px]');
+    expect(search).not.toHaveClass('w-full');
+    for (const link of [saved, cta, account]) {
+      expect(link).toHaveClass('shrink-0', 'whitespace-nowrap');
+    }
+    expect(saved.querySelector('svg')).toHaveClass('shrink-0');
+  });
+
+  it('hides "How it works" from the header row below 1200px', () => {
+    render(<SiteHeader />);
+    const nav = screen.getAllByRole('navigation', { name: 'Main' })[0];
+    const item = within(nav).getByRole('link', { name: 'How it works' }).closest('li')!;
+
+    expect(item).toHaveClass('hidden', 'min-[1200px]:list-item');
+    const allFreebies = within(nav).getByRole('link', { name: 'All freebies' }).closest('li')!;
+    expect(allFreebies).not.toHaveClass('hidden');
+  });
+});
+
 describe('the desktop header entry point', () => {
   it('offers a Saved link to /saved next to Log in', () => {
     render(<SiteHeader />);

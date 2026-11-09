@@ -150,3 +150,36 @@ export const SORT_LABELS: Record<SortKey, string> = {
 };
 
 export const CATALOGUE_PAGE_SIZE = 12;
+
+/** What an offer card reads. The Saved page sends only this much of an offer to the browser. */
+export type CardOffer = Pick<
+  Offer,
+  | 'id'
+  | 'slug'
+  | 'title'
+  | 'offerType'
+  | 'image'
+  | 'postage'
+  | 'freshness'
+  | 'demo'
+  | 'source'
+  | 'merchantSlug'
+  | 'merchant'
+>;
+
+/** The card fields of an offer, copied so nothing else travels with them. */
+export function toCardOffer(offer: Offer): CardOffer {
+  return {
+    id: offer.id,
+    slug: offer.slug,
+    title: offer.title,
+    offerType: offer.offerType,
+    image: offer.image,
+    postage: offer.postage,
+    freshness: offer.freshness,
+    demo: offer.demo,
+    source: offer.source,
+    merchantSlug: offer.merchantSlug,
+    merchant: offer.merchant,
+  };
+}

@@ -4,18 +4,19 @@ import { postageText } from '@/components/offer/offer-format';
 import { SaveButton } from '@/components/saved/save-button';
 import { cn } from '@/lib/utils';
 import { displayFreshness } from '@/lib/catalogue/freshness';
-import type { Merchant, Offer } from '@/lib/catalogue/types';
+import type { CardOffer, Merchant } from '@/lib/catalogue/types';
 import { DemoBadge } from './demo-badge';
 import { OfferArt } from './offer-art';
 import { OfferTypeBadge } from './offer-type-badge';
 
 interface OfferCardProps {
-  offer: Offer;
+  /** Only the card fields: the Saved page sends no more than this to the browser. */
+  offer: CardOffer;
   merchant: Merchant;
   className?: string;
 }
 
-export function offerHref(offer: Offer): string {
+export function offerHref(offer: Pick<CardOffer, 'slug'>): string {
   return `/freebies/${offer.slug}`;
 }
 
@@ -31,19 +32,23 @@ export function OfferCard({ offer, merchant, className }: OfferCardProps) {
   return (
     <article
       className={cn(
-        'focus-proxy group relative flex flex-col rounded-card border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow-md',
+        'focus-proxy group/card relative flex flex-col rounded-card border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow-md',
         className
       )}
     >
       <div className="relative">
-        <OfferArt image={offer.image} />
-        {/* Smaller on phones so the badge and the heart both fit a narrow two-column card. */}
+        {/* The art and the demo badge share a box of their own, so the type badge below can leave the art. */}
+        <div className="relative">
+          <OfferArt image={offer.image} />
+          {/* The heart owns the top-right corner (design screens 05, 06); the demo badge takes the bottom-right. */}
+          {offer.demo && <DemoBadge className="absolute bottom-3 right-3" />}
+        </div>
+        {/* Over the art's top-left; under 375px (a card too narrow for badge and heart side by side) it drops
+            below the art instead, as a bordered pill. */}
         <OfferTypeBadge
           type={offer.offerType}
-          className="absolute left-2 top-2 max-w-[calc(100%-2.5rem)] px-1.5 text-[10px] tracking-normal sm:left-3 sm:top-3 sm:px-3 sm:text-[11px] sm:tracking-wide"
+          className="absolute left-2 top-2 whitespace-nowrap px-1.5 text-[10px] tracking-normal max-[374px]:static max-[374px]:mt-2 max-[374px]:border max-[374px]:border-border sm:left-3 sm:top-3 sm:px-3 sm:text-[11px] sm:tracking-wide"
         />
-        {/* The heart owns the top-right corner (design screens 05, 06); the demo badge takes the bottom-right. */}
-        {offer.demo && <DemoBadge className="absolute bottom-3 right-3" />}
         <SaveButton slug={offer.slug} title={offer.title} className="absolute right-0 top-0" />
       </div>
       <p className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -72,7 +77,7 @@ export function OfferCard({ offer, merchant, className }: OfferCardProps) {
         ) : (
           <span />
         )}
-        <span className="inline-flex items-center gap-1 font-bold text-accent-ink group-hover:underline">
+        <span className="inline-flex items-center gap-1 font-bold text-accent-ink group-hover/card:underline group-has-[button:hover]/card:no-underline">
           View freebie
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
@@ -82,7 +87,7 @@ export function OfferCard({ offer, merchant, className }: OfferCardProps) {
 }
 
 interface OfferGridProps {
-  offers: Offer[];
+  offers: CardOffer[];
   merchants: Merchant[];
   className?: string;
 }

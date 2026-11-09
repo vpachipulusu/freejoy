@@ -29,15 +29,16 @@ export function SaveButton({ slug, title, className }: SaveButtonProps) {
     <button
       type="button"
       aria-pressed={saved}
-      aria-label={saved ? `Remove ${title} from saved` : `Save ${title}`}
+      // One constant name: `aria-pressed` carries the state, so the label must not flip with it.
+      aria-label={`Save ${title}`}
       onClick={() => toggleSaved(slug)}
       className={cn(
-        'group relative z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill text-foreground motion-safe:transition-transform motion-safe:active:scale-90',
+        'group/save relative z-10 inline-flex h-11 w-11 items-center justify-center rounded-pill text-foreground motion-safe:transition-transform motion-safe:active:scale-90',
         className
       )}
     >
       {/* The tap target is 44px; the white disc the visitor sees is 32px, as in the design, so it fits a narrow card. */}
-      <span className="flex h-8 w-8 items-center justify-center rounded-pill border border-border bg-card shadow-sm group-hover:bg-muted">
+      <span className="flex h-8 w-8 items-center justify-center rounded-pill border border-border bg-card shadow-sm group-hover/save:bg-muted">
         <Heart
           aria-hidden="true"
           className={cn('h-4 w-4', saved ? 'fill-cta stroke-foreground' : 'fill-transparent')}

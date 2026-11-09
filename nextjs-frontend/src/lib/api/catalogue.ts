@@ -2,7 +2,7 @@ import 'server-only';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { unstable_cache } from 'next/cache';
-import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
+import { CatalogueRateLimitedError, CatalogueUnavailableError } from '@/lib/catalogue/errors';
 import { isValidSlug } from '@/lib/catalogue/slug';
 import { logger } from '@/lib/logger';
 import { callBackend, readTrustedClientIp, type ApiResult } from './server';
@@ -84,6 +84,7 @@ function timeoutSignal(): AbortSignal {
 /** Logs the failure (never the search text) and throws the typed error callers turn into an error state. */
 function fail(operation: string, result: Extract<ApiResult<unknown>, { success: false }>): never {
   logger.warn('Catalogue read failed', { operation, status: result.status, error: result.error });
+  if (result.status === 429) throw new CatalogueRateLimitedError();
   throw new CatalogueUnavailableError();
 }
 
@@ -131,17 +132,29 @@ function parseEnded(body: unknown): ExpiredOfferData | null {
   return { slug: data.slug, title: data.title, category, ended_at: endedAt };
 }
 
+/** The FastAPI error envelope: `{ success: false, ... }`. */
+function isBackendEnvelope(body: unknown): boolean {
+  return (
+    typeof body === 'object' && body !== null && (body as { success?: unknown }).success === false
+  );
+}
+
 async function loadOffer(slug: string): Promise<OfferReadResult> {
-  // callBackend folds an error body into a message; the 410 stub is the one body we need, so keep it.
-  let goneBody: unknown;
+  // callBackend folds an error body into a message; the 404 and 410 bodies are the ones we need, so keep them.
+  let errorBody: unknown;
   const result = await callBackend(async (client) => {
     const response = await readOffer({ client, path: { slug }, signal: timeoutSignal() });
-    if (response.response?.status === 410) goneBody = response.error;
+    const status = response.response?.status;
+    if (status === 404 || status === 410) errorBody = response.error;
     return response;
   }, backendOptions());
   if (result.success) return { kind: 'found', offer: result.data };
-  if (result.status === 404) return { kind: 'not_found' };
-  if (result.status === 410) return { kind: 'gone', ended: parseEnded(goneBody) };
+  // Only the backend's own envelope is a definitive "no such offer". A 404 from anything else in the path (a
+  // proxy's HTML page, a wrong base URL) is an outage: the Saved page must never prune on it.
+  if (result.status === 404) {
+    return isBackendEnvelope(errorBody) ? { kind: 'not_found' } : fail('read_offer', result);
+  }
+  if (result.status === 410) return { kind: 'gone', ended: parseEnded(errorBody) };
   return fail('read_offer', result);
 }
 

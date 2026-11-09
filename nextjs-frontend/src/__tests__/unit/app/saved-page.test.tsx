@@ -13,6 +13,7 @@ import { DISALLOWED_PATHS } from '@/lib/seo/robots';
 import { buildSitemapEntries } from '@/lib/seo/sitemap';
 import { CATEGORIES, FIXTURE_TODAY, OFFERS } from '@/lib/catalogue/fixtures';
 import { SAVED_STORAGE_KEY } from '@/lib/saved/saved-store';
+import { toCardOffer } from '@/lib/catalogue/types';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -61,7 +62,7 @@ describe('the Saved page', () => {
     window.localStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify({ v: 1, slugs: [offer.slug] }));
     mocks.load.mockResolvedValue({
       success: true,
-      data: { offers: [offer], missing: [], unavailable: [] },
+      data: { offers: [toCardOffer(offer)], missing: [], unavailable: [] },
     });
 
     render(<SavedPage />);
@@ -70,9 +71,30 @@ describe('the Saved page', () => {
       'article'
     );
     expect(card).toHaveClass('focus-proxy');
-    expect(
-      screen.getByRole('button', { name: `Remove ${offer.title} from saved` })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Save ${offer.title}`, pressed: true })).toBeInTheDocument();
+  });
+
+  it('runs the headings 1, 2, 3 without a gap once cards are listed', async () => {
+    const offer = OFFERS.find((item) => item.status === 'published')!;
+    window.localStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify({ v: 1, slugs: [offer.slug] }));
+    mocks.load.mockResolvedValue({
+      success: true,
+      data: { offers: [toCardOffer(offer)], missing: [], unavailable: [] },
+    });
+    const { container } = render(<SavedPage />);
+    await screen.findByRole('heading', { level: 3, name: offer.title });
+
+    const levels = [...container.querySelectorAll('h1, h2, h3')].map((heading) =>
+      Number(heading.tagName.slice(1))
+    );
+
+    expect(levels).toEqual([1, 2, 3]);
+  });
+
+  it('reserves room for the list so the footer does not jump when it arrives', () => {
+    const { container } = render(<SavedPage />);
+
+    expect(container.querySelector('[class*="min-h-"]')).not.toBeNull();
   });
 
   it('never reads cookies or request headers, so nothing about the visitor reaches the server render', () => {

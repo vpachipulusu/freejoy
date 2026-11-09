@@ -8,9 +8,12 @@ const logger = vi.hoisted(() => ({
   debug: vi.fn(),
 }));
 vi.mock('@/lib/logger', () => ({ logger }));
+const ip = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('@/lib/api/server', () => ({ readTrustedClientIp: ip.read }));
 
 import { loadSavedOffersAction } from '@/app/actions/saved-actions';
-import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
+import { resetRateLimitStore } from '@/lib/middleware/rate-limit';
+import { CatalogueRateLimitedError, CatalogueUnavailableError } from '@/lib/catalogue/errors';
 import { fixtureSource } from '@/lib/catalogue/fixture-source';
 import { FIXTURE_TODAY, MERCHANTS, OFFERS } from '@/lib/catalogue/fixtures';
 import { SAVED_OFFERS_REQUEST_LIMIT } from '@/lib/saved/limits';
@@ -26,7 +29,14 @@ function dataOf(result: Awaited<ReturnType<typeof loadSavedOffersAction>>) {
   return result.data;
 }
 
+beforeEach(() => {
+  resetRateLimitStore();
+  ip.read.mockReset();
+  ip.read.mockResolvedValue(undefined);
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   Object.values(logger).forEach((fn) => fn.mockReset());
 });
@@ -195,6 +205,130 @@ describe('loadSavedOffersAction: load on the backend', () => {
     await loadSavedOffersAction(slugs);
 
     expect(peak).toBeGreaterThan(1);
-    expect(peak).toBeLessThanOrEqual(6);
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('loadSavedOffersAction: it cannot be used to flood the backend', () => {
+  const manySlugs = (count: number) =>
+    Array.from({ length: count }, (_, index) => `offer-${index}`);
+
+  it('asks for at most 24 slugs a call', () => {
+    expect(SAVED_OFFERS_REQUEST_LIMIT).toBe(24);
+  });
+
+  it('stops reading at the first rate-limited answer and calls every other slug unavailable', async () => {
+    const lookup = vi
+      .spyOn(fixtureSource, 'lookupOffer')
+      .mockImplementationOnce(async () => {
+        throw new CatalogueRateLimitedError();
+      })
+      .mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { kind: 'not_found' };
+      });
+
+    const result = dataOf(await loadSavedOffersAction(manySlugs(24)));
+
+    // Only the four reads that were already under way finish; nothing is started after the 429.
+    expect(lookup).toHaveBeenCalledTimes(4);
+    expect(result.missing).toHaveLength(3);
+    expect(result.unavailable).toHaveLength(21);
+    expect(result.offers).toEqual([]);
+  });
+
+  it('refuses the 7th call a minute from one address with the curated failure and no reads', async () => {
+    ip.read.mockResolvedValue('203.0.113.7');
+    const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (let call = 0; call < 6; call += 1) {
+      expect((await loadSavedOffersAction(['some-offer'])).success).toBe(true);
+    }
+    lookup.mockClear();
+    const today = vi.spyOn(fixtureSource, 'getToday');
+
+    const refused = await loadSavedOffersAction(['some-offer']);
+
+    expect(refused).toEqual({ success: false, error: expect.any(String) });
+    expect(lookup).not.toHaveBeenCalled();
+    expect(today).not.toHaveBeenCalled();
+    ip.read.mockResolvedValue('203.0.113.8');
+    expect((await loadSavedOffersAction(['some-offer'])).success).toBe(true);
+  });
+
+  it('shares one bucket when there is no trusted address header', async () => {
+    ip.read.mockRejectedValue(new Error('no request scope'));
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (let call = 0; call < 6; call += 1) await loadSavedOffersAction(['some-offer']);
+
+    expect((await loadSavedOffersAction(['some-offer'])).success).toBe(false);
+  });
+
+  it('with every read failing, 24 slugs cost at most 8 reads', async () => {
+    const lookup = vi
+      .spyOn(fixtureSource, 'lookupOffer')
+      .mockRejectedValue(new CatalogueUnavailableError());
+
+    const result = dataOf(await loadSavedOffersAction(manySlugs(24)));
+
+    expect(lookup.mock.calls.length).toBeLessThanOrEqual(8);
+    expect(result.unavailable).toHaveLength(24);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('after about 8 seconds takes no new slug and calls the rest unavailable', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 9_000);
+      return { kind: 'not_found' };
+    });
+
+    const result = dataOf(await loadSavedOffersAction(manySlugs(24)));
+
+    // The first read burns the whole budget; no later slug is asked about.
+    expect(lookup.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(result.missing.length + result.unavailable.length).toBe(24);
+    expect(result.unavailable.length).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe('loadSavedOffersAction: what counts as gone', () => {
+  it('calls an offer the catalogue could not read unavailable, never missing', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'unreadable' });
+
+    const result = dataOf(await loadSavedOffersAction(['new-kind-of-offer']));
+
+    expect(result.unavailable).toEqual(['new-kind-of-offer']);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('calls an answer for a different slug missing, not a card for the wrong offer', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'found', offer: live[0] });
+
+    const result = dataOf(await loadSavedOffersAction(['some-other-slug']));
+
+    expect(result.offers).toEqual([]);
+    expect(result.missing).toEqual(['some-other-slug']);
+  });
+});
+
+describe('loadSavedOffersAction: only what a card needs leaves the server', () => {
+  it('returns a card-shaped projection, not the whole offer', async () => {
+    const result = dataOf(await loadSavedOffersAction([live[0].slug]));
+
+    expect(Object.keys(result.offers[0]).sort()).toEqual(
+      [
+        'demo',
+        'freshness',
+        'id',
+        'image',
+        'merchant',
+        'merchantSlug',
+        'offerType',
+        'postage',
+        'slug',
+        'source',
+        'title',
+      ].sort()
+    );
   });
 });

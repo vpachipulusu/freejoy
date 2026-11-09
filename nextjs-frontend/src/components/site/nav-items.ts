@@ -3,6 +3,8 @@ import { Bell, Heart, Home, Search, type LucideIcon } from 'lucide-react';
 export interface SiteNavItem {
   href: string;
   label: string;
+  /** Left out of the header row below 1200px, where the row is full (the menu sheet still lists it). */
+  wideOnly?: boolean;
 }
 
 export interface SiteTabItem extends SiteNavItem {
@@ -14,7 +16,7 @@ export const SITE_NAV_ITEMS: ReadonlyArray<SiteNavItem> = [
   { href: '/freebies', label: 'All freebies' },
   { href: '/freebies#categories', label: 'Categories' },
   { href: '/freebies?sort=newest', label: 'Just added' },
-  { href: '/about#how-it-works', label: 'How it works' },
+  { href: '/about#how-it-works', label: 'How it works', wideOnly: true },
 ];
 
 /** The Saved list (FREEJ-28): the header's desktop entry point and the third phone tab. */
@@ -45,7 +47,6 @@ export function activeTabHref(pathname: string | null): string | null {
   if (!pathname) return null;
   let best: string | null = null;
   for (const { href } of SITE_TAB_ITEMS) {
-    if (href.includes('#')) continue;
     const matches = pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
     if (matches && (best === null || href.length > best.length)) best = href;
   }

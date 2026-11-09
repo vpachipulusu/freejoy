@@ -14,6 +14,25 @@ const EVENT = {
   transaction: 'GET /alerts?email=victim%40example.com',
 };
 
+describe('the client config also keeps Save clicks out of breadcrumbs', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    sentry.init.mockClear();
+  });
+
+  it('registers beforeBreadcrumb, which blanks a click on a Save heart', async () => {
+    await import('../../../../src/instrumentation-client');
+
+    const { beforeBreadcrumb } = sentry.init.mock.calls[0][0];
+    expect(typeof beforeBreadcrumb).toBe('function');
+    const scrubbed = beforeBreadcrumb({
+      category: 'ui.click',
+      message: 'button[aria-label="Save Some offer"]',
+    });
+    expect(scrubbed.message).toBe('');
+  });
+});
+
 describe('Sentry configs register the scrubber', () => {
   beforeEach(() => {
     vi.resetModules();

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Store = typeof import('@/lib/saved/saved-store');
@@ -233,7 +235,66 @@ describe('saved store: changing', () => {
   });
 });
 
+describe('saved store: small contracts', () => {
+  it('says how many slugs removeSavedMany really removed', async () => {
+    const store = await loadStore();
+    ['a', 'b', 'c'].forEach((slug) => store.addSaved(slug));
+
+    expect(store.removeSavedMany(['a', 'c', 'never-saved'])).toBe(2);
+    expect(store.removeSavedMany(['a', 'zzz'])).toBe(0);
+    expect(store.removeSavedMany([])).toBe(0);
+  });
+
+  it('does not pull a schema library into every catalogue page', () => {
+    const source = readFileSync(
+      path.resolve(__dirname, '../../../../lib/saved/saved-store.ts'),
+      'utf8'
+    );
+
+    expect(source).not.toMatch(/from\s+['"]zod['"]/);
+  });
+
+  it('describes the store honestly: slugs do leave the browser for the Saved page, nothing else does', () => {
+    const source = readFileSync(
+      path.resolve(__dirname, '../../../../lib/saved/saved-store.ts'),
+      'utf8'
+    );
+
+    expect(source).not.toContain('Nothing leaves the browser');
+  });
+});
+
 describe('saved store: subscriptions and other tabs', () => {
+  it('re-reads and notifies when a page comes back from the back/forward cache', async () => {
+    const store = await loadStore();
+    const listener = vi.fn();
+    store.subscribeSaved(listener);
+
+    window.localStorage.setItem(KEY, JSON.stringify({ v: 1, slugs: ['changed-while-away'] }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(store.getSavedSnapshot()).toEqual(['changed-while-away']);
+  });
+
+  it('ignores an ordinary pageshow (a fresh load)', async () => {
+    const store = await loadStore();
+    const listener = vi.fn();
+    store.subscribeSaved(listener);
+
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('removes both window listeners with the last subscriber', async () => {
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const store = await loadStore();
+    store.subscribeSaved(vi.fn())();
+
+    expect(remove.mock.calls.map(([type]) => type).sort()).toEqual(['pageshow', 'storage']);
+  });
+
   it('re-reads and notifies when another tab changes the key', async () => {
     const store = await loadStore();
     expect(store.getSavedSnapshot()).toEqual([]);

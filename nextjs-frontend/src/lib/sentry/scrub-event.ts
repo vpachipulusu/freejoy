@@ -156,6 +156,13 @@ function redactAddresses(text: string): string {
   return result + text.slice(cursor);
 }
 
+/**
+ * The backend's offer read, `/v1/catalogue/offers/<slug>`: the slug says which freebie a visitor opened or
+ * saved (the Saved page reads each saved offer), so span names and URLs keep `[slug]` instead. The list read,
+ * `/v1/catalogue/offers?...`, has no slug and is left alone.
+ */
+const OFFER_READ_SLUG = /(\/v1\/catalogue\/offers\/)[^\s/?#&"'\\]+/g;
+
 function scrubString(value: string): string {
   const named = value.replace(NAMED_PARAM, `$1$2${FILTERED}`);
   const valued = named.replace(ANY_PARAM, (match, start: string, name: string, text: string) =>
@@ -165,7 +172,7 @@ function scrubString(value: string): string {
     (text, [pattern, replacement]) => text.replace(pattern, replacement),
     valued
   );
-  return redactAddresses(withoutParams);
+  return redactAddresses(withoutParams).replace(OFFER_READ_SLUG, '$1[slug]');
 }
 
 /** A string known to be (part of) a query: anything still holding an address after scrubbing goes whole. */

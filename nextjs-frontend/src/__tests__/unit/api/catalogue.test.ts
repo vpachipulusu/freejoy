@@ -44,7 +44,7 @@ import {
   fetchOffer,
   fetchOffers,
 } from '@/lib/api/catalogue';
-import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
+import { CatalogueRateLimitedError, CatalogueUnavailableError } from '@/lib/catalogue/errors';
 
 // Captured at import, before any mockClear, because the caches are created once at module load.
 const cacheCalls = [...mocks.cacheCalls];
@@ -259,6 +259,28 @@ describe('fetchOffer', () => {
 
     await expect(fetchOffer('nope')).resolves.toEqual({ kind: 'not_found' });
     expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it('throws for a 404 whose body is not the backend envelope (an HTML page from a proxy, say)', async () => {
+    mocks.readOffer.mockResolvedValue(failed(404, '<html>Not Found</html>'));
+
+    await expect(fetchOffer('nope')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws for a 404 with no body at all', async () => {
+    mocks.readOffer.mockResolvedValue({ response: { ok: false, status: 404 } });
+
+    await expect(fetchOffer('nope')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+  });
+
+  it('throws a rate-limited error, still an unavailable error, for a 429', async () => {
+    mocks.readOffer.mockResolvedValue(failed(429, { success: false, error: 'slow down' }));
+
+    const error = await fetchOffer('free-tea').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CatalogueRateLimitedError);
+    expect(error).toBeInstanceOf(CatalogueUnavailableError);
   });
 
   it('maps a 410 to the ended stub', async () => {

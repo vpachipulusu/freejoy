@@ -396,11 +396,35 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     expect(container.textContent).toMatch(/draft/i);
   });
 
+  it('the cookie notice is honest that the Saved page looks freebies up on the server, and shows the key as code', () => {
+    const { container } = render(<CookiesPage />);
+
+    expect(container.textContent).toMatch(/not stored in a database or against an account/i);
+    expect(container.textContent).toMatch(/ordinary, short-lived server log entries/i);
+    expect(container.textContent).toMatch(/error reports may include the name of a button/i);
+    expect(container.querySelector('code')).toHaveTextContent('freejoy.saved.v1');
+    expect(container.textContent).not.toContain('`freejoy.saved.v1`');
+  });
+
+  it('both drafts ask the reviewer about the server logs and the error reports', () => {
+    for (const Page of [CookiesPage, PrivacyPage]) {
+      const { container, unmount } = render(<Page />);
+      const checklist = container.textContent ?? '';
+
+      expect(checklist).toMatch(/server log entries.*saved|saved.*server log entries/is);
+      expect(checklist).toMatch(/error report.*button|button.*error report/is);
+      unmount();
+    }
+  });
+
   it('the privacy notice says the saved list stays on the device and records no event', () => {
     const { container } = render(<PrivacyPage />);
 
     expect(container.textContent).toMatch(/list of freebies you saved stays in your browser/i);
     expect(container.textContent).toMatch(/no analytics event when you save or remove/i);
+    expect(container.textContent).toMatch(/not stored in a database or against an account/i);
+    expect(container.textContent).toMatch(/ordinary, short-lived server log entries/i);
+    expect(container.textContent).toMatch(/error reports may include the name of a button/i);
     expect(container.textContent).toMatch(/draft/i);
   });
 });

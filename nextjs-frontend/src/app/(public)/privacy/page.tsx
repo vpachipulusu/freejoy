@@ -41,9 +41,12 @@ export default function PrivacyPage() {
       </p>
       <p>
         If you use the heart on a freebie, the list of freebies you saved stays in your browser, on
-        your device. The Saved page sends their page names to our server only to look the freebies
-        up; we do not keep that list or link it to you, and we record no analytics event when you
-        save or remove one. See the cookie notice for the storage name.
+        your device. It is not stored in a database or against an account. The Saved page sends
+        their page names to our server only to look the freebies up; we do not keep that list or
+        link it to you, and we record no analytics event when you save or remove one. Looking them
+        up produces ordinary, short-lived server log entries, as any page request does, and if error
+        reporting is switched on, error reports may include the name of a button you pressed, which
+        for the heart is the name of the freebie. See the cookie notice for the storage name.
       </p>
       <h2>If you create an account</h2>
       <p>
@@ -100,6 +103,7 @@ export default function PrivacyPage() {
           'Named processors (hosting, error monitoring, email sending) and any transfers outside the UK',
           'Right to object to direct marketing, minimum sign-up age and wording of data-subject rights',
           'Whether the saved-freebies list (kept only in the browser of the visitor, page names only) needs any lawful-basis or retention wording',
+          'Whether the server log entries made when the Saved page looks freebies up, and error reports that may name a pressed button (the heart is named after the freebie), need wording or retention here',
           'Complaint route to the ICO and the data protection fee position',
         ]}
       />

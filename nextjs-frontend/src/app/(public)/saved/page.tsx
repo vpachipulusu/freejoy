@@ -33,7 +33,8 @@ export default function SavedPage() {
           </p>
         </div>
       </aside>
-      <div className="mt-8">
+      {/* The min-height keeps the footer from jumping when the list arrives. */}
+      <div className="mt-8 min-h-[24rem]">
         <SavedOffers />
         <noscript>
           <p className="rounded-card border border-border bg-card p-5 text-sm text-muted-foreground">

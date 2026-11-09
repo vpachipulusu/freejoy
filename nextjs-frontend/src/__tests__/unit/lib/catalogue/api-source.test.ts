@@ -344,18 +344,26 @@ describe('lookupOffer', () => {
     });
   });
 
-  it('says not found for a 404, for a 410 with no usable stub, and for an offer the mapper drops', async () => {
+  it('says unreadable, not not-found, for an offer the mapper cannot read (a value this site does not know yet)', async () => {
+    mocks.fetchOffer.mockResolvedValueOnce({
+      kind: 'found',
+      offer: apiOffer('new-kind', { freshness: 'brand_new' as never }),
+    });
+    expect(await apiSource.lookupOffer('new-kind')).toEqual({ kind: 'unreadable' });
+
+    mocks.fetchOffer.mockResolvedValueOnce({
+      kind: 'found',
+      offer: apiOffer('bad-dates-2', { last_verified_at: null }),
+    });
+    expect(await apiSource.lookupOffer('bad-dates-2')).toEqual({ kind: 'unreadable' });
+  });
+
+  it('says not found for a 404 and for a 410 with no usable stub', async () => {
     mocks.fetchOffer.mockResolvedValueOnce({ kind: 'not_found' });
     expect(await apiSource.lookupOffer('missing')).toEqual({ kind: 'not_found' });
 
     mocks.fetchOffer.mockResolvedValueOnce({ kind: 'gone', ended: null });
     expect(await apiSource.lookupOffer('gone-1')).toEqual({ kind: 'not_found' });
-
-    mocks.fetchOffer.mockResolvedValueOnce({
-      kind: 'found',
-      offer: apiOffer('bad-dates', { last_verified_at: null }),
-    });
-    expect(await apiSource.lookupOffer('bad-dates')).toEqual({ kind: 'not_found' });
   });
 
   it('does not call the API for a slug that cannot name an offer', async () => {
