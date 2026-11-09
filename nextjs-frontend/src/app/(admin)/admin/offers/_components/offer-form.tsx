@@ -4,7 +4,11 @@ import { useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { createOfferAction, updateOfferAction } from '@/app/actions/admin/offer-actions';
+import {
+  createOfferAction,
+  updateOfferAction,
+  type OfferWrittenData,
+} from '@/app/actions/admin/offer-actions';
 import { offerFormSchema, type OfferFormValues } from '@/lib/admin-catalogue/offer-schema';
 import { settleAction } from '@/lib/admin-catalogue/settle-action';
 import type { OfferRowStatus } from '@/lib/admin-catalogue/offer-status';
@@ -103,13 +107,11 @@ export function OfferForm({
       router.push(`/admin/offers/${outcome.data.id}`);
       return;
     }
-    const written = outcome.data;
-    review.recordWrite(
-      'reviewToken' in written && typeof written.reviewToken === 'string'
-        ? written.reviewToken
-        : undefined
-    );
-    form.reset(values);
+    const written: Partial<OfferWrittenData> = outcome.data;
+    review.recordWrite(written.reviewToken, written.previousReviewToken);
+    // The saved values become the form's defaults and nothing stays marked as typed in: a later reload of a field
+    // the editor saved must show the server's version, not the text they saved.
+    form.reset(values, { keepDirtyValues: false });
     markSaved();
     // The status buttons still hold the token of the version before this save until the reload lands.
     startRefresh(() => router.refresh());

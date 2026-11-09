@@ -53,9 +53,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const written = (reviewToken: string, status = 'DRAFT') => ({
+/** A successful write: the token of the state after it, and the token of the state it replaced. */
+const written = (reviewToken: string, status = 'DRAFT', previousReviewToken?: string) => ({
   success: true as const,
-  data: { id: 'o1', slug: 'free-coffee', status, reviewToken },
+  data: { id: 'o1', slug: 'free-coffee', status, reviewToken, previousReviewToken },
 });
 
 beforeEach(() => {
@@ -89,15 +90,18 @@ describe('the notice that the offer changed', () => {
     rerender(page(HEX('b')));
     expect(screen.getByRole('alert')).toHaveTextContent(ALERT);
 
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('c')));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('c'), 'DRAFT', HEX('b')));
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(2));
+    rerender(page(HEX('c')));
 
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // The end state, not a moment on the way to it: the reload with the editor's own token re-raises nothing.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows no notice after an ordinary success whose refresh lands with the token it returned', async () => {
     const user = userEvent.setup();
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b')));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
     const { rerender } = render(page(HEX('a')));
 
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
@@ -109,7 +113,7 @@ describe('the notice that the offer changed', () => {
 
   it('shows the notice when the refresh brings a token other than the one the editor action returned', async () => {
     const user = userEvent.setup();
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b')));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
     const { rerender } = render(page(HEX('a')));
 
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
@@ -127,7 +131,7 @@ describe('the notice that the offer changed', () => {
     const { rerender } = render(page(HEX('a')));
     // A first action of the editor's own, so a token of theirs is on record.
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
-    pending.resolve(written(HEX('b')));
+    pending.resolve(written(HEX('b'), 'DRAFT', HEX('a')));
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
     rerender(page(HEX('b')));
 
@@ -137,7 +141,7 @@ describe('the notice that the offer changed', () => {
     mocks.offerLifecycleAction.mockReturnValueOnce(second.promise);
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
     rerender(page(HEX('c')));
-    await act(async () => second.resolve(written(HEX('c'))));
+    await act(async () => second.resolve(written(HEX('c'), 'DRAFT', HEX('b'))));
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -150,17 +154,70 @@ describe('the notice that the offer changed', () => {
 
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
     rerender(page(HEX('z')));
-    await act(async () => pending.resolve(written(HEX('b'))));
+    await act(async () => pending.resolve(written(HEX('b'), 'DRAFT', HEX('a'))));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(ALERT);
+  });
+
+  it.each(['Unpublish', 'Expire', 'Archive'])(
+    'alerts when the state %s replaced was not the one the editor loaded (a foreign change came first)',
+    async (label) => {
+      const user = userEvent.setup();
+      mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'EXPIRED', HEX('x')));
+      render(page(HEX('a'), 'PUBLISHED'));
+
+      await user.click(screen.getByRole('button', { name: label }));
+      if (label === 'Archive') {
+        await user.click(
+          within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive offer' })
+        );
+      }
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(ALERT);
+    }
+  );
+
+  it('does not alert when the state a step replaced is the one the editor loaded', async () => {
+    const user = userEvent.setup();
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'EXPIRED', HEX('a')));
+    render(page(HEX('a'), 'PUBLISHED'));
+
+    await user.click(screen.getByRole('button', { name: 'Expire' }));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('alerts when a refused step is followed by a reload that brings a different token', async () => {
+    const user = userEvent.setup();
+    mocks.offerLifecycleAction.mockResolvedValueOnce({
+      success: false,
+      error: 'That change is not allowed for an offer in its current status.',
+    });
+    const { rerender } = render(page(HEX('a'), 'PUBLISHED'));
+
+    await user.click(screen.getByRole('button', { name: 'Expire' }));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    rerender(page(HEX('n'), 'PUBLISHED'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(ALERT);
+  });
+
+  it('alerts on a reload with a new token even before the editor has written anything', () => {
+    const { rerender } = render(page(HEX('a')));
+
+    rerender(page(HEX('b')));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(ALERT);
   });
 });
 
 describe('verify, then publish', () => {
   it('sends the token of the version the first success returned', async () => {
     const user = userEvent.setup();
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b')));
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('c'), 'PUBLISHED'));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('c'), 'PUBLISHED', HEX('b')));
     const { rerender } = render(page(HEX('a')));
 
     await user.click(screen.getByRole('button', { name: 'Mark verified' }));
@@ -180,7 +237,7 @@ describe('verify, then publish', () => {
 describe('focus after the pressed button goes away', () => {
   it('moves into the group when Publish disappears because the offer is now published', async () => {
     const user = userEvent.setup();
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'PUBLISHED'));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'PUBLISHED', HEX('a')));
     const { rerender } = render(page(HEX('a'), 'DRAFT'));
 
     await user.click(screen.getByRole('button', { name: 'Publish' }));
@@ -195,7 +252,7 @@ describe('focus after the pressed button goes away', () => {
 
   it('moves to the status line when the offer has no step left (archived)', async () => {
     const user = userEvent.setup();
-    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'ARCHIVED'));
+    mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'ARCHIVED', HEX('a')));
     const { rerender } = render(page(HEX('a'), 'DRAFT'));
 
     await user.click(screen.getByRole('button', { name: 'Archive' }));

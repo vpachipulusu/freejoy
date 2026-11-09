@@ -44,6 +44,7 @@ vi.mock('next/navigation', () => ({
 import { OfferForm } from '@/app/(admin)/admin/offers/_components/offer-form';
 import { DirtyFormProvider } from '@/app/(admin)/admin/_components/dirty-form-context';
 import { OfferLifecycleButtons } from '@/app/(admin)/admin/offers/_components/offer-lifecycle-buttons';
+import { OfferReviewProvider } from '@/app/(admin)/admin/offers/_components/offer-review-context';
 import { CategoryForm } from '@/app/(admin)/admin/categories/category-form';
 import { MerchantForm } from '@/app/(admin)/admin/merchants/merchant-form';
 import { emptyOfferFormValues, type OfferFormValues } from '@/lib/admin-catalogue/offer-schema';
@@ -613,6 +614,110 @@ describe('edit page: the form follows the offer data it is given', SLOW, () => {
     await waitFor(() =>
       expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish', 'tok-2')
     );
+  });
+});
+
+describe('edit page: a field the editor saved keeps following the server', SLOW, () => {
+  const editForm = (values: Partial<OfferFormValues> = {}) => (
+    <OfferForm
+      mode="edit"
+      offerId="o1"
+      status="DRAFT"
+      initialValues={{ ...filled, slug: 'free-coffee-sample', ...values }}
+      categories={categories}
+      merchants={merchants}
+    />
+  );
+
+  it('shows a later foreign change to a field the editor saved earlier', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editForm());
+    const title = screen.getByLabelText(/^Title/);
+    await user.clear(title);
+    await user.type(title, 'My title');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes saved.');
+    // The reload with what was saved ...
+    rerender(editForm({ title: 'My title' }));
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('My title');
+
+    // ... then somebody else changes the title and the summary.
+    rerender(editForm({ title: 'Their title', summary: 'Their summary.' }));
+
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('Their title');
+    expect(screen.getByLabelText(/^Summary/)).toHaveValue('Their summary.');
+  });
+});
+
+describe('edit page: the notice when a save went over a foreign change', SLOW, () => {
+  const ALERT =
+    'This offer changed since you opened it. This page now shows the latest version: review it again.';
+
+  function reviewed(token: string) {
+    return (
+      <DirtyFormProvider>
+        <OfferReviewProvider>
+          <OfferLifecycleButtons
+            offerId="o1"
+            offerTitle="Free coffee"
+            reviewToken={token}
+            status="DRAFT"
+          />
+          <OfferForm
+            mode="edit"
+            offerId="o1"
+            status="DRAFT"
+            initialValues={{ ...filled, slug: 'free-coffee-sample' }}
+            categories={categories}
+            merchants={merchants}
+          />
+        </OfferReviewProvider>
+      </DirtyFormProvider>
+    );
+  }
+
+  it('alerts when the state the save replaced is not the one the editor loaded', async () => {
+    const user = userEvent.setup();
+    mocks.updateOfferAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: 'o1',
+        slug: 's',
+        status: 'DRAFT',
+        reviewToken: 'tok-after',
+        previousReviewToken: 'tok-foreign',
+      },
+    });
+    const { rerender } = render(reviewed('tok-1'));
+
+    await user.type(screen.getByLabelText(/^Title/), 'x');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes saved.');
+    rerender(reviewed('tok-after'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(ALERT);
+  });
+
+  it('does not alert on the editor own save when nothing foreign was there', async () => {
+    const user = userEvent.setup();
+    mocks.updateOfferAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: 'o1',
+        slug: 's',
+        status: 'DRAFT',
+        reviewToken: 'tok-after',
+        previousReviewToken: 'tok-1',
+      },
+    });
+    const { rerender } = render(reviewed('tok-1'));
+
+    await user.type(screen.getByLabelText(/^Title/), 'x');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes saved.');
+    rerender(reviewed('tok-after'));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 

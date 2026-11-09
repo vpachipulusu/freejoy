@@ -13,24 +13,29 @@ import {
 /**
  * What the edit page knows about the review token of the offer it shows.
  *
- * The page loads an offer with a `review_token`; every write the editor makes (a save, a status step) returns the
- * token of the version it stored. When the page then reloads with a different token, or the API refuses a step
- * with `offer_changed`, somebody else changed the offer: `changed` turns on and stays on (a toast is gone after a
- * few seconds) until the editor's next successful write.
+ * `seen` is the last version of the offer the editor has actually been shown: it starts at the token the page
+ * first loaded with. The editor's own write (a save, a status step) returns the token of the state after it AND
+ * `previous`, the token of the state it replaced under the row lock. If `previous` is not `seen`, somebody else
+ * changed the offer before the write and the page is about to show their version: `changed` turns on and stays on
+ * (a toast is gone after a few seconds) until the editor's next successful write. A reload that brings a token
+ * other than `seen` (a refused step, a link edited elsewhere) does the same. `seen` then moves to that token.
  *
  * A reload can land before the write's own result does, so while a write is in flight the loaded token is only
- * noted; the comparison happens when the result arrives.
+ * noted; when the result arrives a version other than the editor's own that landed meanwhile still raises it.
+ *
+ * The handlers only touch refs and `setChanged`, so they are created once: a changing identity would re-run the
+ * page's "this token was loaded" effect with its still-old token and raise the notice again after a success.
  */
-type OfferReview = {
-  changed: boolean;
+type OfferReviewHandlers = {
   beginWrite: () => void;
-  /** A write succeeded; `token` is the review token of the version it stored. */
-  recordWrite: (token: string | undefined) => void;
+  /** A write succeeded: the token after it and the token of the state it replaced (when the API said). */
+  recordWrite: (token: string | undefined, previous?: string) => void;
   /** A write was refused; `offer_changed` means the offer moved since it was loaded. */
   recordFailure: (reason?: 'offer_changed') => void;
-  /** The token the page was last loaded with. */
+  /** The token the page was just loaded with. */
   watchLoadedToken: (token: string) => void;
 };
+type OfferReview = OfferReviewHandlers & { changed: boolean };
 
 const NOOP: OfferReview = {
   changed: false,
@@ -44,26 +49,26 @@ const OfferReviewContext = createContext<OfferReview>(NOOP);
 
 export function OfferReviewProvider({ children }: { children: ReactNode }) {
   const [changed, setChanged] = useState(false);
-  const own = useRef<string | null>(null);
+  const seen = useRef<string | null>(null);
   const loaded = useRef<string | null>(null);
   const loadedAtStart = useRef<string | null>(null);
   const inFlight = useRef(false);
 
-  const value = useMemo<OfferReview>(
+  const handlers = useMemo<OfferReviewHandlers>(
     () => ({
-      changed,
       beginWrite() {
         inFlight.current = true;
         loadedAtStart.current = loaded.current;
       },
-      recordWrite(token) {
+      recordWrite(token, previous) {
         inFlight.current = false;
-        setChanged(false);
-        if (token === undefined) return;
-        own.current = token;
+        const foreignBefore = previous !== undefined && previous !== seen.current;
         const now = loaded.current;
         // A different version landed while the write ran: not the editor's own.
-        if (now !== null && now !== loadedAtStart.current && now !== token) setChanged(true);
+        const foreignMeanwhile =
+          token !== undefined && now !== null && now !== loadedAtStart.current && now !== token;
+        setChanged(foreignBefore || foreignMeanwhile);
+        if (token !== undefined) seen.current = token;
       },
       recordFailure(reason) {
         inFlight.current = false;
@@ -71,11 +76,20 @@ export function OfferReviewProvider({ children }: { children: ReactNode }) {
       },
       watchLoadedToken(token) {
         loaded.current = token;
-        if (!inFlight.current && own.current !== null && token !== own.current) setChanged(true);
+        if (seen.current === null) {
+          seen.current = token;
+          return;
+        }
+        if (inFlight.current) return;
+        if (token !== seen.current) {
+          setChanged(true);
+          seen.current = token;
+        }
       },
     }),
-    [changed]
+    []
   );
+  const value = useMemo<OfferReview>(() => ({ ...handlers, changed }), [handlers, changed]);
 
   return <OfferReviewContext.Provider value={value}>{children}</OfferReviewContext.Provider>;
 }

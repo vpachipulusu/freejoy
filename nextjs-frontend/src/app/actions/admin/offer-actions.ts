@@ -38,8 +38,15 @@ import { ADMIN_REQUEST_FAILED_MESSAGE } from '@/lib/api/admin-errors';
  */
 
 export type OfferSavedData = { id: string; slug: string; status: OfferStatus };
-/** What an edit or a status action returns: the saved offer and the review token of the version now stored. */
-export type OfferWrittenData = OfferSavedData & { reviewToken: string };
+/**
+ * What an edit or a status action returns: the saved offer, the review token of the version now stored and the
+ * token of the version the write replaced (when they differ from the one the editor loaded, somebody else changed
+ * the offer first). Either is absent when the API sent something that is not a plain token.
+ */
+export type OfferWrittenData = OfferSavedData & {
+  reviewToken?: string;
+  previousReviewToken?: string;
+};
 export type OfferActionData = OfferWrittenData;
 
 const ADMIN_OFFERS_PATH = '/admin/offers';
@@ -86,10 +93,25 @@ export async function updateOfferAction(
       return failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
 
     refreshAdminPages(offerId);
-    const { id, slug, status, review_token: reviewToken } = result.data;
+    const { id, slug, status } = result.data;
     if (status === 'PUBLISHED') refreshPublicCatalogue(slug);
-    return { success: true, data: { id, slug, status: status as OfferStatus, reviewToken } };
+    return {
+      success: true,
+      data: {
+        id,
+        slug,
+        status: status as OfferStatus,
+        reviewToken: plainToken(result.data.review_token),
+        previousReviewToken: plainToken(result.data.previous_review_token),
+      },
+    };
   });
+}
+
+/** A review token from the API, only if it is made of the plain characters tokens have. */
+function plainToken(value: unknown): string | undefined {
+  const parsed = reviewTokenSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** What the API call needs for `action`, or null when a reviewed step has no usable review token. */
@@ -131,10 +153,16 @@ export async function offerLifecycleAction(
 
     refreshAdminPages(offerId);
     refreshPublicCatalogue(result.data.slug);
-    const { id, slug, status, review_token: newToken } = result.data;
+    const { id, slug, status } = result.data;
     return {
       success: true,
-      data: { id, slug, status: status as OfferStatus, reviewToken: newToken },
+      data: {
+        id,
+        slug,
+        status: status as OfferStatus,
+        reviewToken: plainToken(result.data.review_token),
+        previousReviewToken: plainToken(result.data.previous_review_token),
+      },
     };
   });
 }

@@ -51,7 +51,7 @@ export function useOfferAction() {
       try {
         const result = await settleAction(() => offerLifecycleAction(offerId, action, reviewToken));
         if (result.success) {
-          review.recordWrite(result.data.reviewToken);
+          review.recordWrite(result.data.reviewToken, result.data.previousReviewToken);
           toast({ title: SUCCESS_TITLES[action], description: offerTitle });
         } else {
           review.recordFailure(result.reason);

@@ -103,6 +103,7 @@ const OFFER = {
   status: 'PUBLISHED',
   last_verified_at: '2026-01-02T00:00:00Z',
   review_token: 'f'.repeat(64),
+  previous_review_token: 'e'.repeat(64),
 };
 
 const TOKEN = 'tok-1_ABC';
@@ -265,7 +266,12 @@ describe('offer actions', () => {
 
     expect(result).toMatchObject({
       success: true,
-      data: { id: 'o1', status: 'PUBLISHED', reviewToken: 'f'.repeat(64) },
+      data: {
+        id: 'o1',
+        status: 'PUBLISHED',
+        reviewToken: 'f'.repeat(64),
+        previousReviewToken: 'e'.repeat(64),
+      },
     });
     expect(mocks.patchAdminOffer.mock.calls[0][0]).toBe('o1');
     expect('slug' in mocks.patchAdminOffer.mock.calls[0][1]).toBe(false);
@@ -307,6 +313,7 @@ describe('offer actions', () => {
           slug: 'free-coffee',
           status: 'PUBLISHED',
           reviewToken: 'f'.repeat(64),
+          previousReviewToken: 'e'.repeat(64),
         },
       });
       expect(mocks.runAdminOfferAction).toHaveBeenCalledWith(
@@ -388,6 +395,42 @@ describe('offer actions', () => {
     await offerLifecycleAction('o1', 'publish', TOKEN);
     expect(mocks.revalidateCatalogue).toHaveBeenCalledWith(['/freebies']);
   });
+});
+
+describe('the tokens a write returns', () => {
+  it('hands back the token of the state a save replaced, for the page to compare', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok(OFFER));
+
+    const result = await updateOfferAction('o1', offerInput);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { reviewToken: 'f'.repeat(64), previousReviewToken: 'e'.repeat(64) },
+    });
+  });
+
+  it.each(['has space', 'x;y', '', 'z'.repeat(129), 5, null])(
+    'drops a token from the API that is not made of plain characters (%j)',
+    async (bad) => {
+      mocks.runAdminOfferAction.mockResolvedValue(
+        ok({ ...OFFER, review_token: bad, previous_review_token: bad })
+      );
+      mocks.patchAdminOffer.mockResolvedValue(
+        ok({ ...OFFER, review_token: bad, previous_review_token: bad })
+      );
+
+      const step = await offerLifecycleAction('o1', 'expire');
+      const save = await updateOfferAction('o1', offerInput);
+
+      for (const result of [step, save]) {
+        expect(result).toMatchObject({ success: true });
+        if (result.success) {
+          expect(result.data.reviewToken).toBeUndefined();
+          expect(result.data.previousReviewToken).toBeUndefined();
+        }
+      }
+    }
+  );
 });
 
 describe('the review token on publish and verify', () => {
