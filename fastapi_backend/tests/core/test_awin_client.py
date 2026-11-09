@@ -521,3 +521,9 @@ def test_a_token_that_cannot_be_a_header_value_is_refused_without_echoing_it(
 def test_a_boolean_is_not_a_publisher_id() -> None:
     with pytest.raises(ValueError, match="publisher"):
         HttpxAwinClient(True, SecretStr(TOKEN))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("publisher_id", [12.5, True, False, "4242", None, 2.0])
+def test_only_a_real_integer_is_a_publisher_id(publisher_id: object) -> None:
+    with pytest.raises(ValueError, match="publisher"):
+        HttpxAwinClient(publisher_id, SecretStr(TOKEN))  # type: ignore[arg-type]

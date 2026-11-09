@@ -200,8 +200,11 @@ async def _write_page(
                 unit.store, unit.session, unit.auditor, lambda: now
             )
             written = await importer.import_batch(batch)
-        report = replace(report, tally=report.tally.merged(written))
-        yield report
+            # Counted at once, with nothing awaited in between, and handed over while the unit is still
+            # open: a deadline that cancels the session's close cannot lose a batch that was committed.
+            # Only a cancellation inside commit() itself can: the failure line says "at least".
+            report = replace(report, tally=report.tally.merged(written))
+            yield report
 
 
 async def _progress(

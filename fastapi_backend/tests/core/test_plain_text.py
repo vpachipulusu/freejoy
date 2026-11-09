@@ -205,3 +205,11 @@ def test_fit_line_collapses_and_cuts_without_cleaning() -> None:
         fit_line("&amp;lt;b&amp;gt;", 50) == "&amp;lt;b&amp;gt;"
     )  # no second decoding
     assert fit_line(fit_line("x " * 40, 20), 20) == fit_line("x " * 40, 20)
+
+
+def test_an_unclosed_script_or_style_runs_to_the_end_of_the_text() -> None:
+    assert plain_line("<script alert(1)", 200) == ""
+    assert plain_line("a <style x", 200) == "a"
+    assert plain_line("a <SCRIPT src=x", 200) == "a"
+    assert plain_line("a <b unclosed text", 200) == "a b unclosed text"
+    assert plain_paragraphs("one\n<script alert(1)", 5, 100) == ("one",)

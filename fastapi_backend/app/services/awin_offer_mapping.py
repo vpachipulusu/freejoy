@@ -48,17 +48,6 @@ FINGERPRINT_VERSION = (
     1  # bump with FINGERPRINT_FIELDS: stored fingerprints then stop matching, safely
 )
 FINGERPRINT_FIELDS = tuple(sorted(EDITABLE_FIELDS | {"status", "last_verified_at"}))
-REFRESH_FIELDS = (
-    "title",
-    "summary",
-    "description",
-    "offer_type",
-    "source_url",
-    "start_at",
-    "end_at",
-    "eligibility",
-    "publisher_notes",
-)
 
 
 def _type_note(promotion: Promotion) -> str:

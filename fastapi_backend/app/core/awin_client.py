@@ -221,7 +221,7 @@ class HttpxAwinClient:
         limiter: CallLimiter | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        if isinstance(publisher_id, bool) or publisher_id < 1:
+        if type(publisher_id) is not int or publisher_id < 1:
             raise ValueError("publisher id must be a positive integer")
         secret = token.get_secret_value()
         if not secret or not all("!" <= char <= "~" for char in secret):

@@ -367,7 +367,7 @@ async def test_a_changed_tracking_url_is_held_back_and_the_rows_stay_identical(
     await run(engine, [raw_item(1)])
     offers = await rows(engine, "SELECT * FROM offers")
     links = await rows(engine, "SELECT * FROM affiliate_links")
-    moved = raw_item(1, urlTracking=tracking_for(1, moved="1"))
+    moved = raw_item(1, urlTracking=tracking_for(1, clickref2="1"))
 
     first = await run(engine, [moved], now=NOW + timedelta(days=1))
     second = await run(engine, [moved], now=NOW + timedelta(days=2))

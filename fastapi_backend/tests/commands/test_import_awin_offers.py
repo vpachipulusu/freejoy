@@ -527,3 +527,6 @@ def test_a_run_past_its_deadline_exits_1_with_what_was_committed(
 
     err = capsys.readouterr().err
     assert code == 1 and "failed (run_deadline)" in err and "created 200" in err
+    assert (
+        "at least" in err
+    )  # a batch cancelled inside its commit may be committed and uncounted

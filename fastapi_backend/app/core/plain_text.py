@@ -109,10 +109,20 @@ def _tag_span(finder: _Finder, text: str, index: int) -> tuple[int, str | None, 
     if text.startswith("<!--", index):
         end = finder.find("-->", index + 4)
         return (end + 3 if end >= 0 else len(text)), None, False
+    named = _TAG_NAME.match(text, index)
     end = finder.find(">", index + 1)
     if end < 0:
-        return index + 1, None, False  # never closed: drop only the ``<``
-    named = _TAG_NAME.match(text, index)
+        if (
+            named is not None
+            and named.group(2).lower() in _SKIPPED_TAGS
+            and not named.group(1)
+        ):
+            return (
+                len(text),
+                None,
+                False,
+            )  # an unclosed script or style runs to the end of the text
+        return index + 1, None, False  # any other unclosed tag: drop only the ``<``
     if named is None:
         return end + 1, None, False
     return end + 1, named.group(2).lower(), named.group(1) == "/"

@@ -56,7 +56,7 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | `--dry-run` | off | Fetch and validate, write nothing, open no database connection, print counts. |
 | `--limit N` | 500 (1 to 5000) | Most promotions read in one run (valid or not). The page size follows it, within Awin's 10 to 200. |
 | `--max-pages N` | 10 (1 to 50) | Most pages fetched. Awin allows 20 calls a minute, so 50 pages take about 2 minutes (20, 20 and 10 calls). |
-| `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1) and what was committed stays; a rerun carries on. |
+| `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1; stderr says "already committed and kept (at least)" because a batch cancelled inside its own commit may be committed and not counted) and what was committed stays; a rerun carries on. |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
 
 | Exit | Meaning |
@@ -187,7 +187,7 @@ On each item the importer compares hashes, in this order:
 | --- | --- |
 | No provenance row | Create (`created`). |
 | `source_hash` equals the new hash | Nothing is written (`unchanged`). A second run changes nothing, not even `updated_at`. |
-| Source changed, the offer is `DRAFT` **and** has exactly one link **and** its fingerprint equals `applied_content_hash` **and** that link's destination equals the new tracking URL **and** the merchant mapped from the item's advertiser id is the offer's merchant | Refresh the imported **text** fields, re-store both hashes (`updated`). A link is never rewritten. |
+| Source changed, the offer is `DRAFT` **and** has exactly one link **and** its fingerprint equals `applied_content_hash` **and** that link's destination equals the new tracking URL **and** the offer's `source_url` equals the item's `url` **and** the merchant mapped from the item's advertiser id is the offer's merchant | Refresh the imported **text** fields, re-store both hashes (`updated`). A link is never rewritten. |
 | Source changed (or a marker is pending), anything else (edited, published, expired, archived, **or only the tracking URL moved, or the advertiser changed**) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared; if the editor reverts every edit, the next run
 refreshes the offer with the pending source. A change already recorded is not noted or audited again. |
 
@@ -205,13 +205,27 @@ the offer's row lock as an editor would: the importer waits for it and then judg
 
 `validate_https_url` and the Awin host allowlist only prove a link is on an Awin host. `awin_tracking.tracking_problem`
 pins the link itself (fail closed; the shapes are an [unverified assumption](#unverified-assumptions-the-first-dry-run-confirms-or-breaks)):
-no fragment; the path is `/cread.php` (`awinmid` = advertiser id, `awinaffid` = publisher id, optional deep link `ued`)
-or `/awclick.php` (`mid`, `id`, optional `p`); the query is parsed strictly (no `;` separators, no malformed pairs) and no id
-or deep-link parameter appears twice; the publisher parameter equals `AWIN_PUBLISHER_ID` and the advertiser parameter
-equals the item's advertiser id; a deep link is a clean https URL, not on any network tracking host, and on the same host
-as the item's `url` (`www.` may differ). Reasons: `tracking_shape_unrecognised` (shape, duplicate or missing id
-parameter), `tracking_owner_mismatch` (another publisher or advertiser), `tracking_destination_mismatch` (a deep link
-that is unsafe or goes elsewhere).
+
+- No fragment; the path is `/cread.php` (`awinmid` = advertiser id, `awinaffid` = publisher id) or `/awclick.php`
+  (`mid` = advertiser id, `id` = publisher id).
+- The query is parsed strictly (no `;` separators, no malformed pairs) and **every parameter name must be on an
+  allowlist**, exact and case-sensitive after decoding: the shape's two id names, the deep-link names `ued` and `p`
+  (the same for both shapes) and the passive names `clickref`, `clickref2` to `clickref6`. Any other name (`UED`,
+  `ued[]`, `AwinAffId`, `awinaffid[]`, a name with a space, a parameter nobody listed) is
+  `tracking_shape_unrecognised`, so no look-alike of an id or deep-link parameter can sit beside a valid one. Passive
+  values must match `[A-Za-z0-9_.-]{0,64}`.
+- Each id parameter appears exactly once; the publisher one equals `AWIN_PUBLISHER_ID` and the advertiser one equals the
+  item's advertiser id (`tracking_owner_mismatch` otherwise).
+- A deep link is read from **whichever** deep-link name carries it, on either shape. More than one in total is refused
+  (`tracking_shape_unrecognised`); the one there must be a clean https URL, not on any network tracking host, and on the
+  same host as the item's `url` (`www.` may differ), else `tracking_destination_mismatch`.
+- An item **without** a `url` cannot vouch for a deep link, so a deep link on such an item is
+  `tracking_destination_mismatch`. No `url` and no deep link is accepted.
+- A later source change that only moves the item's `url` (or the tracking URL) is never written over an untouched
+  draft: it leaves a source-change marker (`admin.offers.source_changed`) for the editor.
+
+A genuine link that carries a parameter that is not listed is **skipped** with `tracking_shape_unrecognised` and shows in
+the dry-run report; the allowlist is extended in a reviewed change, never relaxed.
 
 ## Audit
 
@@ -279,9 +293,10 @@ Awin's page does not document these. Each is handled defensively; the **first dr
 10. **`updatedSince`** filters on a date Awin maintains and takes `yyyy-MM-dd`.
 11. **The shape of a tracking link** (`app/services/awin_tracking.py`). Awin's promotions documentation says nothing about
     the URL. The importer assumes the two shapes Awin links are commonly written in: `/cread.php` with `awinmid`
-    (advertiser id), `awinaffid` (publisher id) and an optional deep link `ued`, or `/awclick.php` with `mid`, `id` and an
-    optional `p`. If real links differ, every item is skipped as `tracking_shape_unrecognised` and the dry-run shows the
-    count. See [the tracking link](#the-tracking-link-is-pinned).
+    (advertiser id) and `awinaffid` (publisher id), or `/awclick.php` with `mid` and `id`, with an optional deep link in
+    `ued` or `p` and optional `clickref` to `clickref6`, and **no other parameter**. **Unverified against live Awin.** If real
+    links differ, or carry a parameter that is not listed, the item is skipped as `tracking_shape_unrecognised` and shows
+    in the dry-run report. See [the tracking link](#the-tracking-link-is-pinned).
 
 ### The owner's first run (a real token is an owner step)
 

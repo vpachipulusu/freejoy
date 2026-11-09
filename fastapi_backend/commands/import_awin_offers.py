@@ -44,6 +44,7 @@ from app.services.awin_import_run import (
     MAX_LIMIT,
     MAX_MAX_PAGES,
     MAX_MAX_SECONDS,
+    RUN_DEADLINE,
     ImportFailed,
     RunOptions,
     RunReport,
@@ -253,10 +254,12 @@ def _send(reporter: Reporter, context: Mapping[str, Any]) -> None:
 
 
 def _fail_run(failure: ImportFailed, *, dry_run: bool, reporter: Reporter) -> int:
+    # A deadline can cancel a batch inside its own commit: it may be committed and not counted.
+    qualifier = " (at least)" if failure.cause == RUN_DEADLINE else ""
     done = (
         "nothing was written (dry run)"
         if dry_run
-        else f"already committed and kept: {_counts_text(failure.report)}; run it again to continue"
+        else f"already committed and kept{qualifier}: {_counts_text(failure.report)}; run it again to continue"
     )
     code = _fail(
         f"failed ({failure.cause}) {failure.stage}. After {failure.report.pages} page(s), {done}.",

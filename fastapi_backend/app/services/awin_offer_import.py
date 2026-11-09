@@ -356,7 +356,8 @@ class OfferImporter:
         """True only for an untouched import whose refresh would rewrite text and nothing else.
 
         The text of an untouched draft may be refreshed. A destination the editor may have looked at is
-        never rewritten in place (the tracking URL must be unchanged), and neither is an offer whose
+        never rewritten in place (neither the tracking URL nor the source URL may have moved), and neither
+        is an offer whose
         advertiser is no longer the merchant it was imported under.
         """
         if (
@@ -364,6 +365,7 @@ class OfferImporter:
             or len(links) != 1
             or fingerprint(offer, links) != known.applied_content_hash
             or links[0].destination_url != promotion.tracking_url
+            or offer.source_url != promotion.source_url
         ):
             return False
         merchant_id = await self.store.find_merchant_id(

@@ -412,3 +412,30 @@ async def test_a_database_lock_timeout_is_reported_as_its_own_cause() -> None:
             NOW,
         )
     assert caught.value.cause == "lock_timeout"
+
+
+async def test_a_batch_that_committed_is_counted_even_when_the_deadline_hits_while_the_unit_closes() -> (
+    None
+):
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    db = FakeDatabase()
+
+    @asynccontextmanager
+    async def slow_to_close() -> Any:
+        async with db.unit() as unit:
+            yield unit
+        await asyncio.sleep(3600)  # closing the session outlives the deadline
+
+    with pytest.raises(ImportFailed) as caught:
+        await run_import(
+            FakeAwinClient([raw_page(1, 3)]),
+            slow_to_close,
+            RunOptions(publisher_id=PUBLISHER_ID, max_seconds=0),
+            NOW,
+        )
+
+    assert caught.value.cause == module.RUN_DEADLINE
+    assert len(db.committed.offers) == 3
+    assert caught.value.report.tally.created == 3

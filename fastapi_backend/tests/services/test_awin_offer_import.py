@@ -622,7 +622,7 @@ async def test_a_changed_tracking_url_is_never_written_over_an_untouched_draft()
     await run(db, promotion())
     db.committed.audits.clear()
     offers, links = dict(db.committed.offers), dict(db.committed.links)
-    moved = promotion(urlTracking=tracking_for(1001, moved="1"))
+    moved = promotion(urlTracking=tracking_for(1001, clickref2="1"))
 
     tally = await run(db, moved, now=LATER)
 
@@ -640,7 +640,7 @@ async def test_the_pending_tracking_change_is_neither_refreshed_nor_audited_agai
 ):
     db = FakeDatabase()
     await run(db, promotion())
-    moved = promotion(urlTracking=tracking_for(1001, moved="1"))
+    moved = promotion(urlTracking=tracking_for(1001, clickref2="1"))
     await run(db, moved, now=LATER)
     before = snapshot(db)
 
@@ -669,7 +669,7 @@ async def test_a_tracking_change_together_with_text_is_held_back_whole() -> None
 
     tally = await run(
         db,
-        promotion(title="New text", urlTracking=tracking_for(1001, moved="1")),
+        promotion(title="New text", urlTracking=tracking_for(1001, clickref2="1")),
         now=LATER,
     )
 
@@ -733,3 +733,32 @@ def test_the_fingerprint_fields_are_pinned_so_a_new_editable_field_is_a_delibera
         "summary",
         "title",
     )
+
+
+async def test_a_changed_source_url_is_held_back_and_never_written_in_place() -> None:
+    db = FakeDatabase()
+    await run(db, promotion())
+    db.committed.audits.clear()
+    offers, links = dict(db.committed.offers), dict(db.committed.links)
+    moved = promotion(url="https://www.acme.example/a-different-page")
+
+    tally = await run(db, moved, now=LATER)
+
+    assert tally.source_changed == 1 and tally.updated == 0
+    assert dict(db.committed.offers) == offers and dict(db.committed.links) == links
+    assert only_import(db).source_changed_at == LATER
+    assert actions(db) == ["admin.offers.source_changed"]
+
+
+async def test_a_changed_source_url_with_a_pending_marker_is_not_audited_again() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    moved = promotion(url="https://www.acme.example/a-different-page")
+    await run(db, moved, now=LATER)
+    before = snapshot(db)
+
+    tally = await run(db, moved, now=LATER + timedelta(days=1))
+
+    assert tally.unchanged == 1 and snapshot(db) == before
