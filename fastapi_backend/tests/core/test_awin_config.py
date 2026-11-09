@@ -74,3 +74,13 @@ def test_a_token_that_could_not_be_a_header_value_is_refused_without_echoing_it(
 
     assert "AWIN_OAUTH_API_TOKEN" in str(caught.value)
     assert value not in str(caught.value)
+
+
+@pytest.mark.parametrize("value", ["café-token", "token—dash", "tok\u200ben"])
+def test_a_token_that_is_not_printable_ascii_is_refused(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    with pytest.raises(ValidationError) as caught:
+        load(monkeypatch, AWIN_OAUTH_API_TOKEN=value)
+
+    assert value not in str(caught.value)

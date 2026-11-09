@@ -55,7 +55,7 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | --- | --- | --- |
 | `--dry-run` | off | Fetch and validate, write nothing, open no database connection, print counts. |
 | `--limit N` | 500 (1 to 5000) | Most promotions read in one run (valid or not). The page size follows it, within Awin's 10 to 200. |
-| `--max-pages N` | 10 (1 to 50) | Most pages fetched. Awin allows 20 calls a minute, so 50 pages take at least 2.5 minutes. |
+| `--max-pages N` | 10 (1 to 50) | Most pages fetched. Awin allows 20 calls a minute, so 50 pages take about 2 minutes (20, 20 and 10 calls). |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
 
 | Exit | Meaning |
@@ -72,6 +72,9 @@ import-awin-offers: created 30, updated 5, unchanged 5, source changed and not a
 import-awin-offers: skipped by reason: not_joined 2, tracking_host_not_allowed 2.
 ```
 
+"Valid" counts items that passed validation; an item skipped later as `slug_unavailable` is counted in both
+"valid" and "skipped".
+
 Skip reasons (`SkipReason`): `invalid_item`, `invalid_id`, `unsupported_type`, `invalid_advertiser`, `not_joined`,
 `invalid_title`, `invalid_text`, `field_too_long`, `invalid_date`, `invalid_window`, `ended`, `invalid_url`,
 `source_url_on_tracking_host`, `missing_tracking_url`, `invalid_tracking_url`, `tracking_host_not_allowed`,
@@ -84,9 +87,10 @@ Skip reasons (`SkipReason`): `invalid_item`, `invalid_id`, `unsupported_type`, `
 2. Treat every item as untrusted (`parse_promotion`, below), drop duplicates, then write the valid ones in
    **batches of 50**, each in its own database transaction that commits once. A failure stops the run; earlier batches
    stay. A rerun is idempotent, so it carries on.
-3. Stop when a page holds fewer items than asked for (an empty page included), or the response said how many pages
-   exist and this was the last, or `--limit` items were read (`stopped at --limit`), or `--max-pages` pages were
-   fetched while the last was full (`stopped at --max-pages`). A page whose promotion ids were all seen on earlier
+3. Stop when a page is empty; or, when the response said how many pages exist (`pagination.totalPages`), when this
+   was the last (the total is believed over a short page); or, when it did not, when a page holds fewer items than
+   asked for. Also stop when `--limit` items were read or a page was cut by it (`stopped at --limit`), or
+   `--max-pages` pages were fetched while the last was full (`stopped at --max-pages`). A page whose promotion ids were all seen on earlier
    pages is not trusted: the run fails with `pagination_repeat`.
 
 Concurrent runs take turns: each batch starts with `pg_advisory_xact_lock`, so two runs can never both create the same
@@ -99,9 +103,11 @@ run would do). It needs outbound HTTPS to `api.awin.com`, `DATABASE_URL`, and op
 
 - **Types:** ids are positive integers (not strings or booleans), `type` is `promotion` or `voucher`,
   `advertiser.joined` must be the boolean `true` (`false` is `not_joined`, anything else `invalid_advertiser`).
-- **Text** (`app/core/plain_text.py`): tags removed with `html.parser` (re-run until nothing tag-like is left, so
-  `&lt;b&gt;` cannot come back as markup; `script` and `style` content dropped), entities decoded once, NFC, control
-  characters and zero-width or bidirectional formatting characters dropped, whitespace collapsed. Lengths are the admin
+- **Text** (`app/core/plain_text.py`): tags removed by a small linear scanner (not `html.parser`, which takes
+  quadratic time on input like `"<a " * 6000`; re-run on its own output so `&lt;b&gt;` cannot come back as markup;
+  `script` and `style` content dropped), entities decoded once, NFC, control characters and zero-width or
+  bidirectional formatting characters dropped before and after stripping (so `<` + zero-width space + `script`
+  cannot glue into a tag), a final step deleting any `<` that still starts something tag-like, whitespace collapsed. Lengths are the admin
   API's (title 200, summary 300, paragraph 2000 and at most 20 of them, terms 500): longer text is cut on a word with
   an ellipsis, text over 20,000 characters rejects the item (`field_too_long`), a title or advertiser name that is empty
   after cleaning rejects it. Only plain text is stored.
@@ -141,7 +147,10 @@ code by hand. A change of code alone is therefore not seen as a change at the so
   the site. If it is ever found enabled, the importer refuses to run (`import_category_enabled`) rather than create
   offers that could be published into a public category. It is created by the command rather than by the migration so
   that the downgrade needs no data handling.
-- **Merchant.** `merchant_imports` maps an Awin advertiser id to a merchant (by id, never by name). A new advertiser
+- **Merchant.** (The website below is a value from the feed. A `direct` affiliate link may only point at the
+  merchant's website host, so an editor who later attaches a `direct` link is trusting that host; the merchant is
+  inactive and every offer needs an editor first, so this is a review step, not an automatic grant.)
+  `merchant_imports` maps an Awin advertiser id to a merchant (by id, never by name). A new advertiser
   gets a new merchant: `active = false` (so `merchant_inactive` blocks publishing), the cleaned advertiser name, no logo,
   and a website only when the promotion's own `url` gives one (the origin, for example `https://www.acme.example`, never a
   network tracking host). The slug is the name, else name plus advertiser id, else `awin-advertiser-<id>`. An existing
@@ -179,14 +188,17 @@ On each item the importer compares hashes, in this order:
 | No provenance row | Create (`created`). |
 | `source_hash` equals the new hash | Nothing is written (`unchanged`). A second run changes nothing, not even `updated_at`. |
 | Source changed, the offer is `DRAFT` **and** has exactly one link **and** its fingerprint equals `applied_content_hash` | Refresh the imported fields and the link, re-store both hashes (`updated`). |
-| Source changed, anything else (edited, published, expired, archived) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared. |
+| Source changed (or a marker is pending), anything else (edited, published, expired, archived) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared; if the editor reverts every edit, the next run
+refreshes the offer with the pending source. A change already recorded is not noted or audited again. |
 
 **Why a fingerprint and not `updated_at`.** `updated_at` also moves for the importer's own writes and for housekeeping
 that is not an edit (expiry, `last_verified_at` bookkeeping), so comparing it would either miss edits or treat every
 refresh as an edit. The fingerprint changes exactly when a person changes what the offer says or where its links go.
 Editing any field, adding or deactivating a link, choosing a category, verifying the offer or changing its status
 all end the import's right to overwrite it. (Choosing a category counts: an editor who has done that has started
-reviewing it.) A test per editable field proves it, an e2e test edits through the real admin service, and another holds
+reviewing it.) A test per editable field proves it, a pinned list of the fingerprinted fields (`FINGERPRINT_VERSION`) makes adding an
+editable field a deliberate change (stored fingerprints would stop matching, which fails safe: nothing is refreshed),
+ an e2e test edits through the real admin service, and another holds
 the offer's row lock as an editor would: the importer waits for it and then judges the saved offer.
 
 ## Audit
@@ -264,6 +276,13 @@ Awin's page does not document these. Each is handled defensively; the **first dr
    "Imported (uncategorised)".
 
 ## Known limits
+
+- **A refresh can land during a review.** An editor who has read an imported draft may find the importer refreshed it
+  (it was still an untouched import) before they clicked verify. The admin verify and publish actions carry no
+  "version I reviewed" check (a change to the admin API, out of scope here); `updated_at` moves on a refresh.
+- **The tracking URL is checked for host, not for ownership.** It must be on an Awin host, but its `awinmid` and
+  `awinaffid` query values are not compared with the advertiser id and the publisher id (their shape is one of the
+  unverified assumptions). The editor reviewing the draft is the control.
 
 - **Not in the feed any more.** An offer whose promotion has left the feed (ended, left the programme) is not
   archived or expired by this command; drafts stay drafts, and published offers still expire through

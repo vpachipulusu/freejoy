@@ -5,7 +5,7 @@
     uv run python -m commands.import_awin_offers --limit 100 --max-pages 2 --updated-since 2026-11-01
 
 Needs ``AWIN_PUBLISHER_ID`` and ``AWIN_OAUTH_API_TOKEN`` (the token goes only in an Authorization header)
-and, unless ``--dry-run``, ``DATABASE_URL``. It never publishes, verifies or features an offer. An
+and ``DATABASE_URL`` (the app settings require it; a ``--dry-run`` opens no connection to it). It never publishes, verifies or features an offer. An
 imported offer is a DRAFT in a disabled "Imported (uncategorised)" category on an inactive merchant, so
 an editor must choose a category, activate the merchant and verify the offer before it can go live. Safe
 to repeat: an offer is found again by promotion id, and one an editor has edited, published, expired or
@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.awin_client import AwinClient, HttpxAwinClient
@@ -281,7 +281,13 @@ def _options(args: argparse.Namespace) -> RunOptions:
 
 def _real_client() -> AwinClient | str:
     """The real client, or the message saying which settings are missing."""
-    from app.core.config import settings
+    try:
+        from app.core.config import settings
+    except ValidationError:  # the message is withheld: it could name a value
+        return (
+            "the settings are invalid: check DATABASE_URL, AWIN_PUBLISHER_ID (a positive "
+            "integer) and AWIN_OAUTH_API_TOKEN (printable ASCII, no spaces)."
+        )
 
     missing = _missing_settings(settings)
     if missing:

@@ -581,3 +581,87 @@ def test_a_tally_adds_up() -> None:
     assert merged.created == 1 and merged.updated == 2
     assert merged.skipped == {"a": 3, "b": 1}
     assert merged.processed == 7 and merged.skipped_total == 4
+
+
+async def test_an_offer_an_editor_reverted_is_refreshed_again_with_the_pending_source() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    created = only_offer(db)
+    db.edit_offer(created.id, title="Edited")
+    moved = promotion(title="Moved on at the source")
+    await run(db, moved, now=LATER)
+    assert only_import(db).source_changed_at == LATER
+    db.committed.offers[created.id] = created  # the editor undoes every edit
+
+    tally = await run(db, moved, now=LATER + timedelta(days=1))
+
+    assert tally.updated == 1 and only_offer(db).title == "Moved on at the source"
+    assert only_import(db).source_changed_at is None
+
+
+async def test_a_known_source_change_is_not_noted_or_audited_again_on_every_run() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    db.edit_offer(only_offer(db).id, title="Edited")
+    moved = promotion(title="Moved on")
+    await run(db, moved, now=LATER)
+    before = snapshot(db)
+
+    tally = await run(db, moved, now=LATER + timedelta(days=1))
+
+    assert tally.unchanged == 1 and snapshot(db) == before
+
+
+async def test_a_refresh_that_moves_the_link_audits_the_link_by_host_only() -> None:
+    db = FakeDatabase()
+    await run(db, promotion())
+    db.committed.audits.clear()
+
+    await run(db, promotion(urlTracking=f"{TRACKING}&moved=1"), now=LATER)
+
+    link_audits = [
+        a for a in db.committed.audits if a["action"] == "admin.offer_links.update"
+    ]
+    assert len(link_audits) == 1
+    assert link_audits[0]["details"]["fields"] == ["destination_url"]
+    assert link_audits[0]["details"]["destination_host"] == "www.awin1.com"
+    assert "https://" not in json.dumps(link_audits, default=str)
+
+
+def test_the_fingerprint_fields_are_pinned_so_a_new_editable_field_is_a_deliberate_change() -> (
+    None
+):
+    from app.services.awin_offer_mapping import FINGERPRINT_FIELDS, FINGERPRINT_VERSION
+
+    assert FINGERPRINT_VERSION == 1
+    assert FINGERPRINT_FIELDS == (
+        "availability",
+        "category_id",
+        "description",
+        "eligibility",
+        "end_at",
+        "featured",
+        "freshness",
+        "image_alt",
+        "image_label",
+        "image_tint",
+        "last_verified_at",
+        "merchant_id",
+        "offer_type",
+        "postage_amount_minor",
+        "postage_currency",
+        "postage_kind",
+        "publisher_notes",
+        "requires_card",
+        "source_url",
+        "start_at",
+        "status",
+        "steps",
+        "subscription_terms",
+        "summary",
+        "title",
+    )

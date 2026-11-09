@@ -107,3 +107,53 @@ def test_paragraphs_are_capped_in_number_and_length() -> None:
 
 def test_paragraphs_of_nothing_is_an_empty_tuple() -> None:
     assert plain_paragraphs("<p></p>", 5, 50) == ()
+
+
+ZWSP, NUL, SHY = chr(0x200B), chr(0), chr(0xAD)
+SURROGATE = chr(0xD800)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        f"<{ZWSP}script>alert(1)</script>",
+        f"<{NUL}img src=x onerror=alert(1)>",
+        f"<{ZWSP}/script>",
+        f"x<{SURROGATE}script>",
+        f"<{SHY}b>hi",
+        "<<img src=x onerror=alert(1)",
+        "<<a",
+        "<<<<<<<<img src=x",
+        "&lt;<!-->script>",
+        f"&lt;{ZWSP}script&gt;",
+        "&#60;&#8203;script&#62;",
+    ],
+)
+def test_invisible_characters_cannot_glue_a_tag_together_after_the_strip(
+    raw: str,
+) -> None:
+    assert not TAG_LIKE.search(plain_line(raw, 500))
+    assert not any(TAG_LIKE.search(p) for p in plain_paragraphs(raw, 5, 500))
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "<a " * 6666,
+        "<!--" * 5000,
+        "<script>" * 2500,
+        "<" * 19_000,
+        "<a>" * 6000 + "<",
+        "<p " * 3000 + ">" + "<b " * 3000,
+        "&lt;a " * 3000,
+        "<style>" + "</style" * 2500,
+    ],
+)
+def test_hostile_input_takes_linear_time(raw: str) -> None:
+    import time
+
+    started = time.perf_counter()
+    plain_line(raw, 300)
+    plain_paragraphs(raw, 20, 2000)
+
+    assert time.perf_counter() - started < 1.0

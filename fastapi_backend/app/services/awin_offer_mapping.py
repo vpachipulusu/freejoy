@@ -48,6 +48,9 @@ DEFAULT_ELIGIBILITY = "See the offer terms on the merchant's site before you cla
 AVAILABILITY = (
     "Listed for UK customers. Check the merchant's terms for dates and exclusions."
 )
+FINGERPRINT_VERSION = (
+    1  # bump with FINGERPRINT_FIELDS: stored fingerprints then stop matching, safely
+)
 FINGERPRINT_FIELDS = tuple(sorted(EDITABLE_FIELDS | {"status", "last_verified_at"}))
 REFRESH_FIELDS = (
     "title",
@@ -190,6 +193,7 @@ def _canonical(value: Any) -> Any:
 def fingerprint(offer: OfferRecord, links: Sequence[AffiliateLinkRecord]) -> str:
     """SHA-256 (hex) of the offer's editable state and its links, as an editor would see them."""
     state: Mapping[str, Any] = {
+        "v": FINGERPRINT_VERSION,
         "offer": {name: getattr(offer, name) for name in FINGERPRINT_FIELDS},
         "links": sorted(
             (

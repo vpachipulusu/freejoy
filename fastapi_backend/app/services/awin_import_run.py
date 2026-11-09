@@ -28,6 +28,8 @@ from datetime import date, datetime
 from typing import Any
 
 from app.core.awin_client import (
+    MAX_PAGE_SIZE,
+    MIN_PAGE_SIZE,
     AwinClient,
     AwinError,
     PromotionFilters,
@@ -49,7 +51,6 @@ from app.services.awin_promotions import (
 )
 
 BATCH_SIZE = 50
-MIN_PAGE_SIZE, MAX_PAGE_SIZE = 10, 200
 DEFAULT_LIMIT, MAX_LIMIT = 500, 5000
 DEFAULT_MAX_PAGES, MAX_MAX_PAGES = 10, 50
 MAX_LOGGED_SKIPS = 100
@@ -148,11 +149,22 @@ def _stop_reason(
     page_size: int,
     received: int,
     options: RunOptions,
+    *,
+    truncated: bool,
 ) -> tuple[bool, str | None]:
     """Whether to stop after this page, and the ``stopped_early`` note when more may exist."""
-    finished = len(page.items) < page_size or (
-        page.total_pages is not None and page_no >= page.total_pages
-    )
+    if (
+        truncated
+    ):  # items past --limit were dropped, so the feed was not read to its end
+        return True, "limit"
+    if not page.items:
+        return True, None
+    if (
+        page.total_pages is not None
+    ):  # the response said how many pages exist: believe it
+        finished = page_no >= page.total_pages
+    else:
+        finished = len(page.items) < page_size
     if finished:
         return True, None
     if received >= options.limit:
@@ -205,7 +217,14 @@ async def _progress(
             async for written in _write_page(units, promotions, report, now):
                 report = written
                 yield _Progress(report, STAGE_WRITE)
-        stop, early = _stop_reason(page, page_no, page_size, report.received, options)
+        stop, early = _stop_reason(
+            page,
+            page_no,
+            page_size,
+            report.received,
+            options,
+            truncated=len(items) < len(page.items),
+        )
         report = replace(report, stopped_early=early)
         yield _Progress(report, STAGE_FETCH)
         if stop:

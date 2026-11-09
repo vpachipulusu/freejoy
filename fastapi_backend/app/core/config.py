@@ -143,8 +143,10 @@ class Settings(BaseSettings):
         token = value.strip()
         if not token:
             return None
-        if any(char.isspace() or not char.isprintable() for char in token):
-            raise ValueError("AWIN_OAUTH_API_TOKEN must not contain whitespace")
+        if not all("!" <= char <= "~" for char in token):  # printable ASCII, no spaces
+            raise ValueError(
+                "AWIN_OAUTH_API_TOKEN must be printable ASCII without whitespace"
+            )
         return token
 
     @model_validator(mode="after")

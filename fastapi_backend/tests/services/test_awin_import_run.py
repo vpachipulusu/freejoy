@@ -292,3 +292,64 @@ async def test_a_dry_run_needs_no_database_at_all() -> None:
     report = await run_import(client, None, RunOptions(dry_run=True), NOW)
 
     assert report.valid == 1
+
+
+async def test_a_short_last_page_cut_by_the_limit_is_reported_as_stopped_at_the_limit(
+    small_pages: int,
+) -> None:
+    client = FakeAwinClient([raw_page(1, 5), raw_page(6, 3)])
+
+    report = await go(client, limit=7)
+
+    assert report.received == 7 and report.stopped_early == "limit"
+
+
+async def test_a_page_cut_by_a_small_limit_is_reported_even_when_it_was_short() -> None:
+    client = FakeAwinClient(
+        [raw_page(1, 7)]
+    )  # asked for 10 (the minimum), got 7, limit is 5
+
+    report = await go(client, limit=5)
+
+    assert report.received == 5 and report.stopped_early == "limit"
+
+
+async def test_a_short_page_does_not_end_a_run_that_knows_more_pages_exist(
+    small_pages: int,
+) -> None:
+    client = FakeAwinClient(
+        [raw_page(1, 3), raw_page(4, 3), raw_page(7, 1)], total_pages=3
+    )
+
+    report = await go(client, limit=100)
+
+    assert [page for _, page, _ in client.requests] == [1, 2, 3]
+    assert report.received == 7 and report.stopped_early is None
+
+
+async def test_an_empty_page_ends_the_run_whatever_the_total_says(
+    small_pages: int,
+) -> None:
+    client = FakeAwinClient([raw_page(1, 3), []], total_pages=9)
+
+    report = await go(client, limit=100)
+
+    assert len(client.requests) == 2 and report.received == 3
+
+
+async def test_a_slug_skip_is_logged_with_its_id_and_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db = FakeDatabase()
+    await go(FakeAwinClient([[raw_item(1001)]]), db)
+    db.committed.imports.clear()
+    db.committed.merchant_imports.clear()
+    await go(FakeAwinClient([[raw_item(1001)]]), db)
+    db.committed.imports.clear()
+    db.committed.merchant_imports.clear()
+    caplog.set_level(logging.WARNING)
+
+    report = await go(FakeAwinClient([[raw_item(1001)]]), db)
+
+    assert report.tally.skipped == {"slug_unavailable": 1}
+    assert "promotion_id=1001 reason=slug_unavailable" in caplog.text

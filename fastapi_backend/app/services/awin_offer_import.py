@@ -30,6 +30,7 @@ the store, auditor and committer, and a failure leaves the batch uncommitted.
 """
 
 import enum
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
@@ -55,6 +56,7 @@ from app.services.awin_promotions import PROVIDER, Promotion, SkipReason, source
 from app.services.offer_rules import AUDITED_FIELDS
 
 SOURCE = "commands.import_awin_offers"
+logger = logging.getLogger("freejoy.awin_import")
 OFFERS = "offers"
 LINKS = "affiliate_links"
 MERCHANTS = "merchants"
@@ -214,7 +216,7 @@ class OfferImporter:
         )
         if known is None:
             return await self._create(promotion, category_id, digest)
-        if known.source_hash == digest:
+        if known.source_hash == digest and known.source_changed_at is None:
             return ItemResult(Outcome.UNCHANGED)
         return await self._reconcile(promotion, known, digest)
 
@@ -228,6 +230,11 @@ class OfferImporter:
         )
         merchant_id = await self._merchant_id(promotion) if slug else None
         if slug is None or merchant_id is None:
+            logger.warning(
+                "awin item skipped: promotion_id=%s reason=%s",
+                promotion.promotion_id,
+                SkipReason.SLUG_UNAVAILABLE.value,
+            )
             return ItemResult(Outcome.SKIPPED, SkipReason.SLUG_UNAVAILABLE)
         offer = await self.store.insert_offer(
             offer_values(promotion, category_id, merchant_id, slug)
@@ -267,7 +274,7 @@ class OfferImporter:
             action="admin.merchants.create",
             resource=MERCHANTS,
             resource_id=merchant.id,
-            after={"name": merchant.name, "slug": merchant.slug, "active": False},
+            after={"slug": merchant.slug, "active": False},
             details={
                 "provider": PROVIDER,
                 "external_id": external_id,
@@ -343,6 +350,8 @@ class OfferImporter:
         )
         if untouched:
             return await self._refresh(promotion, known, offer, links, digest)
+        if digest == known.source_hash:  # already recorded: nothing new for a reviewer
+            return ItemResult(Outcome.UNCHANGED)
         return await self._note_source_change(known, digest)
 
     async def _refresh(

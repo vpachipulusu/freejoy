@@ -8,22 +8,26 @@ render with ordinary escaping, and none of it can start a tag.
 * ``plain_line`` gives one trimmed line, cut at ``max_length`` on a word edge with an ellipsis.
 * ``plain_paragraphs`` gives up to ``max_paragraphs`` non-empty lines, each cut the same way. Every
   line break in the source (a ``<br>``, a block element, a newline) starts a new paragraph.
-* Text longer than ``MAX_RAW_LENGTH`` is refused before it is parsed (``TextTooLong``), so a hostile
-  megabyte cannot cost CPU.
+* Text longer than ``MAX_RAW_LENGTH`` is refused before it is parsed (``TextTooLong``).
 
-The tag stripper is ``html.parser`` (standard library), run again on its own output until no tag-like
-text is left (``&lt;b&gt;`` decodes to ``<b>``, which is then removed), and any ``<`` that still
-starts something tag-like afterwards is deleted. ``script`` and ``style`` content is dropped, not kept.
+The tag stripper is a small single-pass scanner written for this module, not ``html.parser``: the
+standard parser takes quadratic time on input such as ``"<a " * 6000`` (tens of seconds), which would let
+one hostile field stall an import. Here every ``str.find`` that fails is remembered, so the work is linear
+in the length. It runs again on its own output (``&lt;b&gt;`` decodes to ``<b>``, which is then removed),
+invisible characters are dropped before and after (``<`` + zero-width space + ``script`` must not glue
+into a tag), and a last step deletes every ``<`` that still starts something tag-like.
+``script`` and ``style`` content is dropped, not kept.
 """
 
+import html
 import re
 import unicodedata
-from html.parser import HTMLParser
 
 MAX_RAW_LENGTH = 20_000
-ELLIPSIS = "…"
+ELLIPSIS = "\N{HORIZONTAL ELLIPSIS}"
 MAX_STRIP_PASSES = 3
-_TAG_START = re.compile(r"<(?=[A-Za-z/!?])")
+_TAG_START_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/!?")
+_TAG_NAME = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9]*)")
 _BLOCK_TAGS = frozenset(
     {
         "address",
@@ -61,43 +65,91 @@ class TextTooLong(ValueError):
     """The raw text is longer than ``MAX_RAW_LENGTH``."""
 
 
-class _TextExtractor(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self._skipping = 0
+class _Finder:
+    """``str.find`` that remembers a miss, so repeated misses cost one scan in total."""
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in _SKIPPED_TAGS:
-            self._skipping += 1
-        elif tag in _BLOCK_TAGS:
-            self.parts.append("\n")
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._lower = text.lower()
+        self._missing: set[str] = set()
 
-    def handle_endtag(self, tag: str) -> None:
-        if tag in _SKIPPED_TAGS:
-            self._skipping = max(self._skipping - 1, 0)
-        elif tag in _BLOCK_TAGS:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if not self._skipping:
-            self.parts.append(data)
+    def find(self, needle: str, start: int, *, lowered: bool = False) -> int:
+        if needle in self._missing:
+            return -1
+        source = self._lower if lowered else self._text
+        found = source.find(needle, start)
+        if found < 0:
+            self._missing.add(needle)
+        return found
 
 
-def _strip_tags(text: str) -> str:
-    parser = _TextExtractor()
-    parser.feed(text)
-    parser.close()
-    return "".join(parser.parts)
+def _skip_to_end(finder: _Finder, name: str, start: int) -> int:
+    """The index just after the closing tag of a skipped element, or -1 when it never closes."""
+    closing = finder.find(f"</{name}", start, lowered=True)
+    if closing < 0:
+        return -1
+    end = finder.find(">", closing)
+    return end + 1 if end >= 0 else -1
+
+
+def _tag_span(finder: _Finder, text: str, index: int) -> tuple[int, str | None, bool]:
+    """For a ``<`` at ``index``: where the markup ends, the tag name if any, and whether it closes."""
+    if text.startswith("<!--", index):
+        end = finder.find("-->", index + 4)
+        return (end + 3 if end >= 0 else len(text)), None, False
+    end = finder.find(">", index + 1)
+    if end < 0:
+        return len(text), None, False
+    named = _TAG_NAME.match(text, index)
+    if named is None:
+        return end + 1, None, False
+    return end + 1, named.group(2).lower(), named.group(1) == "/"
+
+
+def _strip_tags(text: str, *, decode: bool) -> str:
+    """Text without markup; ``decode`` also turns entities into characters (done once only)."""
+    finder, parts, index, length = _Finder(text), [], 0, len(text)
+    while index < length:
+        lt = text.find("<", index)
+        chunk = text[index:] if lt < 0 else text[index:lt]
+        parts.append(html.unescape(chunk) if decode else chunk)
+        if lt < 0:
+            break
+        if text[lt + 1 : lt + 2] not in _TAG_START_CHARS:
+            parts.append("<")
+            index = lt + 1
+            continue
+        end, name, closing = _tag_span(finder, text, lt)
+        if name in _SKIPPED_TAGS and not closing:
+            end = _skip_to_end(finder, name, end)
+            end = length if end < 0 else end
+        elif name in _BLOCK_TAGS:
+            parts.append("\n")
+        index = end
+    return "".join(parts)
 
 
 def _without_markup(raw: str) -> str:
-    text = raw
-    for _ in range(MAX_STRIP_PASSES):
-        if "<" not in text and "&" not in text:
+    text = _strip_tags(raw, decode=True)
+    for _ in range(MAX_STRIP_PASSES - 1):
+        if "<" not in text:
             break
-        text = _strip_tags(text)
-    return _TAG_START.sub("", text)
+        text = _strip_tags(text, decode=False)
+    return _drop_tag_openers(text)
+
+
+def _drop_tag_openers(text: str) -> str:
+    """Delete every ``<`` that is followed, after any further ``<``, by a tag-like character (linear)."""
+    kept: list[str] = []
+    opens_a_tag = False
+    for char in reversed(text):
+        if char == "<":
+            if opens_a_tag:
+                continue
+        else:
+            opens_a_tag = char in _TAG_START_CHARS
+        kept.append(char)
+    return "".join(reversed(kept))
 
 
 def _clean_characters(text: str) -> str:
@@ -119,7 +171,10 @@ def _clean_characters(text: str) -> str:
 def _plain(raw: str) -> str:
     if len(raw) > MAX_RAW_LENGTH:
         raise TextTooLong
-    return _clean_characters(_without_markup(raw))
+    cleaned = _clean_characters(raw)
+    stripped = _clean_characters(_without_markup(cleaned))
+    # Dropping characters above may have joined a ``<`` to a tag name; remove any such ``<`` last.
+    return _drop_tag_openers(stripped)
 
 
 def _fit(line: str, max_length: int) -> str:

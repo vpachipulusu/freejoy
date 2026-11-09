@@ -457,3 +457,30 @@ def test_without_a_dsn_the_reporter_sends_nothing() -> None:
     )
 
     assert report_to_sentry("m", {"cause": "x"}, no_dsn) is False
+
+
+def test_invalid_or_missing_app_settings_exit_2_without_a_traceback_or_a_request() -> (
+    None
+):
+    import subprocess
+    import sys
+
+    from tests._subprocess_support import BACKEND_ROOT, from_scratch_environment
+
+    environment = from_scratch_environment(
+        IGNORE_ENV_FILE="1"
+    )  # no DATABASE_URL at all
+
+    finished = subprocess.run(
+        [sys.executable, "-m", "commands.import_awin_offers", "--dry-run"],
+        cwd=BACKEND_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert finished.returncode == 2, finished.stderr
+    assert "settings are invalid" in finished.stderr
+    assert "Traceback" not in finished.stderr
