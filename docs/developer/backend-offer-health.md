@@ -26,7 +26,7 @@ the rules live in the services, the SQL in the repository.
 | `--limit N` | 500 (1 to 5000) | Most URLs checked in one run. Offers least recently verified (`last_verified_at`) come first. |
 | `--batch-size N` | 200 (1 to 1000) | Offers per committed expiry batch. |
 | `--concurrency N` | 5 (1 to 20) | Requests in flight at once. A single host is never asked twice at the same time. |
-| `--max-seconds N` | 900 (at least 1) | Time limit for the reachability step. Requests still unfinished are cancelled and their targets are reported `inconclusive / not_checked`; the exit code stays 0. |
+| `--max-seconds N` | 900 (1 to 86400) | Time limit for the **request phase only**: it does not bound expiry, the read of the URLs to check, or shutdown. Requests still unfinished are cancelled and their targets are reported `inconclusive / not_checked`; the exit code stays 0. |
 
 | Exit | Meaning |
 | --- | --- |
@@ -100,7 +100,7 @@ reporting for those.
 | Status | Reason codes | When |
 | --- | --- | --- |
 | `reachable` | `ok`, `redirect` | 2xx, or 3xx (the redirect is not followed) |
-| `inconclusive` | `auth_required`, `method_not_allowed`, `rate_limited`, `probe_error`, `host_skipped`, `not_checked` | 401 or 403 (usually a bot filter), 405 after a `GET` retry, 429, our own unexpected error, a request skipped by the host circuit breaker, or one cut off by `--max-seconds` |
+| `inconclusive` | `auth_required`, `method_not_allowed`, `rate_limited`, `probe_error`, `host_skipped`, `not_checked`, `tracking_host` | 401 or 403 (usually a bot filter), 405 after a `GET` retry, 429, our own unexpected error, a request skipped by the host circuit breaker, one cut off by `--max-seconds`, or a tracking-host URL handed to `probe_targets` directly |
 | `unreachable` | `dns_failure`, `connection_error`, `timeout`, `tls_error`, `client_error`, `server_error` | DNS did not resolve, connection or TLS failed, a deadline passed, any other 4xx, any 5xx |
 | `refused` | `invalid_url`, `blocked_address` | never requested: the stored URL failed validation, or its name resolves to a non-public address |
 
@@ -136,8 +136,8 @@ The URLs are written by admins and the command runs inside your network, so each
 7. **Deadlines.** Connect 5 s, read 10 s, and 20 s for the whole check. `--concurrency` bounds requests in flight and a
    per-host lock keeps the load on one merchant to one request at a time.
 8. **Bounded run.** After 3 consecutive `timeout` or `connection_error` results for one host (`MAX_HOST_FAILURES`), that
-   host's remaining targets are not requested and are reported `inconclusive / host_skipped`; any other result resets
-   the count. `--max-seconds` (default 900) caps the whole reachability step with `asyncio.timeout`: what finished is
+   host's remaining targets are not requested and are reported `inconclusive / host_skipped`; a result that proves the host answered
+   resets the count, while refusals (`invalid_url`, `blocked_address`) and `probe_error` neither add to it nor clear it. `--max-seconds` (default 900) caps the request phase with `asyncio.timeout`: what finished is
    reported, the rest is `inconclusive / not_checked`, and the exit code is still 0. Both counts appear in the summary.
 9. **Neutral User-Agent:** `<Brand>-LinkCheck/1.0 (+<PUBLIC_SITE_URL>)`, the brand taken from `APP_NAME`.
 
@@ -160,7 +160,7 @@ expired certificate is `tls_error`.
   same reason). No `SENTRY_DSN`, no event, no error. If sending fails, stderr names the error type and the run's exit
   code is unchanged.
 - **Failed run.** A run that exits 1 sends **one** event too, after the last request has finished: constant message
-  `Offer health check run failed`, context `offer_health` holding only `stage`, `cause` (the exception type name) and
+  `Offer health check run failed` at level `error` (the unreachable summary stays `warning`), context `offer_health` holding only `stage`, `cause` (the exception type name) and
   `expired` (offers already committed). No URL, id or error text. Same no-op when Sentry is off.
 
 ## Scheduling
@@ -179,6 +179,10 @@ exists. Pair it with `commands.prune_click_events` and `commands.purge_subscribe
   is `inconclusive`, never a problem).
 - A redirect that leads to a dead page reads as reachable: redirects are not followed (see above). Network-provider
   links and URLs on tracking hosts are never checked.
+- The tracking-host list is the `/go/` allow-list (`PROVIDER_HOSTS`), not an exhaustive registry of affiliate
+  networks. A network domain that is not listed, a short link that redirects to a network, or a merchant subdomain
+  CNAMEd to a network would still be requested. `probe_targets` re-checks the list itself (`inconclusive /
+  tracking_host`), so any caller is covered as far as the list goes.
 - The per-host lock and the failure breaker are keyed on the host **name**, so subdomains of one domain (or two names
   on one address) can be probed in parallel, bounded by `--concurrency`.
 - The `GET` fallback after a 405 or 501 sends the stored URL including its query string, as `HEAD` does; the response
