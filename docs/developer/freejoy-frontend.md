@@ -3,11 +3,12 @@
 Phase 1 built the public Freejoy pages on fixture data so the design could be approved. FREEJ-21
 (Phase 2) switched them to real published offers from the catalogue API. The pages are still server
 rendered and need no login, the browser never calls FastAPI, and the fixtures remain for local design
-work and unit tests. Nothing here stores visitor data or links to an external site.
+work and unit tests. Nothing here stores visitor data on a server or links to an external site. The one
+thing kept in the browser is the visitor's own Saved list (FREEJ-28, [Saved freebies](#saved-freebies-freej-28)).
 
 Design reference: `design-reference/freejoy/` (PNG and SVG screens plus `design_tokens.json`).
 Plan and decisions: `.claude/plans/freejoy-phase1.plan.md`. Jira: project `FREEJ`, stories
-FREEJ-6 to FREEJ-16 (Phase 1) and FREEJ-21 (the switch to the API).
+FREEJ-6 to FREEJ-16 (Phase 1), FREEJ-21 (the switch to the API) and FREEJ-28 (favourites).
 
 ## Routes
 
@@ -20,6 +21,7 @@ All public pages live in the `(public)` route group under `src/app/(public)/` an
 | `/freebies` | 02 / 06 | Search, category/type/postage filters, sort, pagination, empty and error states |
 | `/category/[slug]` | 02 | Category intro plus the same catalogue controls scoped to one category |
 | `/freebies/[slug]` | 03 / 07 | Hero, claim steps, "important bits", trust panel, related offers; the "offer has ended" page for an ended offer; 404 page for an unknown one |
+| `/saved` | 05 / 06 tab | The visitor's saved freebies, read from this device ([Saved freebies](#saved-freebies-freej-28)); static shell, `noindex, follow`, not in the sitemap |
 | `/alerts` | 04 | Preferences form; starts a double opt-in through a server action ([backend-subscribers.md](backend-subscribers.md)); a plain "not open yet" notice until `ALERTS_FORM_LIVE=true` |
 | `/about`, `/contact`, `/privacy`, `/cookies`, `/terms`, `/affiliate-disclosure` | – | Editorial and legal scaffolding, each with a visible "draft, pending legal review" banner |
 | `not-found.tsx` | – | Freejoy-styled 404 |
@@ -162,8 +164,79 @@ the admin publish, unpublish and expire actions (FREEJ-22); nothing calls it yet
   `ALERTS_FORM_LIVE=true` it shows a plain "Alerts aren't open yet" notice instead. No address or token
   is ever logged.
 - Legal pages carry a draft banner and a reviewer checklist instead of compliance claims.
-- Public pages set no cookies and use no browser storage (tests: `public-pages-privacy.test.tsx`;
-  `catalogue-live.spec.ts` checks `context.cookies()`).
+- Public pages set no cookies. They use no browser storage either, except the visitor's own Saved list
+  (`freejoy.saved.v1`, written only when a heart is pressed; `lib/saved/saved-store.ts` is the only code in
+  the app that touches browser storage, and `public-pages-privacy.test.tsx` fails if that changes).
+  `catalogue-live.spec.ts` and `saved.spec.ts` check `context.cookies()`.
+
+## Saved freebies (FREEJ-28)
+
+A heart on every offer card and on the offer page saves the offer to a list on **this device**; `/saved`
+lists them; the phone tab bar has a Saved tab and the desktop header has a Saved link. No account, no
+cookie, no backend call to store anything, and **no analytics event on save or unsave**.
+
+**Storage contract** (`src/lib/saved/saved-store.ts`; unit tests in `unit/lib/saved/`):
+
+| | |
+|---|---|
+| Medium | `window.localStorage`, one key: `freejoy.saved.v1` |
+| Value | `{"v":1,"slugs":["glow-boosting-face-cream-sample", ...]}`: offer **slugs** only, oldest first. No titles, no ids of people, nothing else |
+| Read | Defensive. Not that envelope (bad JSON, another version, over 32 KB) means an empty list, never a throw; a bad entry inside a good envelope (not a valid slug, a duplicate) is dropped. A read never rewrites the stored value; the next save replaces it |
+| Cap | 200 (`MAX_SAVED_OFFERS`). Saving past it drops the oldest |
+| Storage unavailable | Private mode, blocked site data, quota: reads see an empty list, writes keep the list in memory for that page, so the heart still toggles until the tab closes. A successful write from another tab ends the memory fallback |
+| Consent | This is functional storage the visitor asked for by pressing the heart, so it needs no consent banner (our reading of PECR's "strictly necessary" exemption, **to be confirmed in legal review**). It is listed in the draft cookie notice and mentioned in the draft privacy notice; both stay marked draft |
+
+If the shape ever changes, add `freejoy.saved.v2` and migrate or discard `v1`; never reuse the key.
+
+**React side.** The store is an external store for `useSyncExternalStore` (`subscribeSaved`,
+`getSavedSnapshot`, `getServerSavedSnapshot`; hooks in `src/lib/saved/use-saved.ts`). The snapshot is a frozen
+array that keeps its identity until the stored value changes. The server snapshot is empty, so the server render
+and the first client render agree and there is no hydration mismatch. Every heart and the Saved page share the
+store, and the `storage` event keeps other tabs in step. `useHydrated()` tells "not read yet" (skeleton) from
+"nothing saved" (empty state), so a saved list never flashes empty.
+
+**The heart** (`SaveButton`). A real `<button type="button">` with `aria-pressed` and the name "Save {title}" /
+"Remove {title} from saved" (the title is never stored). 44px target around a 32px disc (so it fits a narrow
+two-column card; the badge on the card shrinks on phones for the same reason). A heart that is outlined or
+filled (so state is not only a colour); no focus style of its own, the global outline shows. Motion is
+`motion-safe:` only. It sits **beside** the card's stretched link, never inside it, with `z-10` to stay
+clickable. `OfferCard` and `OfferHero` stay server components; the heart is the only client island in them.
+On the card the demo badge moved to the bottom-right to free the corner the design gives the heart.
+
+**The Saved page** (`src/app/(public)/saved/page.tsx`). A static server shell (heading, the "Saved on this
+device" note, a `<noscript>` message) around the `SavedOffers` client island. The island reads the slugs and
+calls the server action `loadSavedOffersAction` (`src/app/actions/saved-actions.ts`) in chunks of 48
+(`SAVED_OFFERS_REQUEST_LIMIT`), once per slug (a slug saved later, say in another tab, is the only one asked for
+next). It renders the **same `OfferGrid` and `OfferCard`** as the catalogue, newest saved first, with a polite
+live region for the count. When the focused card disappears (its heart was pressed) focus moves to that region.
+
+**The server action.** Input validated with Zod: 1 to 48 slugs, each `^[a-z0-9-]+$` and at most 100 characters,
+otherwise a curated failure and no catalogue read. Each slug goes through `lookupOffer` (the same facade and
+60-second Data Cache as the offer page), at most 6 at a time, and ends in exactly one list:
+
+- `offers`: published and live today (`isLive`; an expired offer is not shown even though the facade still
+  looks it up as found). Public fields only; fixture offers get their merchant attached.
+- `missing`: unknown, draft, archived, expired or ended. The page **drops these from the list and from
+  storage** and says "N saved freebie(s) no longer available and removed from your list". No error.
+- `unavailable`: the catalogue could not be read. **Never pruned**, so an outage cannot empty a list. The page
+  says they are still saved and offers "Try again"; a failed call shows a curated error and also waits for the
+  visitor (no automatic retry loop).
+
+The action logs the error name only, never a slug. Cost to the backend: one cached read per saved offer per
+minute, so a visitor with 200 saved offers is 200 reads on a cold cache (the shared per-address limit is
+120 a minute, see [Catalogue API wrapper](#catalogue-api-wrapper-freej-21)). Server actions are not covered by the
+edge rate limiter (it covers `/api/` and `/go/`).
+
+**Navigation.** `SITE_TAB_ITEMS` is Home, Browse, **Saved**, Alerts, as in the design (screens 05 to 07): Saved
+took the third slot, so Categories left the phone tab bar (it stays in the menu sheet, on the home page and on
+`/freebies`). The active tab gets `aria-current="page"` from `activeTabHref`. The desktop header has a heart link
+to `/saved` next to Log in (icon only at 1024px, with the word from 1280px, so the nav row never wraps). There is
+no count badge, because the design has none.
+
+**Indexing and routing.** `/saved` is `noindex, follow` (it is different on every device), is not in the
+sitemap and is left crawlable in `robots.txt` so the `noindex` can be seen. `src/proxy.ts` keeps no list of
+public routes: it protects `/dashboard`, `/settings`, `/profile`, `/security` and `/admin` and meters `/api/`
+and `/go/`, so `/saved` is public without an entry (`saved-page.test.tsx` and the proxy test cover it).
 
 ## Theme and typography
 
@@ -180,20 +253,26 @@ the admin publish, unpublish and expire actions (FREEJ-22); nothing calls it yet
 | Folder | Contents |
 |---|---|
 | `src/components/site/` | Header, footer, mobile tab bar, announcement bar, search form, brand mark |
+| `src/components/saved/` | `SaveButton` (the heart), `SavedOffers` (the Saved page's list) and its `useSavedOffers` hook |
 | `src/components/catalogue/` | `OfferCard`/`OfferGrid` (shared), filters, sort, pagination, empty state, drawer, `InlineError`, `RetryButton` |
 | `src/components/home/` | Hero, hero art, trust strip, category grid, freshly found, newsletter band, `HomeSections` (+ skeleton) |
 | `src/components/offer/` | Breadcrumbs, hero, claim steps, important bits, trust panel, CTA, ended panel and ended-offer page, related |
 | `src/components/alerts/` | `AlertsForm` (client component, react-hook-form + Zod) |
 | `src/components/legal/` | `LegalPage` shell with draft banner and `ReviewerChecklist` |
 
-Only `offer-cta.tsx`, `retry-button.tsx`, `alerts-form.tsx`, `filter-drawer.tsx`, the mobile tab bar and
-the site header are client components. Client components must not import `@/lib/catalogue` (the facade),
+Only `offer-cta.tsx`, `retry-button.tsx`, `alerts-form.tsx`, `filter-drawer.tsx`, the mobile tab bar, the
+site header and the two Saved components (`save-button.tsx`, `saved-offers.tsx`) are client components. Client components must not import `@/lib/catalogue` (the facade),
 `@/lib/api/catalogue` or read `BACKEND_*` / `CATALOGUE_SOURCE`; the client/server boundary test enforces
 it. The filter drawer and sort control render outside the keyed Suspense boundaries in
 `catalogue-layout.tsx` so they keep focus across filter navigations.
 
 ## Tests
 
+- Saved freebies: `unit/lib/saved/saved-store.test.ts` (add, remove, toggle, cap, corrupt and foreign data,
+  throwing storage, the `storage` event, the server snapshot), `unit/components/save-button.test.tsx` (heart,
+  hydration), `saved-offers.test.tsx` (list, empty, pruning, outage, chunking), `saved-navigation.test.tsx` (tab bar
+  and header), `unit/actions/saved-actions.test.ts` (validation, bounds, only published offers) and
+  `unit/app/saved-page.test.tsx` (page, noindex, sitemap, robots).
 - Unit (Vitest): `src/__tests__/unit/app/*` render each page and check metadata, 404s, error states and
   the no-external-link rule; `unit/api/catalogue*.test.ts` cover the wrapper (cache wiring, status
   mapping, timeout, outage error, headers on the wire); `unit/lib/catalogue/*` cover the mapper, the
@@ -205,7 +284,12 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
   and 5). They need `npm run test:e2e:local`, which builds a production bundle and expects a running
   backend and a Firebase test project. **`catalogue-live.spec.ts` was written in FREEJ-21 but not run**: it
   needs a seeded backend (FREEJ-20). How to run it is in the file header and in
-  [local-e2e.md](local-e2e.md#real-catalogue-data).
+  [local-e2e.md](local-e2e.md#real-catalogue-data). `saved.spec.ts` (FREEJ-28: save, open `/saved`, remove, reload,
+  corrupt storage, a vanished offer, per-browser isolation; desktop and 390px) runs on the fixture catalogue, like
+  `freebies.spec.ts`. Run it with `npm run test:e2e:saved` (`playwright.saved.config.ts`: no login, no backend, no
+  `webServer`) against a production build you serve yourself with `CATALOGUE_SOURCE=fixture` and `E2E_BASE_URL`.
+  All 11 tests passed that way when FREEJ-28 was built; it has **not** been run through `test:e2e:local` or in CI
+  (E2E is not in the gate).
 
 ## Known deviations
 
@@ -292,4 +376,4 @@ them. Check the retention setting and shorten it before launch; the privacy noti
   (this switch) is done; FREEJ-22 (admin UI) calls `revalidateCatalogue`.
 - Phase 3 (FREEJ-23 to FREEJ-27): `/go/[offerId]` redirect, click events, email provider,
   sitemap, structured data.
-- Phase 4 (FREEJ-28, FREEJ-29): favourites and the remaining nice-to-haves.
+- Phase 4 (FREEJ-28, FREEJ-29): favourites (FREEJ-28, done) and the remaining nice-to-haves.

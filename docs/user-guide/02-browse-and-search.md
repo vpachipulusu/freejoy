@@ -108,6 +108,30 @@ Phone:
 
 ![The no-results panel on a phone](images/catalogue-empty-m.png)
 
+## Step 9. Save a freebie for later
+
+Every card, and the top of every offer page, has a **heart** button.
+
+1. Press the heart on a card (or on the offer page). The heart fills in and its label changes from "Save ..." to
+   "Remove ... from saved". The page does not move, and you are not taken anywhere.
+2. Press it again to take the freebie off your list.
+3. To see your list, choose **Saved**: the heart link in the header on a computer, or the **Saved** tab at the
+   bottom on a phone. The page is headed **Saved freebies** and shows the same cards as the catalogue, newest
+   saved first.
+4. If you have saved nothing yet, the page says **Nothing saved yet** and has a **Browse freebies** button.
+
+**Your list stays on this device.** It is kept in your browser, not in an account. It is not copied to your other
+phones or computers, another browser on the same computer has its own list, and clearing your browser data (or
+using a private window) removes it. Freejoy does not record that you saved or removed a freebie.
+
+If a freebie you saved has ended or been taken down, it quietly disappears from your list and a line says how many
+were removed. If Freejoy cannot load some of your saved freebies right now, they stay saved, and a **Try again**
+button appears.
+
+You can save up to 200 freebies; saving more drops the oldest.
+
+*The screenshots in this guide were taken before the heart existed, so this step has none.*
+
 ## Step 9. When the catalogue cannot be loaded
 
 Rarely, the site cannot reach its catalogue. Instead of the list you see a panel headed **The freebies are not
