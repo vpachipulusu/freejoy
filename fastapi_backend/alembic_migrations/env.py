@@ -3,7 +3,6 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -11,8 +10,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 import app.models.platform  # noqa: F401  (registers every table on Base.metadata)
 from app.core.base import Base
 from app.core.db_url import to_async_target
+from app.core.env_file import load_env_file
 
-load_dotenv()
+load_env_file()
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -88,7 +88,10 @@ session makers: those live behind `app.core.database` (`SessionProvider`), and r
   Admin, the internal key) are validated at import time so a misconfigured deployment refuses to start.
   `ENVIRONMENT` defaults to `production`; only `local` and `test` (or Vercel `preview`/`development`) relax
   checks. Secrets are `SecretStr` and are never logged. Add new variables to `.env.example` and
-  `docs/developer/getting-started.md`.
+  `docs/developer/getting-started.md`. The only `os.environ` reader besides `Settings` is the `IGNORE_ENV_FILE`
+  switch in `app/core/env_file.py`, which stops `.env` being read (tests, the OpenAPI commands and the gate set it;
+  see `docs/developer/testing.md`). Never set it in a deployment or for a normal local run.
+  Fields are read by plain name (no alias, no `env_prefix`): the test and schema isolation removes them by name.
 - **Modules.** The Stripe Billing code is listed in `docs/developer/modules.md`; keep new billing code inside
   the files listed there so the module stays removable.
 - **Style.** Strict typing (mypy strict), small functions, immutable data (`@dataclass(frozen=True)`), no

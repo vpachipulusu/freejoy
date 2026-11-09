@@ -4,6 +4,11 @@ from pathlib import Path
 import pytest
 
 from commands import check_openapi_schema, generate_openapi_schema
+from tests._subprocess_support import (
+    LEAKY_ENV_FILE,
+    from_scratch_environment,
+    run_module,
+)
 
 SCHEMA = {"openapi": "3.1.0", "paths": {}}
 
@@ -52,3 +57,31 @@ def test_fails_when_the_committed_schema_is_stale(
 
     assert check_openapi_schema.main() == 1
     assert "out of date" in capsys.readouterr().out
+
+
+def test_the_check_gives_the_same_answer_whatever_the_shell_and_dotenv_hold(
+    tmp_path: Path,
+) -> None:
+    clean_dir = tmp_path / "clean"
+    dirty_dir = tmp_path / "dirty"
+    clean_dir.mkdir()
+    dirty_dir.mkdir()
+    (dirty_dir / ".env").write_text(LEAKY_ENV_FILE, encoding="utf-8")
+
+    clean = run_module(
+        "commands.check_openapi_schema", clean_dir, from_scratch_environment()
+    )
+    dirty = run_module(
+        "commands.check_openapi_schema",
+        dirty_dir,
+        from_scratch_environment(
+            APP_NAME="Shell Brand",
+            ENVIRONMENT="production",
+            SENTRY_DSN="https://x@y.invalid/1",
+        ),
+    )
+
+    # The first stdout line names a temporary file, so compare the verdict line only.
+    assert clean.returncode == dirty.returncode
+    assert clean.stdout.splitlines()[-1] == dirty.stdout.splitlines()[-1]
+    assert clean.stderr == "" and dirty.stderr == ""

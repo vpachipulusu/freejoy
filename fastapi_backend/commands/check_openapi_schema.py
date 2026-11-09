@@ -8,7 +8,6 @@ The generated TypeScript client is checked separately, from nextjs-frontend/, by
 """
 
 import json
-import os
 import sys
 import tempfile
 from collections.abc import Callable
@@ -16,14 +15,6 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BACKEND_DIR.parent / "nextjs-frontend" / "openapi.json"
-
-# Importing the app requires these settings (app/core/config.py). Schema generation
-# never connects to the database or signs tokens, so harmless placeholders are
-# enough; values already set in the environment still take precedence.
-PLACEHOLDER_SETTINGS = {
-    "ENVIRONMENT": "test",
-    "DATABASE_URL": "postgresql+asyncpg://openapi:openapi@localhost:5432/openapi",
-}
 
 
 def main() -> int:
@@ -35,9 +26,7 @@ def main() -> int:
         )
         return 1
 
-    for key, value in PLACEHOLDER_SETTINGS.items():
-        os.environ.setdefault(key, value)
-
+    # Importing the generator isolates the environment (placeholders, no .env) before the app loads.
     from commands import generate_openapi_schema as generator
 
     generate_openapi_schema: Callable[[Path], None] = generator.generate_openapi_schema
