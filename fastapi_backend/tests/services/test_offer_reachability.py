@@ -1,0 +1,330 @@
+"""Reachability targets and results: which URLs are requested, and what is reported about them."""
+
+import logging
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from app.core.url_probe import ProbeReason, ProbeResult, ProbeStatus
+from app.repositories.offer_health import DirectLinkTarget, SourceUrlTarget
+from app.services.offer_reachability import (
+    MAX_EVENT_FINDINGS,
+    CheckTarget,
+    Finding,
+    ReachabilityReport,
+    TargetKind,
+    collect_targets,
+    event_context,
+    probe_targets,
+)
+from tests.fakes_offer_health import FakeHealthStore, FakeUrlProbe
+
+NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+SHOP = "https://www.shop.example/"
+OK = ProbeResult(ProbeStatus.REACHABLE, ProbeReason.OK)
+DEAD = ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.CLIENT_ERROR)
+
+
+def source(offer_id: str, url: str, verified: datetime | None = NOW) -> SourceUrlTarget:
+    return SourceUrlTarget(offer_id, url, verified)
+
+
+def link(
+    offer_id: str,
+    link_id: str,
+    url: str,
+    *,
+    provider: str = "direct",
+    website: str | None = SHOP,
+    verified: datetime | None = NOW,
+) -> DirectLinkTarget:
+    return DirectLinkTarget(offer_id, link_id, provider, url, website, verified)
+
+
+async def targets_of(store: FakeHealthStore, limit: int = 100) -> list[CheckTarget]:
+    return list((await collect_targets(store, NOW, limit=limit)).items)
+
+
+async def test_source_urls_and_direct_links_are_collected_with_their_ids() -> None:
+    store = FakeHealthStore(
+        sources=[source("o1", "https://a.example/offer")],
+        links=[link("o2", "l2", "https://www.shop.example/deal")],
+    )
+
+    found = await targets_of(store)
+
+    assert {(t.kind, t.offer_id, t.link_id) for t in found} == {
+        (TargetKind.SOURCE_URL, "o1", None),
+        (TargetKind.AFFILIATE_LINK, "o2", "l2"),
+    }
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "awin",
+        "cj",
+        "partnerize",
+        "rakuten",
+        "tradedoubler",
+        "sample",
+        "impact",
+        "Direct",
+        "",
+    ],
+)
+async def test_a_link_of_any_provider_but_direct_is_never_collected(
+    provider: str,
+) -> None:
+    store = FakeHealthStore(
+        links=[
+            link("o1", "l1", "https://www.awin1.com/cread.php?x=1", provider=provider)
+        ]
+    )
+
+    collected = await collect_targets(store, NOW, limit=10)
+
+    assert collected.items == ()
+
+
+async def test_a_direct_link_is_collected_only_when_it_points_at_the_merchants_own_host() -> (
+    None
+):
+    store = FakeHealthStore(
+        links=[
+            link("o1", "same", "https://www.shop.example/a"),
+            link("o2", "bare", "https://shop.example/a"),
+            link("o3", "other", "https://elsewhere.example/a"),
+            link("o4", "sub", "https://tracking.shop.example/a"),
+            link("o5", "nosite", "https://www.shop.example/a", website=None),
+        ]
+    )
+
+    collected = await collect_targets(store, NOW, limit=10)
+
+    assert [t.link_id for t in collected.items] == ["same", "bare"]
+    assert collected.not_followable == 3
+
+
+async def test_a_direct_link_with_an_unusable_url_is_passed_on_so_the_probe_can_refuse_it() -> (
+    None
+):
+    store = FakeHealthStore(links=[link("o1", "l1", "http://www.shop.example/a")])
+
+    collected = await collect_targets(store, NOW, limit=10)
+
+    assert [t.link_id for t in collected.items] == ["l1"]
+    assert collected.not_followable == 0
+
+
+async def test_least_recently_verified_come_first_and_the_limit_truncates() -> None:
+    old, new = NOW - timedelta(days=30), NOW - timedelta(days=1)
+    store = FakeHealthStore(
+        sources=[
+            source("fresh", "https://a.example/1", new),
+            source("never", "https://a.example/2", None),
+        ],
+        links=[link("stale", "l1", "https://www.shop.example/3", verified=old)],
+    )
+
+    found = await targets_of(store, limit=2)
+
+    assert [t.offer_id for t in found] == ["never", "stale"]
+
+
+async def test_the_limit_is_passed_to_the_store_queries() -> None:
+    limits: list[int] = []
+
+    class CountingStore(FakeHealthStore):
+        async def list_source_url_targets(
+            self, now: datetime, limit: int
+        ) -> list[SourceUrlTarget]:
+            limits.append(limit)
+            return []
+
+    store = CountingStore()
+
+    await collect_targets(store, NOW, limit=7)
+
+    assert limits == [7]
+
+
+def test_a_target_never_shows_its_url_in_its_repr() -> None:
+    target = CheckTarget(
+        TargetKind.SOURCE_URL, "o1", None, "https://secret.example/x?t=1", NOW
+    )
+
+    assert "secret.example" not in repr(target) and "t=1" not in repr(target)
+
+
+def target(offer_id: str, url: str, link_id: str | None = None) -> CheckTarget:
+    kind = TargetKind.AFFILIATE_LINK if link_id else TargetKind.SOURCE_URL
+    return CheckTarget(kind, offer_id, link_id, url, NOW)
+
+
+async def test_every_outcome_category_is_recorded_against_its_offer_and_link() -> None:
+    outcomes = {
+        "https://a.example/ok": OK,
+        "https://b.example/dead": DEAD,
+        "https://c.example/blocked": ProbeResult(
+            ProbeStatus.REFUSED, ProbeReason.BLOCKED_ADDRESS
+        ),
+        "https://d.example/auth": ProbeResult(
+            ProbeStatus.INCONCLUSIVE, ProbeReason.AUTH_REQUIRED
+        ),
+    }
+    probe = FakeUrlProbe(outcomes)
+    targets = [
+        target("o1", "https://a.example/ok"),
+        target("o2", "https://b.example/dead", "l2"),
+        target("o3", "https://c.example/blocked"),
+        target("o4", "https://d.example/auth", "l4"),
+    ]
+
+    findings = await probe_targets(probe, targets)
+
+    assert findings == [
+        Finding(
+            "o1", None, TargetKind.SOURCE_URL, ProbeStatus.REACHABLE, ProbeReason.OK
+        ),
+        Finding(
+            "o2",
+            "l2",
+            TargetKind.AFFILIATE_LINK,
+            ProbeStatus.UNREACHABLE,
+            ProbeReason.CLIENT_ERROR,
+        ),
+        Finding(
+            "o3",
+            None,
+            TargetKind.SOURCE_URL,
+            ProbeStatus.REFUSED,
+            ProbeReason.BLOCKED_ADDRESS,
+        ),
+        Finding(
+            "o4",
+            "l4",
+            TargetKind.AFFILIATE_LINK,
+            ProbeStatus.INCONCLUSIVE,
+            ProbeReason.AUTH_REQUIRED,
+        ),
+    ]
+
+
+async def test_an_unreachable_destination_is_reported_and_nothing_is_changed() -> None:
+    probe = FakeUrlProbe({"https://b.example/dead": DEAD})
+
+    findings = await probe_targets(probe, [target("o2", "https://b.example/dead")])
+
+    assert [f.status for f in findings] == [ProbeStatus.UNREACHABLE]
+    assert probe.urls == [
+        "https://b.example/dead"
+    ]  # the one request; no store is involved
+
+
+async def test_a_probe_that_raises_becomes_an_inconclusive_finding_and_the_rest_continue() -> (
+    None
+):
+    class FlakyProbe(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            if "boom" in url:
+                raise RuntimeError("bug")
+            return await super().check(url)
+
+    findings = await probe_targets(
+        FlakyProbe(),
+        [target("o1", "https://boom.example/"), target("o2", "https://a.example/")],
+    )
+
+    assert findings[0].status is ProbeStatus.INCONCLUSIVE
+    assert findings[0].reason is ProbeReason.PROBE_ERROR
+    assert findings[1].status is ProbeStatus.REACHABLE
+
+
+async def test_requests_run_concurrently_but_never_beyond_the_bound() -> None:
+    probe = FakeUrlProbe()
+    targets = [target(f"o{n}", f"https://host{n}.example/") for n in range(12)]
+
+    await probe_targets(probe, targets, concurrency=3)
+
+    assert 1 < probe.peak_in_flight <= 3
+
+
+async def test_one_host_is_never_asked_twice_at_once() -> None:
+    probe = FakeUrlProbe()
+    targets = [target(f"o{n}", f"https://same.example/{n}") for n in range(6)]
+
+    await probe_targets(probe, targets, concurrency=5)
+
+    assert probe.peak_in_flight == 1 and len(probe.urls) == 6
+
+
+async def test_problems_are_logged_with_ids_and_reason_codes_only(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    probe = FakeUrlProbe({"https://b.example/dead?token=abc123": DEAD})
+    targets = [
+        target("offer_1", "https://b.example/dead?token=abc123", "link_9"),
+        target("offer_2", "https://a.example/fine"),
+    ]
+
+    await probe_targets(probe, targets)
+
+    logged = caplog.text + capsys.readouterr().out
+    assert "offer_1" in logged and "link_9" in logged and "client_error" in logged
+    assert "offer_2" not in logged  # reachable results are not logged one by one
+    for fragment in ("b.example", "abc123", "token", "dead"):
+        assert fragment not in logged
+
+
+def finding(offer_id: str, status: ProbeStatus, reason: ProbeReason) -> Finding:
+    return Finding(offer_id, None, TargetKind.SOURCE_URL, status, reason)
+
+
+def test_the_event_context_summarises_counts_and_lists_problems_by_id_and_reason() -> (
+    None
+):
+    report = ReachabilityReport(
+        (
+            finding("o1", ProbeStatus.REACHABLE, ProbeReason.OK),
+            finding("o2", ProbeStatus.UNREACHABLE, ProbeReason.DNS_FAILURE),
+            finding("o3", ProbeStatus.UNREACHABLE, ProbeReason.DNS_FAILURE),
+            finding("o4", ProbeStatus.INCONCLUSIVE, ProbeReason.AUTH_REQUIRED),
+            finding("o5", ProbeStatus.REFUSED, ProbeReason.BLOCKED_ADDRESS),
+        ),
+        not_followable=2,
+    )
+
+    context = event_context(3, report)
+
+    assert context["expired"] == 3 and context["checked"] == 5
+    assert context["not_followable"] == 2
+    assert context["counts"] == {
+        "reachable": 1,
+        "inconclusive": 1,
+        "unreachable": 2,
+        "refused": 1,
+    }
+    assert context["reasons"] == {"dns_failure": 2, "blocked_address": 1}
+    assert [f["offer_id"] for f in context["findings"]] == ["o2", "o3", "o5"]
+    assert context["findings"][0] == {
+        "offer_id": "o2",
+        "link_id": None,
+        "target": "source_url",
+        "status": "unreachable",
+        "reason": "dns_failure",
+    }
+    assert context["findings_omitted"] == 0
+
+
+def test_the_event_context_lists_a_bounded_number_of_problems() -> None:
+    many = tuple(
+        finding(f"o{n}", ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT)
+        for n in range(MAX_EVENT_FINDINGS + 5)
+    )
+
+    context = event_context(0, ReachabilityReport(many))
+
+    assert len(context["findings"]) == MAX_EVENT_FINDINGS
+    assert context["findings_omitted"] == 5
