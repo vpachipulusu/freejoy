@@ -19,7 +19,7 @@ expired or archived                            ``source_changed_at`` is set     
 
 "Edited by a person" is detected by fingerprint, not by ``updated_at``: when the importer writes an
 offer it stores a hash of every editor-changeable field and the offer's links
-(``awin_offer_mapping.fingerprint``) in ``applied_content_hash``. Any later difference means a person
+(``offer_fingerprint.fingerprint``) in ``applied_content_hash``. Any later difference means a person
 changed the offer (a refresh by the importer re-stores the new fingerprint). ``updated_at`` would also
 move for the importer's own writes and for housekeeping such as expiry, which is why it is not used.
 
@@ -43,7 +43,6 @@ from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.repositories.awin_import import OfferImportRecord
 from app.services.admin_catalogue_common import Clock, changed_values, utc_now
 from app.services.awin_offer_mapping import (
-    fingerprint,
     import_category_values,
     link_values,
     merchant_slug_candidates,
@@ -53,6 +52,7 @@ from app.services.awin_offer_mapping import (
     refresh_values,
 )
 from app.services.awin_promotions import PROVIDER, Promotion, SkipReason, source_hash
+from app.services.offer_fingerprint import fingerprint
 from app.services.offer_rules import AUDITED_FIELDS
 
 SOURCE = "commands.import_awin_offers"

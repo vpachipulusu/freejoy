@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Annotated, Any
 
 import pytest
@@ -57,6 +58,7 @@ OFFER_BODY: dict[str, Any] = {
     "availability": "Today",
     "source_url": "https://shop.example.com/box",
 }
+TOKEN_BODY: dict[str, Any] = {"review_token": "token-from-the-read"}
 CATEGORY_BODY = {
     "name": "Home & cleaning",
     "short_name": "Home",
@@ -121,6 +123,12 @@ class Harness:
         return AsyncClient(transport=transport, base_url="http://test", headers=headers)
 
 
+async def token_body(client: AsyncClient, offer_id: str = "off1") -> dict[str, Any]:
+    """What the admin UI sends: the review token from the offer it loaded."""
+    loaded = await client.get(f"/v1/admin/offers/{offer_id}")
+    return {"review_token": loaded.json()["data"]["review_token"]}
+
+
 @pytest.fixture
 def harness() -> Iterator[Harness]:
     built = Harness()
@@ -135,11 +143,11 @@ ROUTES: list[tuple[str, str, dict[str, Any] | None, str]] = [
     ("POST", "/v1/admin/offers", OFFER_BODY, "offers.write"),
     ("GET", "/v1/admin/offers/off1", None, "offers.read"),
     ("PATCH", "/v1/admin/offers/off1", {"title": "x"}, "offers.write"),
-    ("POST", "/v1/admin/offers/off1/publish", None, "offers.publish"),
+    ("POST", "/v1/admin/offers/off1/publish", TOKEN_BODY, "offers.publish"),
     ("POST", "/v1/admin/offers/off1/unpublish", None, "offers.publish"),
     ("POST", "/v1/admin/offers/off1/expire", None, "offers.publish"),
     ("POST", "/v1/admin/offers/off1/archive", None, "offers.publish"),
-    ("POST", "/v1/admin/offers/off1/verify", {}, "offers.publish"),
+    ("POST", "/v1/admin/offers/off1/verify", TOKEN_BODY, "offers.publish"),
     (
         "POST",
         "/v1/admin/offers/off1/links",
@@ -255,8 +263,8 @@ async def test_unknown_ids_are_404_with_a_code(harness):
         results = [
             await client.get("/v1/admin/offers/ghost"),
             await client.patch("/v1/admin/offers/ghost", json={"title": "x"}),
-            await client.post("/v1/admin/offers/ghost/publish"),
-            await client.post("/v1/admin/offers/ghost/verify"),
+            await client.post("/v1/admin/offers/ghost/publish", json=TOKEN_BODY),
+            await client.post("/v1/admin/offers/ghost/verify", json=TOKEN_BODY),
             await client.get("/v1/admin/categories/ghost"),
             await client.post("/v1/admin/categories/ghost/disable"),
             await client.get("/v1/admin/merchants/ghost"),
@@ -272,7 +280,9 @@ async def test_publish_blocked_is_422_and_lists_the_reasons(harness):
     harness.offers.offers["off1"] = offer("off1")
 
     async with harness.client() as client:
-        result = await client.post("/v1/admin/offers/off1/publish")
+        result = await client.post(
+            "/v1/admin/offers/off1/publish", json=await token_body(client)
+        )
 
     assert result.status_code == 422
     assert result.json()["code"] == "publish_blocked"
@@ -285,12 +295,19 @@ async def test_verify_then_publish_then_illegal_repeat(harness):
 
     async with harness.client() as client:
         verified = await client.post(
-            "/v1/admin/offers/off1/verify", json={"note": "ok"}
+            "/v1/admin/offers/off1/verify",
+            json={**await token_body(client), "note": "ok"},
         )
-        published = await client.post("/v1/admin/offers/off1/publish")
-        again = await client.post("/v1/admin/offers/off1/publish")
+        published = await client.post(
+            "/v1/admin/offers/off1/publish", json=await token_body(client)
+        )
+        again = await client.post(
+            "/v1/admin/offers/off1/publish", json=await token_body(client)
+        )
         archived = await client.post("/v1/admin/offers/off1/archive")
-        revive = await client.post("/v1/admin/offers/off1/publish")
+        revive = await client.post(
+            "/v1/admin/offers/off1/publish", json=await token_body(client)
+        )
 
     assert verified.json()["data"]["last_verified_at"] is not None
     assert published.json()["data"]["status"] == "PUBLISHED"
@@ -537,7 +554,9 @@ async def test_audit_and_verified_timestamps_use_the_injected_clock(harness):
     harness.offers.offers["off1"] = offer("off1", last_verified_at=EARLIER)
 
     async with harness.client() as client:
-        result = await client.post("/v1/admin/offers/off1/verify")
+        result = await client.post(
+            "/v1/admin/offers/off1/verify", json=await token_body(client)
+        )
 
     assert result.json()["data"]["last_verified_at"].startswith("2026-06-01T12:00:00")
 
@@ -559,3 +578,95 @@ async def test_a_partial_admin_sending_an_invalid_body_gets_403_not_422(
 
     assert result.status_code == 403
     assert result.json() == {"success": False, "error": "Forbidden"}
+
+
+# --- the review token ---------------------------------------------------------------------------
+
+
+async def test_the_detail_and_the_list_return_the_same_opaque_review_token(harness):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.links["l1"] = link("l1")
+
+    async with harness.client() as client:
+        detail = (await client.get("/v1/admin/offers/off1")).json()["data"]
+        listed = (await client.get("/v1/admin/offers")).json()["data"]["offers"][0]
+
+    assert len(detail["review_token"]) == 64
+    assert listed["review_token"] == detail["review_token"]
+
+
+async def test_publish_and_verify_without_a_token_are_422_and_change_nothing(harness):
+    harness.offers.offers["off1"] = offer(
+        "off1", last_verified_at=EARLIER, source_url="https://shop.example.com"
+    )
+
+    async with harness.client() as client:
+        results = [
+            await client.post("/v1/admin/offers/off1/publish"),
+            await client.post("/v1/admin/offers/off1/publish", json={}),
+            await client.post("/v1/admin/offers/off1/verify", json={"note": "ok"}),
+            await client.post(
+                "/v1/admin/offers/off1/verify", json={"review_token": ""}
+            ),
+        ]
+
+    assert [r.status_code for r in results] == [422] * 4
+    assert harness.offers.offers["off1"].status is OfferStatus.DRAFT
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+@pytest.mark.parametrize("step", ["publish", "verify"])
+async def test_a_stale_token_is_409_offer_changed_and_nothing_is_written(harness, step):
+    harness.offers.offers["off1"] = offer(
+        "off1", last_verified_at=EARLIER, source_url="https://shop.example.com"
+    )
+    harness.offers.links["l1"] = link("l1")
+
+    async with harness.client() as client:
+        stale = await token_body(client)
+        harness.offers.links["l1"] = replace(
+            harness.offers.links["l1"], destination_url="https://shop.example.com/new"
+        )
+        result = await client.post(f"/v1/admin/offers/off1/{step}", json=stale)
+
+    assert result.status_code == 409
+    assert result.json() == {
+        "success": False,
+        "error": "The offer changed after it was loaded: review it again",
+        "code": "offer_changed",
+    }
+    assert harness.offers.offers["off1"].status is OfferStatus.DRAFT
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+async def test_the_response_of_a_verify_carries_the_token_the_next_publish_needs(
+    harness,
+):
+    harness.offers.offers["off1"] = offer("off1", source_url="https://shop.example.com")
+
+    async with harness.client() as client:
+        verified = await client.post(
+            "/v1/admin/offers/off1/verify", json=await token_body(client)
+        )
+        published = await client.post(
+            "/v1/admin/offers/off1/publish",
+            json={"review_token": verified.json()["data"]["review_token"]},
+        )
+
+    assert published.status_code == 200
+    assert published.json()["data"]["status"] == "PUBLISHED"
+
+
+@pytest.mark.parametrize("step", ["unpublish", "expire", "archive"])
+async def test_taking_an_offer_off_the_site_needs_no_token(harness, step):
+    harness.offers.offers["off1"] = offer(
+        "off1",
+        status=OfferStatus.PUBLISHED,
+        last_verified_at=EARLIER,
+        source_url="https://shop.example.com",
+    )
+
+    async with harness.client() as client:
+        result = await client.post(f"/v1/admin/offers/off1/{step}")
+
+    assert result.status_code == 200

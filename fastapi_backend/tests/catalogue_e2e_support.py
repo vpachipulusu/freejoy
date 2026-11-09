@@ -178,6 +178,28 @@ def offer_body(category_id: str, merchant_id: str, **changes: Any) -> dict[str, 
     return {**body, **changes}
 
 
+async def review_token(
+    client: AsyncClient, headers: dict[str, str], offer_url: str
+) -> str:
+    """The review token the admin read returns right now (what an editor holds after loading)."""
+    loaded = await client.get(offer_url, headers=headers)
+    return str(loaded.json()["data"]["review_token"])
+
+
+async def approve(
+    client: AsyncClient,
+    headers: dict[str, str],
+    offer_url: str,
+    step: str,
+    **body: Any,
+) -> Any:
+    """Load the offer, then ``verify`` or ``publish`` it with the token just read."""
+    token = await review_token(client, headers, offer_url)
+    return await client.post(
+        f"{offer_url}/{step}", json={"review_token": token, **body}, headers=headers
+    )
+
+
 async def create_references(
     client: AsyncClient, headers: dict[str, str]
 ) -> tuple[str, str]:

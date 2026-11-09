@@ -15,8 +15,8 @@ from app.services.awin_offer_import import (
     ImportTally,
     OfferImporter,
 )
-from app.services.awin_offer_mapping import fingerprint
 from app.services.awin_promotions import Promotion, source_hash
+from app.services.offer_fingerprint import fingerprint
 from app.services.offer_lifecycle import PublishFacts, PublishReason, publish_blockers
 from tests.awin_samples import CODE, promotion, tracking_for
 from tests.fakes_awin_import import T0, FakeDatabase
@@ -703,7 +703,7 @@ async def test_a_promotion_that_moves_to_another_advertiser_is_not_refreshed_und
 def test_the_fingerprint_fields_are_pinned_so_a_new_editable_field_is_a_deliberate_change() -> (
     None
 ):
-    from app.services.awin_offer_mapping import FINGERPRINT_FIELDS, FINGERPRINT_VERSION
+    from app.services.offer_fingerprint import FINGERPRINT_FIELDS, FINGERPRINT_VERSION
 
     assert FINGERPRINT_VERSION == 1
     assert FINGERPRINT_FIELDS == (

@@ -16,7 +16,7 @@ from app.core.permissions import AdminContext
 from app.repositories.admin_categories import AdminCategoryRepository
 from app.repositories.admin_merchants import AdminMerchantRepository
 from app.repositories.admin_offers import AdminOfferRepository
-from app.services.admin_catalogue_errors import PublishBlocked
+from app.services.admin_catalogue_errors import OfferChanged, PublishBlocked
 from app.services.admin_categories import AdminCategoryService
 from app.services.admin_merchants import AdminMerchantService
 from app.services.admin_offers import AdminOfferService
@@ -54,7 +54,7 @@ async def world(engine: AsyncEngine, client):
         "/v1/admin/offers", json=offer_body(category_id, merchant_id), headers=headers
     )
     offer_id = created.json()["data"]["id"]
-    await client.post(f"/v1/admin/offers/{offer_id}/verify", headers=headers)
+    await support.approve(client, headers, f"/v1/admin/offers/{offer_id}", "verify")
     return (
         async_sessionmaker(engine, expire_on_commit=False),
         offer_id,
@@ -89,8 +89,11 @@ async def test_a_publish_in_flight_makes_the_disable_wait_for_its_commit(
     session_a, service_a = publisher(factory, publishing)
     session_b, disable = disabler(factory, kind, target, off)
     async with session_a, session_b:
+        token = (await service_a.get_offer(offer_id)).review_token
         publish_task = asyncio.create_task(
-            service_a.transition(ACTOR, offer_id, OfferAction.PUBLISH)
+            service_a.transition(
+                ACTOR, offer_id, OfferAction.PUBLISH, review_token=token
+            )
         )
         await asyncio.wait_for(publishing.reached.wait(), WAIT)
         disable_task = asyncio.create_task(disable())
@@ -116,10 +119,13 @@ async def test_a_disable_in_flight_makes_the_publish_wait_and_then_refuse(
     session_b, disable = disabler(factory, kind, target, disabling)
     session_a, service_a = publisher(factory, off)
     async with session_a, session_b:
+        token = (await service_a.get_offer(offer_id)).review_token
         disable_task = asyncio.create_task(disable())
         await asyncio.wait_for(disabling.reached.wait(), WAIT)
         publish_task = asyncio.create_task(
-            service_a.transition(ACTOR, offer_id, OfferAction.PUBLISH)
+            service_a.transition(
+                ACTOR, offer_id, OfferAction.PUBLISH, review_token=token
+            )
         )
         await asyncio.sleep(SETTLE)
 
@@ -132,3 +138,49 @@ async def test_a_disable_in_flight_makes_the_publish_wait_and_then_refuse(
     expected = "category_disabled" if kind == "category" else "merchant_inactive"
     assert blocked.value.reasons == [expected]
     assert await rows(engine, "SELECT status FROM offers") == [("DRAFT",)]
+
+
+@pytest.mark.parametrize("write", ["offer", "link"])
+async def test_a_write_in_flight_makes_publish_wait_and_then_refuse_as_changed(
+    engine, world, write
+):
+    """The token is compared under the row lock: an uncommitted edit cannot slip past the check."""
+    factory, offer_id, _category_id, _merchant_id = world
+    editing, off = GatedAuditor(True), GatedAuditor(False)
+    session_a, service_a = publisher(factory, off)
+    session_b, service_b = publisher(factory, editing)
+    async with session_a, session_b:
+        token = (await service_a.get_offer(offer_id)).review_token
+        if write == "offer":
+            edit = service_b.update_offer(ACTOR, offer_id, {"title": "Edited"})
+        else:
+            edit = service_b.create_link(
+                ACTOR,
+                offer_id,
+                {
+                    "provider": "awin",
+                    "destination_url": "https://www.awin1.com/c?x=1",
+                    "tracking_id": None,
+                    "active": True,
+                },
+            )
+        edit_task = asyncio.create_task(edit)
+        await asyncio.wait_for(editing.reached.wait(), WAIT)
+        publish_task = asyncio.create_task(
+            service_a.transition(
+                ACTOR, offer_id, OfferAction.PUBLISH, review_token=token
+            )
+        )
+        await asyncio.sleep(SETTLE)
+
+        assert not publish_task.done(), "publish ran while an edit was uncommitted"
+        editing.release.set()
+        await asyncio.wait_for(edit_task, WAIT)
+        with pytest.raises(OfferChanged):
+            await asyncio.wait_for(publish_task, WAIT)
+
+    assert await rows(engine, "SELECT status FROM offers") == [("DRAFT",)]
+    published = await rows(
+        engine, "SELECT 1 FROM audit_logs WHERE action = 'admin.offers.publish'"
+    )
+    assert published == []

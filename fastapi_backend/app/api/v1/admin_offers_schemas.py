@@ -26,12 +26,15 @@ from app.models.platform.offer import (
     OfferType,
     PostageKind,
 )
-from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
-from app.services.admin_offers import OfferDetail
+from app.repositories.admin_offers import AffiliateLinkRecord
+from app.services.admin_offers import OfferDetail, OfferListItem
 
 MAX_PARAGRAPHS = 20
 MAX_STEPS = 20
 MAX_POSTAGE_MINOR = 1_000_000
+ReviewToken = Annotated[
+    str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+]
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 Title = Annotated[str, line(200)]
 Summary = Annotated[str, line(300)]
@@ -130,9 +133,18 @@ class UpdateOfferRequest(BaseModel):
         return self
 
 
+class PublishRequest(BaseModel):
+    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken
+
+
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    review_token: ReviewToken
     note: Annotated[str, line(500)] | None = None
 
 
@@ -188,6 +200,7 @@ class OfferSummaryOut(BaseModel):
     end_at: datetime | None
     last_verified_at: datetime | None
     updated_at: datetime
+    review_token: str
 
 
 class OfferOut(OfferSummaryOut):
@@ -238,10 +251,15 @@ def link_out(record: AffiliateLinkRecord) -> AffiliateLinkOut:
     return AffiliateLinkOut(**record.__dict__)
 
 
-def summary_out(record: OfferRecord) -> OfferSummaryOut:
-    return OfferSummaryOut.model_validate(record, from_attributes=True)
+def summary_out(item: OfferListItem) -> OfferSummaryOut:
+    fields = {**item.offer.__dict__, "review_token": item.review_token}
+    return OfferSummaryOut.model_validate(fields)
 
 
 def offer_out(detail: OfferDetail) -> OfferOut:
-    fields = {**detail.offer.__dict__, "links": [link_out(i) for i in detail.links]}
+    fields = {
+        **detail.offer.__dict__,
+        "links": [link_out(i) for i in detail.links],
+        "review_token": detail.review_token,
+    }
     return OfferOut(**fields)

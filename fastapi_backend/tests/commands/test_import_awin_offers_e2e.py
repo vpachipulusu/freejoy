@@ -28,7 +28,7 @@ from app.core.permissions import AdminContext
 from app.repositories.admin_offers import AdminOfferRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.awin_import import AwinImportRepository
-from app.services.admin_catalogue_errors import PublishBlocked
+from app.services.admin_catalogue_errors import OfferChanged, PublishBlocked
 from app.services.admin_offers import AdminOfferService
 from app.services.audit import AuditService
 from app.services.awin_import_run import RunOptions, RunReport, Unit, run_import
@@ -288,9 +288,11 @@ async def test_an_imported_draft_cannot_be_published_through_the_real_publish_pa
 
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
+        service = editor_service(session)
+        token = (await service.get_offer(offer_id)).review_token
         with pytest.raises(PublishBlocked) as blocked:
-            await editor_service(session).transition(
-                EDITOR, offer_id, OfferAction.PUBLISH
+            await service.transition(
+                EDITOR, offer_id, OfferAction.PUBLISH, review_token=token
             )
 
     assert set(blocked.value.reasons) == {
@@ -359,6 +361,41 @@ async def test_an_untouched_import_has_its_text_refreshed_in_place(
         engine, [raw_item(1, title="Retitled twice")], now=NOW + timedelta(days=2)
     )
     assert again.tally.updated == 1
+
+
+async def test_an_importer_refresh_after_the_editor_loaded_the_offer_stales_verify_and_publish(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1, endDate=None)])
+    offer_id = await first_offer(engine)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        loaded = (await editor_service(session).get_offer(offer_id)).review_token
+
+    await run(
+        engine,
+        [raw_item(1, title="Source retitled", endDate=None)],
+        now=NOW + timedelta(days=1),
+    )
+    offers = await rows(engine, "SELECT * FROM offers")
+    audits = await scalar(engine, "SELECT count(*) FROM audit_logs")
+
+    async with maker() as session:
+        service = editor_service(session)
+        with pytest.raises(OfferChanged):
+            await service.verify(EDITOR, offer_id, None, review_token=loaded)
+        with pytest.raises(OfferChanged):
+            await service.transition(
+                EDITOR, offer_id, OfferAction.PUBLISH, review_token=loaded
+            )
+
+    assert await rows(engine, "SELECT * FROM offers") == offers
+    assert await scalar(engine, "SELECT count(*) FROM audit_logs") == audits
+    async with maker() as session:  # a token read after the refresh is accepted
+        service = editor_service(session)
+        fresh = (await service.get_offer(offer_id)).review_token
+        verified = await service.verify(EDITOR, offer_id, None, review_token=fresh)
+    assert verified.offer.last_verified_at is not None
 
 
 async def test_a_changed_tracking_url_is_held_back_and_the_rows_stay_identical(

@@ -1,5 +1,6 @@
 """Queries behind the admin offers API. No business rules live here."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -183,6 +184,22 @@ class AdminOfferRepository(BaseRepository):
             .order_by(AffiliateLink.created_at, AffiliateLink.id)
         )
         return [_link(row) for row in rows]
+
+    async def list_links_by_offer(
+        self, offer_ids: Sequence[str]
+    ) -> dict[str, list[AffiliateLinkRecord]]:
+        """The links of several offers in one query (an offer with none maps to an empty list)."""
+        grouped: dict[str, list[AffiliateLinkRecord]] = {i: [] for i in offer_ids}
+        if not offer_ids:
+            return grouped
+        rows = await self._session.scalars(
+            select(AffiliateLink)
+            .where(AffiliateLink.offer_id.in_(offer_ids))
+            .order_by(AffiliateLink.created_at, AffiliateLink.id)
+        )
+        for row in rows:
+            grouped[row.offer_id].append(_link(row))
+        return grouped
 
     async def count_active_links(self, offer_id: str) -> int:
         total = await self._session.scalar(

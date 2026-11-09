@@ -17,25 +17,17 @@ What an import writes, and what it deliberately does not:
   activates it. It has no website (the editor sets it when activating) and its slug always carries
   the advertiser id, so an import never reserves a bare brand slug.
 
-``fingerprint`` hashes every field an editor can change on an offer, its status and verification
-date, and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids,
-slugs or timestamps). The importer stores it each time it writes an offer; a later mismatch means a
-person changed the offer, so it is no longer an untouched import.
+The edit fingerprint (``offer_fingerprint.fingerprint``) is what the importer stores each time it writes an
+offer; a later mismatch means a person changed the offer, so it is no longer an untouched import.
 """
 
-import hashlib
-import json
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from typing import Any
 
 from app.core.plain_text import fit_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import OfferStatus, OfferType, PostageKind
-from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.repositories.awin_import import IMPORT_CATEGORY_SLUG
 from app.services.awin_promotions import PROVIDER, Promotion
-from app.services.offer_rules import EDITABLE_FIELDS
 
 IMAGE_TINT = "cream"
 IMAGE_ALT = "Illustration of an offer"
@@ -44,10 +36,6 @@ DEFAULT_ELIGIBILITY = "See the offer terms on the merchant's site before you cla
 AVAILABILITY = (
     "Listed for UK customers. Check the merchant's terms for dates and exclusions."
 )
-FINGERPRINT_VERSION = (
-    1  # bump with FINGERPRINT_FIELDS: stored fingerprints then stop matching, safely
-)
-FINGERPRINT_FIELDS = tuple(sorted(EDITABLE_FIELDS | {"status", "last_verified_at"}))
 
 
 def _type_note(promotion: Promotion) -> str:
@@ -164,28 +152,3 @@ def merchant_slug_candidates(promotion: Promotion) -> tuple[str, ...]:
     fallback = f"{PROVIDER}-advertiser-{suffix}"
     with_id = _slug_with_suffix(promotion.advertiser_name, suffix)
     return (with_id, fallback) if with_id else (fallback,)
-
-
-def _canonical(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.astimezone(UTC).isoformat()
-    raise TypeError(f"unexpected {type(value).__name__} in a fingerprint")
-
-
-def fingerprint(offer: OfferRecord, links: Sequence[AffiliateLinkRecord]) -> str:
-    """SHA-256 (hex) of the offer's editable state and its links, as an editor would see them."""
-    state: Mapping[str, Any] = {
-        "v": FINGERPRINT_VERSION,
-        "offer": {name: getattr(offer, name) for name in FINGERPRINT_FIELDS},
-        "links": sorted(
-            (
-                [link.provider, link.destination_url, link.tracking_id, link.active]
-                for link in links
-            ),
-            key=repr,
-        ),
-    }
-    payload = json.dumps(
-        state, sort_keys=True, separators=(",", ":"), default=_canonical
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

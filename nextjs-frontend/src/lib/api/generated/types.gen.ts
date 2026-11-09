@@ -1892,6 +1892,10 @@ export type OfferOut = {
      */
     updated_at: string;
     /**
+     * Review Token
+     */
+    review_token: string;
+    /**
      * Summary
      */
     summary: string;
@@ -2012,6 +2016,10 @@ export type OfferSummaryOut = {
      * Updated At
      */
     updated_at: string;
+    /**
+     * Review Token
+     */
+    review_token: string;
 };
 
 /**
@@ -2448,6 +2456,18 @@ export type ProfileResponse = {
      */
     success?: true;
     data: ProfileData;
+};
+
+/**
+ * PublishRequest
+ *
+ * Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+ */
+export type PublishRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
 };
 
 /**
@@ -3417,6 +3437,10 @@ export type VerificationRequest = {
  * VerifyRequest
  */
 export type VerifyRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
     /**
      * Note
      */
@@ -6669,7 +6693,7 @@ export type AdminUpdateOfferResponses = {
 export type AdminUpdateOfferResponse = AdminUpdateOfferResponses[keyof AdminUpdateOfferResponses];
 
 export type AdminPublishOfferData = {
-    body?: never;
+    body: PublishRequest;
     headers?: {
         /**
          * X-Internal-Key
@@ -6909,10 +6933,7 @@ export type AdminArchiveOfferResponses = {
 export type AdminArchiveOfferResponse = AdminArchiveOfferResponses[keyof AdminArchiveOfferResponses];
 
 export type AdminVerifyOfferData = {
-    /**
-     * Body
-     */
-    body?: VerifyRequest | null;
+    body: VerifyRequest;
     headers?: {
         /**
          * X-Internal-Key

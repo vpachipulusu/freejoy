@@ -1,5 +1,6 @@
 """In-memory doubles for the admin catalogue stores, audit recorder and session."""
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -165,6 +166,11 @@ class FakeOfferStore:
 
     async def list_links(self, offer_id: str) -> list[AffiliateLinkRecord]:
         return [item for item in self.links.values() if item.offer_id == offer_id]
+
+    async def list_links_by_offer(
+        self, offer_ids: Sequence[str]
+    ) -> dict[str, list[AffiliateLinkRecord]]:
+        return {i: await self.list_links(i) for i in offer_ids}
 
     async def count_active_links(self, offer_id: str) -> int:
         return sum(1 for item in await self.list_links(offer_id) if item.active)

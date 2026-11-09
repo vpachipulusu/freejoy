@@ -9,11 +9,19 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   ``ck_offers_published_is_verified`` is the backstop.
 * A published offer keeps meeting the publish rules: edits and link changes that would break
   them (category disabled, no destination left, ``end_at`` in the past) are refused.
+* ``verify`` and ``publish`` are the steps that say "a person reviewed this": they need the
+  ``review_token`` the admin read returned (``offer_fingerprint.review_token``: a hash of the
+  reviewable content and the affiliate links) and refuse with ``OfferChanged`` when it no longer
+  matches. The token is recomputed after the offer row is locked, and every writer of the offer or
+  its links takes that lock first (editor edits, link edits, the Awin importer), so nothing can
+  change the offer between the check and the write. ``unpublish``, ``expire`` and ``archive`` only
+  take content off the public site (or end an offer's life), claim nothing was reviewed and need no
+  token.
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -45,9 +53,11 @@ from app.services.admin_catalogue_common import (
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
     InvalidInput,
+    OfferChanged,
     PublishBlocked,
     SlugTaken,
 )
+from app.services.offer_fingerprint import review_token as compute_review_token
 from app.services.offer_lifecycle import (
     OfferAction,
     PublishFacts,
@@ -63,7 +73,7 @@ from app.services.offer_rules import (
     check_window,
 )
 
-__all__ = ["AdminOfferService", "OfferDetail"]
+__all__ = ["AdminOfferService", "OfferDetail", "OfferListItem", "OfferListing"]
 
 LINK_FIELDS = frozenset({"provider", "destination_url", "tracking_id", "active"})
 LINK_AUDITED = frozenset({"provider", "active"})
@@ -75,6 +85,9 @@ class OfferStore(Protocol):
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
     ) -> OfferPage: ...
+    async def list_links_by_offer(
+        self, offer_ids: Sequence[str]
+    ) -> dict[str, list[AffiliateLinkRecord]]: ...
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
@@ -97,6 +110,22 @@ class OfferStore(Protocol):
 class OfferDetail:
     offer: OfferRecord
     links: list[AffiliateLinkRecord]
+
+    @property
+    def review_token(self) -> str:
+        return compute_review_token(self.offer, self.links)
+
+
+@dataclass(frozen=True)
+class OfferListItem:
+    offer: OfferRecord
+    review_token: str
+
+
+@dataclass(frozen=True)
+class OfferListing:
+    offers: list[OfferListItem]
+    total_count: int
 
 
 def _host(url: str) -> str:
@@ -128,8 +157,13 @@ class AdminOfferService:
 
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
-    ) -> OfferPage:
-        return await self.store.list_offers(filters, *clamp_page(limit, offset))
+    ) -> OfferListing:
+        page = await self.store.list_offers(filters, *clamp_page(limit, offset))
+        links = await self.store.list_links_by_offer([o.id for o in page.offers])
+        items = [
+            OfferListItem(o, compute_review_token(o, links[o.id])) for o in page.offers
+        ]
+        return OfferListing(items, page.total_count)
 
     async def get_offer(self, offer_id: str) -> OfferDetail:
         offer = await self.store.get(offer_id)
@@ -195,12 +229,22 @@ class AdminOfferService:
         return OfferDetail(updated, await self.store.list_links(offer_id))
 
     async def transition(
-        self, actor: AdminContext, offer_id: str, action: OfferAction
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        action: OfferAction,
+        review_token: str | None = None,
     ) -> OfferDetail:
-        """publish, unpublish, expire or archive (``verify`` has its own method)."""
+        """publish, unpublish, expire or archive (``verify`` has its own method).
+
+        ``publish`` needs the ``review_token`` of the offer as the editor loaded it; the other
+        actions ignore it.
+        """
         if action is OfferAction.VERIFY:
             raise ValueError("Use verify")
         current = await self._locked(offer_id)
+        if action is OfferAction.PUBLISH:
+            await self._require_unchanged(current, review_token)
         target = next_status(current.status, action)
         if action is OfferAction.PUBLISH:
             await self._require_publishable(current)
@@ -217,9 +261,14 @@ class AdminOfferService:
         return OfferDetail(updated, await self.store.list_links(offer_id))
 
     async def verify(
-        self, actor: AdminContext, offer_id: str, note: str | None
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        note: str | None,
+        review_token: str | None,
     ) -> OfferDetail:
         current = await self._locked(offer_id)
+        await self._require_unchanged(current, review_token)
         next_status(current.status, OfferAction.VERIFY)  # refuses an archived offer
         verified_at = self.clock()
         updated = await self.store.update(offer_id, {"last_verified_at": verified_at})
@@ -323,6 +372,14 @@ class AdminOfferService:
         if offer is None:
             raise CatalogueNotFound("offer")
         return offer
+
+    async def _require_unchanged(self, locked: OfferRecord, token: str | None) -> None:
+        """The editor's token must match the offer and its links as they are under the row lock."""
+        if not token:
+            raise InvalidInput("review_token_required")
+        links = await self.store.list_links(locked.id)
+        if compute_review_token(locked, links) != token:
+            raise OfferChanged()
 
     async def _require_references(self, category_id: str, merchant_id: str) -> None:
         if await self.store.category_enabled(category_id) is None:

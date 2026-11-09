@@ -469,7 +469,14 @@ export const adminUpdateOffer = <ThrowOnError extends boolean = false>(options: 
 /**
  * Admin Publish Offer
  */
-export const adminPublishOffer = <ThrowOnError extends boolean = false>(options: Options<AdminPublishOfferData, ThrowOnError>) => (options.client ?? client).post<AdminPublishOfferResponses, AdminPublishOfferErrors, ThrowOnError>({ url: '/v1/admin/offers/{offer_id}/publish', ...options });
+export const adminPublishOffer = <ThrowOnError extends boolean = false>(options: Options<AdminPublishOfferData, ThrowOnError>) => (options.client ?? client).post<AdminPublishOfferResponses, AdminPublishOfferErrors, ThrowOnError>({
+    url: '/v1/admin/offers/{offer_id}/publish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Admin Unpublish Offer

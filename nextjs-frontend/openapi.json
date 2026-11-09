@@ -7126,6 +7126,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -7635,18 +7645,11 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/VerifyRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
+                "$ref": "#/components/schemas/VerifyRequest"
               }
             }
           }
@@ -15802,6 +15805,10 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "review_token": {
+            "type": "string",
+            "title": "Review Token"
+          },
           "summary": {
             "type": "string",
             "title": "Summary"
@@ -15951,6 +15958,7 @@
           "end_at",
           "last_verified_at",
           "updated_at",
+          "review_token",
           "summary",
           "description",
           "image_tint",
@@ -16043,6 +16051,10 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "review_token": {
+            "type": "string",
+            "title": "Review Token"
           }
         },
         "type": "object",
@@ -16057,7 +16069,8 @@
           "featured",
           "end_at",
           "last_verified_at",
-          "updated_at"
+          "updated_at",
+          "review_token"
         ],
         "title": "OfferSummaryOut"
       },
@@ -16837,6 +16850,24 @@
           "data"
         ],
         "title": "ProfileResponse"
+      },
+      "PublishRequest": {
+        "properties": {
+          "review_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Review Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "review_token"
+        ],
+        "title": "PublishRequest",
+        "description": "Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."
       },
       "ReadyResponse": {
         "properties": {
@@ -18671,6 +18702,13 @@
       },
       "VerifyRequest": {
         "properties": {
+          "review_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Review Token"
+          },
           "note": {
             "anyOf": [
               {
@@ -18688,6 +18726,9 @@
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "review_token"
+        ],
         "title": "VerifyRequest"
       },
       "app__api__v1__admin_offers_schemas__OfferResponse": {

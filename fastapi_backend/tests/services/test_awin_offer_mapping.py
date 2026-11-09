@@ -12,7 +12,6 @@ from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.services.awin_offer_mapping import (
     IMPORT_CATEGORY_SLUG,
     PROVIDER,
-    fingerprint,
     import_category_values,
     link_values,
     merchant_slug_candidates,
@@ -22,6 +21,7 @@ from app.services.awin_offer_mapping import (
     refresh_values,
 )
 from app.services.awin_promotions import Promotion
+from app.services.offer_fingerprint import fingerprint
 from app.services.offer_rules import EDITABLE_FIELDS
 
 START = datetime(2026, 11, 1, tzinfo=UTC)

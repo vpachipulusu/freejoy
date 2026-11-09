@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 import tests.catalogue_e2e_support as support
 from tests.catalogue_e2e_support import (
     EDITOR,
+    approve,
     as_user,
     audit_rows,
     offer_body,
@@ -295,17 +296,15 @@ async def test_publish_is_blocked_until_verified_and_has_a_destination(
     data = await make_offer(client, editor, source_url=None)
     url = f"{OFFERS}/{data['id']}"
 
-    blocked = await client.post(f"{url}/publish", headers=headers)
-    verified = await client.post(
-        f"{url}/verify", json={"note": "Read the T&Cs"}, headers=headers
-    )
-    still_blocked = await client.post(f"{url}/publish", headers=headers)
+    blocked = await approve(client, headers, url, "publish")
+    verified = await approve(client, headers, url, "verify", note="Read the T&Cs")
+    still_blocked = await approve(client, headers, url, "publish")
     link = await client.post(
         f"{url}/links",
         json={"provider": "awin", "destination_url": "https://www.awin1.com/c?x=1"},
         headers=headers,
     )
-    published = await client.post(f"{url}/publish", headers=headers)
+    published = await approve(client, headers, url, "publish")
 
     assert blocked.status_code == 422 and blocked.json()["code"] == "publish_blocked"
     assert "not been verified" in blocked.json()["error"]
@@ -325,12 +324,12 @@ async def test_publish_checks_category_merchant_and_end_date(client, engine, edi
     headers, category_id, merchant_id = editor
     data = await make_offer(client, editor)
     url = f"{OFFERS}/{data['id']}"
-    await client.post(f"{url}/verify", headers=headers)
+    await approve(client, headers, url, "verify")
 
     await client.post(f"/v1/admin/categories/{category_id}/disable", headers=headers)
     await client.post(f"/v1/admin/merchants/{merchant_id}/deactivate", headers=headers)
     await client.patch(url, json={"end_at": "2020-01-01T00:00:00Z"}, headers=headers)
-    blocked = await client.post(f"{url}/publish", headers=headers)
+    blocked = await approve(client, headers, url, "publish")
 
     assert blocked.status_code == 422
     for phrase in (
@@ -346,10 +345,13 @@ async def test_full_lifecycle_and_illegal_transitions_are_409(client, engine, ed
     headers, *_ = editor
     data = await make_offer(client, editor)
     url = f"{OFFERS}/{data['id']}"
-    await client.post(f"{url}/verify", headers=headers)
+    await approve(client, headers, url, "verify")
 
     async def step(action):
-        result = await client.post(f"{url}/{action}", headers=headers)
+        if action in ("publish", "verify"):
+            result = await approve(client, headers, url, action)
+        else:
+            result = await client.post(f"{url}/{action}", headers=headers)
         body = result.json()
         return result.status_code, body["data"]["status"] if "data" in body else body[
             "code"
@@ -383,8 +385,8 @@ async def test_published_offers_cannot_be_edited_into_an_unpublishable_state(
     headers, *_ = editor
     data = await make_offer(client, editor)
     url = f"{OFFERS}/{data['id']}"
-    await client.post(f"{url}/verify", headers=headers)
-    await client.post(f"{url}/publish", headers=headers)
+    await approve(client, headers, url, "verify")
+    await approve(client, headers, url, "publish")
 
     past = await client.patch(
         url, json={"end_at": "2020-01-01T00:00:00Z"}, headers=headers
@@ -416,10 +418,12 @@ async def test_verify_records_the_note_in_the_audit_row_and_stamps_the_time(
     headers, *_ = editor
     data = await make_offer(client, editor)
 
-    result = await client.post(
-        f"{OFFERS}/{data['id']}/verify",
-        json={"note": "Checked on the merchant site"},
-        headers=headers,
+    result = await approve(
+        client,
+        headers,
+        f"{OFFERS}/{data['id']}",
+        "verify",
+        note="Checked on the merchant site",
     )
 
     audit = (await audit_rows(engine, "admin.offers.verify"))[0][4]
@@ -469,8 +473,8 @@ async def test_last_active_link_of_a_published_offer_cannot_be_deactivated(
         json={"provider": "awin", "destination_url": "https://www.awin1.com/c"},
         headers=headers,
     )
-    await client.post(f"{url}/verify", headers=headers)
-    await client.post(f"{url}/publish", headers=headers)
+    await approve(client, headers, url, "verify")
+    await approve(client, headers, url, "publish")
 
     result = await client.patch(
         f"{url}/links/{link.json()['data']['id']}",
