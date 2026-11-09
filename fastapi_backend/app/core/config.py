@@ -84,7 +84,11 @@ class Settings(BaseSettings):
     SUBSCRIBER_TOKEN_SECRET: SecretStr | None = None
 
     model_config = SettingsConfigDict(
-        env_file=settings_env_file(), env_file_encoding="utf-8", extra="ignore"
+        env_file=settings_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        # A validation error must not echo the input values (they include secrets).
+        hide_input_in_errors=True,
     )
 
     @model_validator(mode="after")

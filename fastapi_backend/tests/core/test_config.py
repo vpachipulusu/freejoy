@@ -156,3 +156,18 @@ def test_clock_skew_outside_range_stops_startup(
     monkeypatch.setenv("FIREBASE_CLOCK_SKEW_SECONDS", value)
     with pytest.raises(ValidationError, match="FIREBASE_CLOCK_SKEW_SECONDS"):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_a_validation_error_does_not_echo_the_input_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # pydantic prints a truncated repr of the whole input (head and tail), which can hold a
+    # password or the start and end of a key. hide_input_in_errors drops it altogether.
+    sentinel = "sentinel-secret-9f3a"
+    monkeypatch.setenv("BACKEND_INTERNAL_KEY", sentinel)
+
+    with pytest.raises(ValidationError, match="at least 32 characters") as error:
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert sentinel not in str(error.value)
+    assert "input_value" not in str(error.value)
