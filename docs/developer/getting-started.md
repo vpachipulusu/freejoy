@@ -58,6 +58,7 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 8000 --reload
 | `TOTP_ENCRYPTION_KEY` | To enable 2FA | Fernet key for TOTP secrets at rest. |
 | `SUBSCRIBER_TOKEN_SECRET` | Outside local/test | 32+ character HMAC secret for the alerts confirm and unsubscribe tokens. |
 | `EMAIL_PROVIDER`, `EMAIL_PROVIDER_API_KEY`, `EMAIL_PROVIDER_LIST_ID`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `PUBLIC_SITE_URL` | To send alerts email | Backend only ([ADR-012](../adr/0012-email-provider.md), [backend-subscribers.md](backend-subscribers.md)). `EMAIL_PROVIDER` unset: nothing is ever sent, and production refuses sign-ups. `fake` records messages for tests (local/test only). |
+| `AWIN_PUBLISHER_ID`, `AWIN_OAUTH_API_TOKEN` | To run the Awin importer | Backend only, for `commands.import_awin_offers` ([backend-awin-import.md](backend-awin-import.md)). Both empty: the app is unaffected and the command exits 2. The token is sent only in an `Authorization` header. |
 | `SENTRY_DSN` | No | Unset disables Sentry. |
 | `APP_NAME`, `TOTP_ISSUER`, `LOG_LEVEL` | No | Brand (API title), the name shown in the authenticator app (keep equal to `NEXT_PUBLIC_APP_NAME`), and log level. |
 | `STRIPE_*`, `BILLING_RETURN_URL_ORIGINS` | Billing module | See [modules.md](modules.md). |

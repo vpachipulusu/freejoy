@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # HMAC secret for confirm and unsubscribe tokens. Required outside local/test.
     SUBSCRIBER_TOKEN_SECRET: SecretStr | None = None
 
+    # Awin offers importer (docs/developer/backend-awin-import.md). Optional for the app; the
+    # command refuses to run without both. The token is only ever sent in an Authorization header.
+    AWIN_PUBLISHER_ID: Annotated[int, Field(gt=0)] | None = None
+    AWIN_OAUTH_API_TOKEN: SecretStr | None = None
+
     model_config = SettingsConfigDict(
         env_file=settings_env_file(),
         env_file_encoding="utf-8",
@@ -123,6 +128,26 @@ class Settings(BaseSettings):
     def blank_secret_is_unset(cls, value: object) -> object:
         """A blank value (``NAME=`` copied from .env.example) means "not set", never an empty secret."""
         return None if value == "" else value
+
+    @field_validator("AWIN_PUBLISHER_ID", mode="before")
+    @classmethod
+    def blank_publisher_id_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("AWIN_OAUTH_API_TOKEN", mode="before")
+    @classmethod
+    def clean_awin_token(cls, value: object) -> object:
+        """Blank means unset; otherwise the token must be usable as a header value as it stands."""
+        if not isinstance(value, str):
+            return value
+        token = value.strip()
+        if not token:
+            return None
+        if not all("!" <= char <= "~" for char in token):  # printable ASCII, no spaces
+            raise ValueError(
+                "AWIN_OAUTH_API_TOKEN must be printable ASCII without whitespace"
+            )
+        return token
 
     @model_validator(mode="after")
     def validate_email_config(self) -> "Settings":

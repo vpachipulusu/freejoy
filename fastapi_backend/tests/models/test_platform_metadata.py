@@ -39,6 +39,9 @@ EXPECTED_TABLES = {
     "affiliate_links",
     "click_events",
     "email_subscribers",
+    # Awin importer provenance
+    "offer_imports",
+    "merchant_imports",
 }
 
 BILLING_COLUMNS = {
