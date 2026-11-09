@@ -69,6 +69,7 @@ MIN_VALUE = 1
 MAX_CONCURRENCY = 20
 MAX_LIMIT = 5000
 MAX_BATCH_SIZE = 1000
+MAX_SECONDS = 86400
 DEFAULT_MAX_SECONDS = 900
 USER_AGENT_VERSION = "1.0"
 
@@ -87,7 +88,12 @@ class Unit:
 
 
 UnitOpener = Callable[[], AbstractAsyncContextManager[Unit]]
-Reporter = Callable[[str, Mapping[str, Any]], object]
+
+
+class Reporter(Protocol):
+    def __call__(
+        self, message: str, context: Mapping[str, Any], *, level: str = "warning"
+    ) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -131,6 +137,8 @@ def report_to_sentry(
     context: Mapping[str, Any],
     settings: Any = None,
     transport: Any = None,
+    *,
+    level: str = "warning",
 ) -> bool:
     """Send ``context`` as one Sentry event; nothing when ``SENTRY_DSN`` is not set.
 
@@ -146,7 +154,9 @@ def report_to_sentry(
         settings = app_settings
     if not init_sentry(settings, transport=transport):
         return False
-    sent = report_message(message, context_name=EVENT_CONTEXT, context=context)
+    sent = report_message(
+        message, context_name=EVENT_CONTEXT, context=context, level=level
+    )
     flush_events()
     return sent
 
@@ -265,7 +275,8 @@ def _parse(argv: Sequence[str]) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_SECONDS,
         help=(
-            "time limit for the reachability step; targets not finished are reported as "
+            "time limit for the request phase only (not expiry, reading the URLs or shutdown); "
+            "targets not finished are reported as "
             f"not_checked and the exit code stays 0 (default {DEFAULT_MAX_SECONDS})"
         ),
     )
@@ -287,6 +298,7 @@ def _invalid(args: argparse.Namespace) -> str | None:
     for name, value, cap in (
         ("--limit", args.limit, MAX_LIMIT),
         ("--batch-size", args.batch_size, MAX_BATCH_SIZE),
+        ("--max-seconds", args.max_seconds, MAX_SECONDS),
         ("--concurrency", args.concurrency, MAX_CONCURRENCY),
     ):
         if value > cap:
@@ -322,9 +334,14 @@ def _summary_lines(result: RunResult) -> list[str]:
     return lines
 
 
-def _send(reporter: Reporter, message: str, context: Mapping[str, Any]) -> None:
+def _send(
+    reporter: Reporter,
+    message: str,
+    context: Mapping[str, Any],
+    level: str = "warning",
+) -> None:
     try:
-        reporter(message, context)
+        reporter(message, context, level=level)
     except Exception as error:  # noqa: BLE001  (the run's outcome stands; say only what failed)
         print(
             f"{PROG}: could not send the Sentry event ({type(error).__name__}).",
@@ -350,7 +367,7 @@ def _fail_run(failure: RunFailed, reporter: Reporter) -> int:
         "cause": failure.cause,
         "expired": failure.expired,
     }
-    _send(reporter, FAILURE_MESSAGE, context)
+    _send(reporter, FAILURE_MESSAGE, context, "error")
     return code
 
 

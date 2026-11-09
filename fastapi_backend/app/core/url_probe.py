@@ -88,6 +88,7 @@ class ProbeReason(enum.StrEnum):
         "host_skipped"  # not requested: the host failed repeatedly in this run
     )
     NOT_CHECKED = "not_checked"  # not requested: the run's time limit was reached
+    TRACKING_HOST = "tracking_host"  # not requested: a network tracking host
 
 
 @dataclass(frozen=True)

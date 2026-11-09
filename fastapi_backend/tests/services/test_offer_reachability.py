@@ -491,3 +491,87 @@ def test_the_repositorys_url_bearing_records_hide_their_urls_in_repr() -> None:
 
     assert "secret.example" not in shown and "site.example" not in shown
     assert "t=1" not in shown and "t=2" not in shown
+
+
+async def test_after_the_deadline_every_cancelled_request_has_finished_unwinding() -> (
+    None
+):
+    cleaned: list[str] = []
+
+    class SlowCleanup(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)  # cleanup that itself awaits
+                cleaned.append(url)
+                raise
+            return OK
+
+    targets = [target(f"o{n}", f"https://slow{n}.example/") for n in range(4)]
+
+    findings = await probe_targets(
+        SlowCleanup(), targets, concurrency=4, max_seconds=0.05
+    )
+
+    assert len(cleaned) == 4
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+    assert {f.reason for f in findings} == {ProbeReason.NOT_CHECKED}
+
+
+async def test_an_unexpected_failure_inside_a_target_is_a_probe_error_not_dropped() -> (
+    None
+):
+    class Broken(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            raise RuntimeError("bug")
+
+    findings = await probe_targets(Broken(), [target("o1", "https://a.example/")])
+
+    assert (findings[0].status, findings[0].reason) == (
+        ProbeStatus.INCONCLUSIVE,
+        ProbeReason.PROBE_ERROR,
+    )
+
+
+async def test_probe_targets_itself_refuses_a_hand_built_tracking_host_target() -> None:
+    probe = FakeUrlProbe()
+    targets = [
+        target("o1", "https://www.awin1.com/cread.php?x=1"),
+        target("o2", "https://click.linksynergy.com/y", "l2"),
+        target("o3", "https://a.example/ok"),
+    ]
+
+    findings = await probe_targets(probe, targets)
+
+    assert probe.urls == ["https://a.example/ok"]
+    assert [f.reason for f in findings[:2]] == [ProbeReason.TRACKING_HOST] * 2
+    assert {f.status for f in findings[:2]} == {ProbeStatus.INCONCLUSIVE}
+
+
+async def test_refusals_and_probe_errors_between_timeouts_do_not_reset_the_breaker() -> (
+    None
+):
+    answers = iter(
+        [
+            ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT),
+            ProbeResult(ProbeStatus.REFUSED, ProbeReason.INVALID_URL),
+            ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT),
+            ProbeResult(ProbeStatus.REFUSED, ProbeReason.BLOCKED_ADDRESS),
+            ProbeResult(ProbeStatus.INCONCLUSIVE, ProbeReason.PROBE_ERROR),
+            ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT),
+        ]
+    )
+
+    class Scripted(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            await super().check(url)
+            return next(answers)
+
+    probe = Scripted()
+    targets = [target(f"o{n}", f"https://same.example/{n}") for n in range(8)]
+
+    findings = await probe_targets(probe, targets)
+
+    assert len(probe.urls) == 6
+    assert [f.reason for f in findings[6:]] == [ProbeReason.HOST_SKIPPED] * 2

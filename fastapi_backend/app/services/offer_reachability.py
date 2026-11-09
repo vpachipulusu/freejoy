@@ -215,6 +215,33 @@ def _log_problem(finding: Finding) -> None:
     )
 
 
+def _count_host_result(
+    failures: dict[str, int], host: str, result: ProbeResult
+) -> None:
+    """Count consecutive host failures; only a result that proves the host answered resets it.
+
+    A refusal (invalid URL, blocked address) and our own probe errors say nothing about the host,
+    so they neither add to the count nor clear it.
+    """
+    if result.reason in HOST_FAILURE_REASONS:
+        failures[host] = failures.get(host, 0) + 1
+    elif (
+        result.status is not ProbeStatus.REFUSED
+        and result.reason is not ProbeReason.PROBE_ERROR
+    ):
+        failures[host] = 0
+
+
+def _probe_error(target: CheckTarget) -> Finding:
+    return Finding(
+        target.offer_id,
+        target.link_id,
+        target.kind,
+        ProbeStatus.INCONCLUSIVE,
+        ProbeReason.PROBE_ERROR,
+    )
+
+
 def _not_checked(target: CheckTarget) -> Finding:
     return Finding(
         target.offer_id,
@@ -250,21 +277,35 @@ async def probe_targets(
     async def one(index: int, target: CheckTarget) -> None:
         host = _host_of(target.url)
         async with host_locks.setdefault(host, asyncio.Lock()), gate:
-            if host_failures.get(host, 0) >= MAX_HOST_FAILURES:
+            if _on_tracking_host(
+                target.url
+            ):  # safe for any caller, not only collect_targets
+                result = ProbeResult(
+                    ProbeStatus.INCONCLUSIVE, ProbeReason.TRACKING_HOST
+                )
+            elif host_failures.get(host, 0) >= MAX_HOST_FAILURES:
                 result = ProbeResult(ProbeStatus.INCONCLUSIVE, ProbeReason.HOST_SKIPPED)
             else:
                 result = await _check(probe, target.url)
-                failed = result.reason in HOST_FAILURE_REASONS
-                host_failures[host] = host_failures.get(host, 0) + 1 if failed else 0
+                _count_host_result(host_failures, host, result)
         done[index] = Finding(
             target.offer_id, target.link_id, target.kind, result.status, result.reason
         )
 
     try:
         async with asyncio.timeout(max_seconds):
-            await asyncio.gather(*(one(i, t) for i, t in enumerate(targets)))
+            # return_exceptions: after a deadline, gather returns only once every cancelled
+            # request has finished unwinding, so nothing keeps running behind the caller.
+            outcomes = await asyncio.gather(
+                *(one(i, t) for i, t in enumerate(targets)), return_exceptions=True
+            )
     except TimeoutError:
-        pass  # whatever finished is in ``done``; the rest is reported as not checked
+        outcomes = []  # whatever finished is in ``done``; the rest is reported as not checked
+    for index, outcome in enumerate(outcomes):
+        if isinstance(
+            outcome, Exception
+        ):  # a bug, not a verdict; never dropped silently
+            done[index] = _probe_error(targets[index])
     findings = [done.get(i) or _not_checked(t) for i, t in enumerate(targets)]
     for finding in findings:
         if finding.status in (ProbeStatus.UNREACHABLE, ProbeStatus.REFUSED):

@@ -81,11 +81,15 @@ class Reporter:
     def __init__(self, raises: Exception | None = None) -> None:
         self.contexts: list[Mapping[str, Any]] = []
         self.messages: list[str] = []
+        self.levels: list[str] = []
         self._raises = raises
 
-    def __call__(self, message: str, context: Mapping[str, Any]) -> None:
+    def __call__(
+        self, message: str, context: Mapping[str, Any], *, level: str = "warning"
+    ) -> None:
         if self._raises is not None:
             raise self._raises
+        self.levels.append(level)
         self.messages.append(message)
         self.contexts.append(context)
 
@@ -176,6 +180,7 @@ def test_a_rerun_expires_nothing(capsys: pytest.CaptureFixture[str]) -> None:
         ["--limit", "5001"],
         ["--batch-size", "1001"],
         ["--max-seconds", "0"],
+        ["--max-seconds", "86401"],
     ],
 )
 def test_out_of_range_values_are_refused_with_exit_2(
@@ -556,3 +561,41 @@ def test_a_failure_event_carries_only_stage_cause_and_count() -> None:
     assert event["message"] == FAILURE_MESSAGE
     assert event["contexts"]["offer_health"] == context
     assert "https://" not in repr(event["contexts"])
+
+
+def test_the_failure_event_is_an_error_and_the_summary_is_a_warning() -> None:
+    failed, summary = Reporter(), Reporter()
+
+    command.main(
+        [],
+        units=failing_units(ConnectionError("x")),
+        probe=FakeUrlProbe(),
+        reporter=failed,
+        now=NOW,
+    )
+    run([], store_with(), probe_with_problems(), summary)
+
+    assert failed.levels == ["error"] and summary.levels == ["warning"]
+
+
+def test_the_failure_event_reaches_sentry_at_level_error() -> None:
+    import sentry_sdk
+
+    transport = RecordingTransport()
+    try:
+        report_to_sentry(
+            FAILURE_MESSAGE,
+            {"stage": "s", "cause": "OSError", "expired": 0},
+            settings_with(DSN),
+            transport=transport,
+            level="error",
+        )
+    finally:
+        for scope in (
+            sentry_sdk.get_global_scope(),
+            sentry_sdk.get_isolation_scope(),
+            sentry_sdk.get_current_scope(),
+        ):
+            scope.client = None  # type: ignore[assignment]
+
+    assert transport.events[0]["level"] == "error"
