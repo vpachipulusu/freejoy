@@ -6,6 +6,7 @@ import { offerLifecycleAction } from '@/app/actions/admin/offer-actions';
 import type { OfferAction } from '@/lib/admin-catalogue/offer-status';
 import { settleAction } from '@/lib/admin-catalogue/settle-action';
 import { useToast } from '@/hooks/use-toast';
+import { useOfferReview } from './offer-review-context';
 
 const SUCCESS_TITLES: Record<OfferAction, string> = {
   publish: 'Offer published',
@@ -33,6 +34,7 @@ const FAILURE_TITLES: Record<OfferAction, string> = {
 export function useOfferAction() {
   const router = useRouter();
   const { toast } = useToast();
+  const review = useOfferReview();
   const [isPending, startTransition] = useTransition();
   const busy = useRef(false);
 
@@ -40,16 +42,19 @@ export function useOfferAction() {
     offerId: string,
     action: OfferAction,
     offerTitle: string,
-    reviewToken: string
+    reviewToken?: string
   ): void {
     if (busy.current) return;
     busy.current = true;
+    review.beginWrite();
     startTransition(async () => {
       try {
         const result = await settleAction(() => offerLifecycleAction(offerId, action, reviewToken));
         if (result.success) {
+          review.recordWrite(result.data.reviewToken);
           toast({ title: SUCCESS_TITLES[action], description: offerTitle });
         } else {
+          review.recordFailure(result.reason);
           toast({
             variant: 'destructive',
             title: FAILURE_TITLES[action],

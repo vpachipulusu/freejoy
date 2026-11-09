@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -9,7 +9,7 @@ import { offerFormSchema, type OfferFormValues } from '@/lib/admin-catalogue/off
 import { settleAction } from '@/lib/admin-catalogue/settle-action';
 import type { OfferRowStatus } from '@/lib/admin-catalogue/offer-status';
 import { useToast } from '@/hooks/use-toast';
-import { useReportFormDirty } from '../../_components/dirty-form-context';
+import { useReportFormBusy, useReportFormDirty } from '../../_components/dirty-form-context';
 import { FormFooter } from '../../_components/form-footer';
 import {
   useSavedMessage,
@@ -25,6 +25,7 @@ import {
   TermsFields,
   type PickOption,
 } from './offer-form-fields';
+import { useOfferReview } from './offer-review-context';
 import { OfferPreviewCard } from './offer-preview-card';
 import { StepsField } from './offer-steps-field';
 
@@ -69,7 +70,13 @@ export function OfferForm({
   const form = useForm<OfferFormValues>({
     resolver: zodResolver(offerFormSchema),
     defaultValues: initialValues,
+    // The page reloads the offer after a save or when somebody else changed it: the form follows, but never
+    // overwrites a field the editor has typed in.
+    values: initialValues,
+    resetOptions: { keepDirtyValues: true },
   });
+  const review = useOfferReview();
+  const [refreshing, startRefresh] = useTransition();
   const { formError, clearFormError, summaryRef, showFailure } = useServerFormErrors(
     form.setError,
     form.setFocus
@@ -82,10 +89,12 @@ export function OfferForm({
   async function onSubmit(values: OfferFormValues): Promise<void> {
     clearFormError();
     clearSaved();
+    review.beginWrite();
     const outcome = await settleAction(() =>
       mode === 'create' || !offerId ? createOfferAction(values) : updateOfferAction(offerId, values)
     );
     if (!outcome.success) {
+      review.recordFailure(outcome.reason);
       showFailure(outcome);
       return;
     }
@@ -94,13 +103,21 @@ export function OfferForm({
       router.push(`/admin/offers/${outcome.data.id}`);
       return;
     }
+    const written = outcome.data;
+    review.recordWrite(
+      'reviewToken' in written && typeof written.reviewToken === 'string'
+        ? written.reviewToken
+        : undefined
+    );
     form.reset(values);
     markSaved();
-    router.refresh();
+    // The status buttons still hold the token of the version before this save until the reload lands.
+    startRefresh(() => router.refresh());
   }
 
   const submitting = form.formState.isSubmitting;
   useReportFormDirty(dirty);
+  useReportFormBusy(refreshing);
   const slug = status ? initialValues.slug : undefined;
 
   return (

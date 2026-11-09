@@ -4,7 +4,7 @@
  * summary, and the draft preview card only links to the public page once the offer is published.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Typing into a long form is slow under coverage instrumentation: the typing-heavy suites get more time.
@@ -13,6 +13,7 @@ const SLOW = { timeout: 30_000 };
 const mocks = vi.hoisted(() => ({
   createOfferAction: vi.fn(),
   updateOfferAction: vi.fn(),
+  offerLifecycleAction: vi.fn(),
   createCategoryAction: vi.fn(),
   updateCategoryAction: vi.fn(),
   createMerchantAction: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/app/actions/admin/offer-actions', () => ({
   createOfferAction: mocks.createOfferAction,
   updateOfferAction: mocks.updateOfferAction,
+  offerLifecycleAction: mocks.offerLifecycleAction,
 }));
 vi.mock('@/app/actions/admin/category-actions', () => ({
   createCategoryAction: mocks.createCategoryAction,
@@ -537,6 +539,114 @@ describe('edit page: the form and the status buttons together', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(publish).not.toHaveAttribute('aria-disabled'));
+  });
+});
+
+function editPage(token: string, values: Partial<OfferFormValues> = {}) {
+  return (
+    <DirtyFormProvider>
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken={token}
+        status="DRAFT"
+      />
+      <OfferForm
+        mode="edit"
+        offerId="o1"
+        status="DRAFT"
+        initialValues={{ ...filled, slug: 'free-coffee-sample', ...values }}
+        categories={categories}
+        merchants={merchants}
+      />
+    </DirtyFormProvider>
+  );
+}
+
+describe('edit page: the form follows the offer data it is given', SLOW, () => {
+  const editForm = (values: Partial<OfferFormValues> = {}) => (
+    <OfferForm
+      mode="edit"
+      offerId="o1"
+      status="DRAFT"
+      initialValues={{ ...filled, slug: 'free-coffee-sample', ...values }}
+      categories={categories}
+      merchants={merchants}
+    />
+  );
+
+  it('shows new content in the field and the preview card when the offer changed under it', () => {
+    const { rerender } = render(editForm());
+    expect(screen.getByLabelText(/^Summary/)).toHaveValue('A free tasting sachet.');
+
+    rerender(editForm({ summary: 'Rewritten by the importer.' }));
+
+    expect(screen.getByLabelText(/^Summary/)).toHaveValue('Rewritten by the importer.');
+    expect(
+      within(screen.getByRole('complementary')).getByText('Rewritten by the importer.')
+    ).toBeInTheDocument();
+  });
+
+  it('keeps what the editor typed while the fields they did not touch update', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editForm());
+    await user.type(screen.getByLabelText(/^Title/), ' (my edit)');
+
+    rerender(editForm({ summary: 'Rewritten by the importer.' }));
+
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('Free coffee sample (my edit)');
+    expect(screen.getByLabelText(/^Summary/)).toHaveValue('Rewritten by the importer.');
+  });
+
+  it('the whole edit page tree shows the new values and the buttons send the new token', async () => {
+    const user = userEvent.setup();
+    mocks.offerLifecycleAction.mockResolvedValue({
+      success: true,
+      data: { id: 'o1', slug: 's', status: 'PUBLISHED', reviewToken: 'tok-3' },
+    });
+    const { rerender } = render(editPage('tok-1'));
+
+    rerender(editPage('tok-2', { summary: 'Rewritten by the importer.' }));
+
+    expect(screen.getByLabelText(/^Summary/)).toHaveValue('Rewritten by the importer.');
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish', 'tok-2')
+    );
+  });
+});
+
+describe('edit page: the buttons wait for the reload that follows a save', SLOW, () => {
+  it('stays disabled after the save resolves and is released only by the new token', async () => {
+    const user = userEvent.setup();
+    let finishRefresh: () => void = () => undefined;
+    mocks.refresh.mockImplementation(
+      () => new Promise<void>((resolve) => (finishRefresh = resolve))
+    );
+    mocks.updateOfferAction.mockResolvedValue({
+      success: true,
+      data: { id: 'o1', slug: 's', status: 'DRAFT', reviewToken: 'tok-2' },
+    });
+    const { rerender } = render(editPage('tok-1'));
+    const publish = screen.getByRole('button', { name: 'Publish' });
+
+    await user.type(screen.getByLabelText(/^Title/), 'x');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Changes saved.')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+    // The save resolved and the form is clean, but the old token is still on the buttons.
+    expect(publish).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByText(/Save or discard your changes first/)).not.toBeInTheDocument();
+
+    await act(async () => finishRefresh());
+    rerender(editPage('tok-2', { title: 'Free coffee samplex' }));
+
+    await waitFor(() => expect(publish).not.toHaveAttribute('aria-disabled'));
+    await user.click(publish);
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish', 'tok-2')
+    );
   });
 });
 

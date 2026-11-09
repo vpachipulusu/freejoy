@@ -46,21 +46,8 @@ vi.mock('react', async () => {
   return { ...actual, cache: <T,>(fn: T) => fn };
 });
 vi.mock('@/app/(admin)/admin/offers/_components/offer-row-actions', () => ({
-  OfferRowActions: ({
-    offerId,
-    status,
-    reviewToken,
-  }: {
-    offerId: string;
-    status: string;
-    reviewToken: string;
-  }) => (
-    <button
-      type="button"
-      data-row-actions={offerId}
-      data-status={status}
-      data-review-token={reviewToken}
-    >
+  OfferRowActions: ({ offerId, status }: { offerId: string; status: string }) => (
+    <button type="button" data-row-actions={offerId} data-status={status}>
       Row actions
     </button>
   ),
@@ -85,7 +72,6 @@ const offer = (overrides: Record<string, unknown> = {}) => ({
   end_at: null,
   last_verified_at: '2026-03-05T10:00:00Z',
   updated_at: '2026-03-06T10:00:00Z',
-  review_token: 'token-of-the-list-read',
   ...overrides,
 });
 
@@ -315,11 +301,6 @@ describe('OffersResults', () => {
     expect(within(published).getByRole('button', { name: 'Row actions' })).toHaveAttribute(
       'data-status',
       'PUBLISHED'
-    );
-    // The row menu publishes and verifies with the token this list read carried.
-    expect(within(published).getByRole('button', { name: 'Row actions' })).toHaveAttribute(
-      'data-review-token',
-      'token-of-the-list-read'
     );
     // The title link is the one way into the editor (the menu has Edit too); no second text link.
     expect(within(published).getAllByRole('link')).toHaveLength(1);

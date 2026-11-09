@@ -1,7 +1,7 @@
 /** Shown when a server action call itself fails (network drop, a deploy mid-request): nothing more is known. */
 export const ACTION_FAILED_MESSAGE = 'Something went wrong. Please try again.';
 
-export type ActionFailure = { success: false; error: string };
+export type ActionFailure = { success: false; error: string; reason?: 'offer_changed' };
 
 /**
  * Awaits a server action call and turns a thrown error into a failure result, so the form or button can show

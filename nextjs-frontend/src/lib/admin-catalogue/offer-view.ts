@@ -18,8 +18,6 @@ export interface OfferRowView {
   endAt: string | null;
   lastVerifiedAt: string | null;
   updatedAt: string;
-  /** Opaque: sent back with publish and verify, which fail if the offer changed since it was loaded. */
-  reviewToken: string;
 }
 
 export interface OfferLinkView {
@@ -30,6 +28,8 @@ export interface OfferLinkView {
 }
 
 export interface OfferDetailView extends OfferRowView {
+  /** Opaque: sent back with publish and verify, which fail if the offer changed since it was loaded. */
+  reviewToken: string;
   summary: string;
   description: string[];
   imageTint: string;

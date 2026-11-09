@@ -62,12 +62,7 @@ export function OffersTable({ rows }: { rows: OfferTableRow[] }) {
             <TableCell className="text-right">
               <div className="flex items-center justify-end gap-1">
                 {row.status === 'UNKNOWN' ? null : (
-                  <OfferRowActions
-                    offerId={row.id}
-                    offerTitle={row.title}
-                    status={row.status}
-                    reviewToken={row.reviewToken}
-                  />
+                  <OfferRowActions offerId={row.id} offerTitle={row.title} status={row.status} />
                 )}
               </div>
             </TableCell>

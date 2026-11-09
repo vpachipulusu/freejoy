@@ -38,7 +38,9 @@ import { ADMIN_REQUEST_FAILED_MESSAGE } from '@/lib/api/admin-errors';
  */
 
 export type OfferSavedData = { id: string; slug: string; status: OfferStatus };
-export type OfferActionData = OfferSavedData;
+/** What an edit or a status action returns: the saved offer and the review token of the version now stored. */
+export type OfferWrittenData = OfferSavedData & { reviewToken: string };
+export type OfferActionData = OfferWrittenData;
 
 const ADMIN_OFFERS_PATH = '/admin/offers';
 
@@ -73,7 +75,7 @@ export async function createOfferAction(
 export async function updateOfferAction(
   offerId: string,
   input: unknown
-): Promise<CatalogueActionResult<OfferSavedData>> {
+): Promise<CatalogueActionResult<OfferWrittenData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     const parsed = offerFormSchema.safeParse(input);
@@ -84,9 +86,9 @@ export async function updateOfferAction(
       return failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
 
     refreshAdminPages(offerId);
-    const { id, slug, status } = result.data;
+    const { id, slug, status, review_token: reviewToken } = result.data;
     if (status === 'PUBLISHED') refreshPublicCatalogue(slug);
-    return { success: true, data: { id, slug, status: status as OfferStatus } };
+    return { success: true, data: { id, slug, status: status as OfferStatus, reviewToken } };
   });
 }
 
@@ -113,17 +115,26 @@ export async function offerLifecycleAction(
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     if (!isOfferAction(action)) return { success: false, error: ADMIN_REQUEST_FAILED_MESSAGE };
     const request = toActionRequest(action, reviewToken);
-    if (request === null) return { success: false, error: OFFER_CHANGED_MESSAGE };
+    if (request === null) {
+      // Only the action name: never the token value.
+      logger.warn('Admin offer action: review token missing or malformed', { action });
+      return { success: false, error: OFFER_CHANGED_MESSAGE };
+    }
 
     const result = await runAdminOfferAction(offerId, request);
     if (!result.success) {
-      if (result.code === 'offer_changed') refreshAdminPages(offerId);
-      return failed(result, OFFER_NOT_FOUND_MESSAGE, `Admin offer ${action} failed`);
+      const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, `Admin offer ${action} failed`);
+      if (result.code !== 'offer_changed') return refusal;
+      refreshAdminPages(offerId);
+      return { ...refusal, reason: 'offer_changed' };
     }
 
     refreshAdminPages(offerId);
     refreshPublicCatalogue(result.data.slug);
-    const { id, slug, status } = result.data;
-    return { success: true, data: { id, slug, status: status as OfferStatus } };
+    const { id, slug, status, review_token: newToken } = result.data;
+    return {
+      success: true,
+      data: { id, slug, status: status as OfferStatus, reviewToken: newToken },
+    };
   });
 }

@@ -25,6 +25,7 @@ export const INVALID_FORM_MESSAGE = 'Check the highlighted fields and try again.
 const CODE_MESSAGES: Record<string, string> = {
   slug_taken: 'That slug is already in use. Choose another.',
   offer_changed: OFFER_CHANGED_MESSAGE,
+  review_token_required: OFFER_CHANGED_MESSAGE,
   illegal_transition:
     'That change is not allowed for an offer in its current status. Refresh the page and try again.',
   invalid_url: 'A web address was rejected. Use a full https:// address.',

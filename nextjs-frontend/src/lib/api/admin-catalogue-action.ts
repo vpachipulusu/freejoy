@@ -15,7 +15,13 @@ import type { ApiResult } from './server';
 
 export type CatalogueActionResult<T = undefined> =
   | { success: true; data: T }
-  | { success: false; error: string; fieldErrors?: Record<string, string> };
+  | {
+      success: false;
+      error: string;
+      fieldErrors?: Record<string, string>;
+      /** Set when the refusal means the offer changed since it was loaded: the page shows a lasting notice. */
+      reason?: 'offer_changed';
+    };
 
 type FailedResult = Extract<ApiResult<unknown>, { success: false }>;
 

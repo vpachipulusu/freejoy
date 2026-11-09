@@ -145,7 +145,6 @@ export function toOfferRow(offer: OfferSummaryOut): OfferRowView {
     endAt: offer.end_at,
     lastVerifiedAt: offer.last_verified_at,
     updatedAt: offer.updated_at,
-    reviewToken: offer.review_token,
   };
 }
 
@@ -168,6 +167,7 @@ function toStepView(step: Record<string, unknown>) {
 export function toOfferDetail(offer: OfferOut): OfferDetailView {
   return {
     ...toOfferRow(offer),
+    reviewToken: offer.review_token,
     summary: offer.summary,
     description: offer.description,
     imageTint: offer.image_tint,

@@ -61,11 +61,11 @@ const OFFER_SUMMARY = {
   end_at: null,
   last_verified_at: '2026-01-02T00:00:00Z',
   updated_at: '2026-01-03T00:00:00Z',
-  review_token: 'a1b2c3-review-token',
 };
 
 const OFFER_OUT = {
   ...OFFER_SUMMARY,
+  review_token: 'a1b2c3-review-token',
   summary: 'A sachet.',
   description: ['One'],
   image_tint: 'mint',
@@ -259,10 +259,10 @@ describe('admin catalogue wrappers', () => {
         categoryId: 'c1',
         lastVerifiedAt: '2026-01-02T00:00:00Z',
         status: 'PUBLISHED',
-        reviewToken: 'a1b2c3-review-token',
       });
       const detail = toOfferDetail(OFFER_OUT as never);
       expect(detail.reviewToken).toBe('a1b2c3-review-token');
+      expect('reviewToken' in toOfferRow(OFFER_SUMMARY as never)).toBe(false);
       expect(detail.steps).toEqual([
         { title: 'Go', detail: 'Click' },
         { title: '', detail: '' },
