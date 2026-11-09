@@ -18,8 +18,19 @@ export default function CookiesPage() {
       <p>
         This release is intended to set no non-essential cookies and run no analytics or advertising
         scripts. If error monitoring is switched on, the privacy notice describes it. Browsing the
-        public pages is not meant to store anything on your device, so no cookie banner is shown at
-        present. That is our current reading and it is still to be confirmed in review.
+        public pages is not meant to store anything on your device, apart from the saved list
+        described below, which exists only if you use the heart button, so no cookie banner is shown
+        at present. That is our current reading and it is still to be confirmed in review.
+      </p>
+      <h2>If you save freebies</h2>
+      <p>
+        The heart on a freebie saves it to a list on this device. The list is kept in your browser&apos;s
+        local storage under the name `freejoy.saved.v1`. It is not a cookie. It holds only the page
+        names (slugs) of the freebies you saved, up to 200, and nothing about you. It stays until you
+        remove the freebies or clear your browser data, and it is not copied to your other devices.
+        The Saved page sends those names to our server only to look the freebies up; we do not keep
+        them. We treat this as storage you asked for, which is our current reading and is still to
+        be confirmed in review.
       </p>
       <h2>If you sign in</h2>
       <p>
@@ -38,6 +49,7 @@ export default function CookiesPage() {
         items={[
           'Final cookie and local-storage list, including strictly necessary items from the framework and sign-in',
           'Whether the conclusion that no banner is needed on the public pages holds',
+          'Whether the saved-freebies list in local storage (freejoy.saved.v1) is storage the visitor asked for, so that no consent is needed',
           'Whether error monitoring needs any wording here or only in the privacy notice',
           'Consent mechanism and wording before any optional cookie, analytics or affiliate pixel is added',
           'Expiry period stated for each item',

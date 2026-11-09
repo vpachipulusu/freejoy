@@ -4,11 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Menu, Search, X } from 'lucide-react';
+import { Heart, Menu, Search, X } from 'lucide-react';
 import { DialogOverlay } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { BrandMark } from './brand-mark';
-import { SITE_NAV_ITEMS } from './nav-items';
+import { SAVED_NAV_ITEM, SITE_NAV_ITEMS } from './nav-items';
 import { SearchForm } from './search-form';
 import { useSignedIn } from './use-signed-in';
 
@@ -66,6 +66,18 @@ export function SiteHeader() {
 
         <div className="ml-auto hidden flex-1 items-center justify-end gap-3 lg:flex">
           <SearchForm className="w-full max-w-[280px]" />
+          <Link
+            href={SAVED_NAV_ITEM.href}
+            aria-current={pathname === SAVED_NAV_ITEM.href ? 'page' : undefined}
+            className={cn(
+              'inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-pill px-3 text-sm font-semibold text-foreground hover:bg-muted',
+              pathname === SAVED_NAV_ITEM.href && 'bg-accent text-accent-ink'
+            )}
+          >
+            <Heart className="h-4 w-4" aria-hidden="true" />
+            {/* Icon only at 1024px, where the row is full; the word shows from 1280px. */}
+            <span className="sr-only xl:not-sr-only">{SAVED_NAV_ITEM.label}</span>
+          </Link>
           <Link
             href={account.href}
             // The dashboard layout verifies the session and loads the profile: never prefetch it from public pages.

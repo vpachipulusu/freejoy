@@ -204,7 +204,12 @@ describe('once the catalogue is API-backed', () => {
     const cta = within(hero).getByRole('link', { name: /^request this sample$/i });
     expect(cta).toHaveAttribute('href', `/go/${FIXTURE_LIVE.id}`);
     expect(cta).toHaveAttribute('rel', 'sponsored nofollow noopener');
-    expect(within(hero).queryByRole('button')).toBeNull();
+    // No demo dialog button: the heart (FREEJ-28) is the only control besides the link.
+    expect(
+      within(hero)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label'))
+    ).toEqual([`Save ${FIXTURE_LIVE.title}`]);
   });
 });
 

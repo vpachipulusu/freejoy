@@ -1,4 +1,4 @@
-import { Bell, Home, LayoutGrid, Search, type LucideIcon } from 'lucide-react';
+import { Bell, Heart, Home, Search, type LucideIcon } from 'lucide-react';
 
 export interface SiteNavItem {
   href: string;
@@ -17,14 +17,17 @@ export const SITE_NAV_ITEMS: ReadonlyArray<SiteNavItem> = [
   { href: '/about#how-it-works', label: 'How it works' },
 ];
 
+/** The Saved list (FREEJ-28): the header's desktop entry point and the third phone tab. */
+export const SAVED_NAV_ITEM: SiteNavItem = { href: '/saved', label: 'Saved' };
+
 /**
- * Phone tab bar (design screens 05/06). The design's "Saved" tab is deferred (FREEJ-28), so no
- * dead-end control ships: Categories takes its slot.
+ * Phone tab bar (design screens 05 to 07): Home, Browse, Saved, Alerts. Categories left the bar when
+ * Saved took the design's third slot; they stay in the menu sheet, the home page grid and /freebies.
  */
 export const SITE_TAB_ITEMS: ReadonlyArray<SiteTabItem> = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/freebies', label: 'Browse', icon: Search },
-  { href: '/freebies#categories', label: 'Categories', icon: LayoutGrid },
+  { ...SAVED_NAV_ITEM, icon: Heart },
   { href: '/alerts', label: 'Alerts', icon: Bell },
 ];
 

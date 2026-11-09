@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, Clock } from 'lucide-react';
 import { postageText } from '@/components/offer/offer-format';
+import { SaveButton } from '@/components/saved/save-button';
 import { cn } from '@/lib/utils';
 import { displayFreshness } from '@/lib/catalogue/freshness';
 import type { Merchant, Offer } from '@/lib/catalogue/types';
@@ -21,7 +22,8 @@ export function offerHref(offer: Offer): string {
 /**
  * Image-led card (design screens 01, 02, 05, 06): type badge over the art, merchant eyebrow,
  * title, a freshness label (see `displayFreshness`) and a "View freebie" link. The whole card is one link
- * target; the demo badge is visible on fixture offers.
+ * target; the demo badge is visible on fixture offers. The heart (`SaveButton`, FREEJ-28) is the card's only
+ * other control: a client island beside the link, never inside it. The card itself stays a server component.
  */
 export function OfferCard({ offer, merchant, className }: OfferCardProps) {
   const href = offerHref(offer);
@@ -35,9 +37,14 @@ export function OfferCard({ offer, merchant, className }: OfferCardProps) {
     >
       <div className="relative">
         <OfferArt image={offer.image} />
-        <OfferTypeBadge type={offer.offerType} className="absolute left-3 top-3" />
-        {/* Below the type badge on narrow two-column cards so the two pills never overlap. */}
-        {offer.demo && <DemoBadge className="absolute bottom-3 right-3 sm:bottom-auto sm:top-3" />}
+        {/* Smaller on phones so the badge and the heart both fit a narrow two-column card. */}
+        <OfferTypeBadge
+          type={offer.offerType}
+          className="absolute left-2 top-2 max-w-[calc(100%-2.5rem)] px-1.5 text-[10px] tracking-normal sm:left-3 sm:top-3 sm:px-3 sm:text-[11px] sm:tracking-wide"
+        />
+        {/* The heart owns the top-right corner (design screens 05, 06); the demo badge takes the bottom-right. */}
+        {offer.demo && <DemoBadge className="absolute bottom-3 right-3" />}
+        <SaveButton slug={offer.slug} title={offer.title} className="absolute right-0 top-0" />
       </div>
       <p className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
         {merchant.name}

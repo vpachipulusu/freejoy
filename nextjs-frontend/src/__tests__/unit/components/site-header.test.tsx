@@ -144,9 +144,8 @@ describe('activeTabHref', () => {
     expect(activeTabHref(null)).toBeNull();
   });
 
-  it('never reports an anchor-only tab as current', () => {
-    const anchored = SITE_TAB_ITEMS.filter((item) => item.href.includes('#'));
-    expect(anchored.length).toBeGreaterThan(0);
+  it('has no anchor-only tab, which could never be reported as current', () => {
+    expect(SITE_TAB_ITEMS.filter((item) => item.href.includes('#'))).toEqual([]);
     expect(activeTabHref('/freebies')).toBe('/freebies');
   });
 });

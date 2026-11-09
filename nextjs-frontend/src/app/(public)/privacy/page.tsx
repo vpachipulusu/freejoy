@@ -39,6 +39,12 @@ export default function PrivacyPage() {
         email address found in a page address, and that single-use code, is removed before an error
         or timing report is sent to our error-monitoring provider.
       </p>
+      <p>
+        If you use the heart on a freebie, the list of freebies you saved stays in your browser, on
+        your device. The Saved page sends their page names to our server only to look the freebies
+        up; we do not keep that list or link it to you, and we record no analytics event when you
+        save or remove one. See the cookie notice for the storage name.
+      </p>
       <h2>If you create an account</h2>
       <p>
         If you create an account, we hold your email address, your name if you give one, the times
@@ -93,6 +99,7 @@ export default function PrivacyPage() {
           'Retention periods for confirmation-token, contact and sign-in history data',
           'Named processors (hosting, error monitoring, email sending) and any transfers outside the UK',
           'Right to object to direct marketing, minimum sign-up age and wording of data-subject rights',
+          'Whether the saved-freebies list (kept only in the browser of the visitor, page names only) needs any lawful-basis or retention wording',
           'Complaint route to the ICO and the data protection fee position',
         ]}
       />

@@ -385,6 +385,26 @@ describe('cookie notice', () => {
   });
 });
 
+describe('saved freebies in the legal drafts (FREEJ-28)', () => {
+  it('the cookie notice names the storage key, says it is not a cookie, and stays a draft', () => {
+    const { container } = render(<CookiesPage />);
+
+    expect(screen.getByRole('heading', { name: 'If you save freebies' })).toBeInTheDocument();
+    expect(container.textContent).toMatch(/freejoy\.saved\.v1/);
+    expect(container.textContent).toMatch(/It is not a cookie/);
+    expect(container.textContent).toMatch(/still to be confirmed in review/i);
+    expect(container.textContent).toMatch(/draft/i);
+  });
+
+  it('the privacy notice says the saved list stays on the device and records no event', () => {
+    const { container } = render(<PrivacyPage />);
+
+    expect(container.textContent).toMatch(/list of freebies you saved stays in your browser/i);
+    expect(container.textContent).toMatch(/no analytics event when you save or remove/i);
+    expect(container.textContent).toMatch(/draft/i);
+  });
+});
+
 describe('terms and about copy', () => {
   it('terms say competitions are run by the organiser, not Freejoy', () => {
     render(<TermsPage />);
