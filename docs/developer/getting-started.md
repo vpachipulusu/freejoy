@@ -45,7 +45,8 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 8000 --reload
 ```
 
 `app/core/config.py` reads `.env` from the working directory; every variable is documented in
-`fastapi_backend/.env.example`, which is the reference. In short:
+`fastapi_backend/.env.example`, which is the reference. The test suite, the OpenAPI schema commands and
+`scripts/gate.sh` deliberately do not read it ([testing.md](testing.md#local-env-and-the-test-suite)). In short:
 
 | Variable | Required | Notes |
 | --- | --- | --- |

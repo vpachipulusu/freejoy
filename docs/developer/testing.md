@@ -93,7 +93,18 @@ uv run pytest
 
 - Config: `pytest.ini` sets `asyncio_mode = auto`.
 - Tests live in `fastapi_backend/tests/`, mirroring `app/` (`api/`, `core/`, `services/`, `repositories/`, `commands/`). Most need **no database**: `tests/fakes.py` has a `FakeSession` and a `FakeSessionProvider` that implements the `SessionProvider` protocol, and tests inject it with `app.dependency_overrides[get_session_provider]` (clear overrides after the test). A repository test shows a repository working with an injected fake provider (ADR-004). The `*_e2e.py` files use a real Postgres through `TEST_DATABASE_URL` and are skipped without it; CI provides one through the `postgres` service in `backend.yml`. `tests/commands/test_seed_catalogue.py` also uses `TEST_DATABASE_URL` (it truncates the catalogue tables and refuses a database that is not a local `*_test` one).
-- `tests/conftest.py` sets a placeholder `DATABASE_URL` (`setdefault`) because `app.core.config` reads it at import. A value already in the environment wins.
+- `tests/conftest.py` gives the app placeholder settings (`tests/_env_isolation.py`) because `app.core.config` reads them at import; see [Local `.env` and the test suite](#local-env-and-the-test-suite).
+
+### Local `.env` and the test suite
+
+The tests never see your machine's configuration. `app.core.config` builds its settings once, when it is first imported, from the process environment and a git-ignored `fastapi_backend/.env`; a developer's real `APP_NAME`, `SENTRY_DSN`, `EMAIL_PROVIDER` or keys must not change what the suite proves (a branded `APP_NAME` used to fail `test_openapi_identifies_yourapp` and the 12 `test_docs_are_not_served_in_production` cases, which end by asserting the schema title, and a real `SENTRY_DSN` made tests try to reach Sentry).
+
+- **The switch.** `IGNORE_ENV_FILE=1` (read by `app/core/env_file.py`, truthy values `1`, `true`, `yes`, `on`) makes `Settings` and Alembic's `env.py` skip `.env`. Without it nothing changes: `uvicorn`, the management commands and Alembic still read `.env`. It is not a setting and is not in `.env.example`; do not set it for a normal run or in a deployment.
+- **Who sets it.** `tests/conftest.py` calls `isolate_settings_environment(os.environ)` (`tests/_env_isolation.py`) before anything imports the app. It sets the switch, removes every name that is a field of `Settings` (read from `config.py`, so a new setting is covered automatically) plus `DATABASE_URL_DIRECT`, and then pins the test placeholders (`ENVIRONMENT=test`, the dummy keys, a dummy `DATABASE_URL`). pytest-xdist workers import the conftest too, and subprocesses the tests start (Alembic, the CLI e2e tests) inherit the clean environment.
+- **What it covers.** Neither a `.env` file nor an exported variable such as `APP_NAME` or `ENVIRONMENT=production` reaches the settings during a run. `TEST_DATABASE_URL` is not a setting and is kept: it is how you point the `*_e2e.py` suites at a database.
+- **The OpenAPI commands** (`commands.generate_openapi_schema`, `commands.check_openapi_schema`, the pre-commit hook) set the switch themselves and also drop an exported `APP_NAME` and `APP_VERSION`, so the committed `nextjs-frontend/openapi.json` is the same whether or not you have a `.env` or a custom brand.
+- **`scripts/gate.sh`** exports the switch for the whole run and pins `DATABASE_URL_DIRECT` to `GATE_TEST_DATABASE_URL` for the Alembic cycle (Alembic prefers `DATABASE_URL_DIRECT`, so an exported or `.env` value would otherwise point `downgrade base` at another database).
+- **Limit.** Settings you construct yourself in a test (`Settings()`, `Settings(_env_file=None)`) still read the process environment the test changes with `monkeypatch`, which is what those tests are for. Regression tests: `tests/core/test_env_file.py`, `tests/test_env_isolation.py` and the two cases in `tests/commands/test_generate_openapi_schema.py` and `test_check_openapi_schema.py`.
 
 Lint and types, using the dev-group tools:
 
