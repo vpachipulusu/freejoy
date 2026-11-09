@@ -20,6 +20,7 @@ Nothing here logs or returns item text: a skipped item is logged as its promotio
 reason code.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
@@ -53,7 +54,13 @@ from app.services.awin_promotions import (
 BATCH_SIZE = 50
 DEFAULT_LIMIT, MAX_LIMIT = 500, 5000
 DEFAULT_MAX_PAGES, MAX_MAX_PAGES = 10, 50
+DEFAULT_MAX_SECONDS, MAX_MAX_SECONDS = (
+    1200,
+    86_400,
+)  # the whole run, 20 minutes by default
 MAX_LOGGED_SKIPS = 100
+RUN_DEADLINE = "run_deadline"
+LOCK_NOT_AVAILABLE = "55P03"  # SQLSTATE: lock_timeout expired
 STAGE_FETCH = "while fetching promotions"
 STAGE_WRITE = "while writing offers"
 logger = logging.getLogger("freejoy.awin_import")
@@ -73,10 +80,12 @@ UnitOpener = Callable[[], AbstractAsyncContextManager[Unit]]
 
 @dataclass(frozen=True)
 class RunOptions:
+    publisher_id: int  # ours: a tracking link must carry it
     dry_run: bool = False
     limit: int = DEFAULT_LIMIT
     max_pages: int = DEFAULT_MAX_PAGES
     updated_since: date | None = None
+    max_seconds: float = DEFAULT_MAX_SECONDS  # the whole run, fetching and writing
 
 
 @dataclass(frozen=True)
@@ -111,7 +120,11 @@ def _raw_id(item: object) -> int | None:
 
 
 def _parse_page(
-    items: Sequence[Any], seen: set[int], now: datetime, logged: int
+    items: Sequence[Any],
+    seen: set[int],
+    now: datetime,
+    logged: int,
+    publisher_id: int,
 ) -> tuple[list[Promotion], ImportTally]:
     promotions: list[Promotion] = []
     tally = ImportTally()
@@ -120,7 +133,7 @@ def _parse_page(
         outcome = (
             Rejected(SkipReason.DUPLICATE_IN_FEED)
             if pid is not None and pid in seen
-            else parse_promotion(item, now)
+            else parse_promotion(item, now, publisher_id)
         )
         if pid is not None:
             seen.add(pid)
@@ -204,7 +217,9 @@ async def _progress(
         page = await client.fetch_promotions(filters, page=page_no, page_size=page_size)
         _check_not_a_repeat(page.items, seen)
         items = page.items[: options.limit - report.received]
-        promotions, skipped = _parse_page(items, seen, now, report.tally.skipped_total)
+        promotions, skipped = _parse_page(
+            items, seen, now, report.tally.skipped_total, options.publisher_id
+        )
         report = replace(
             report,
             pages=page_no,
@@ -231,6 +246,15 @@ async def _progress(
             return
 
 
+def _cause(error: Exception) -> str:
+    """``lock_timeout`` for a database lock wait that ran out, else the exception type name."""
+    wrapped = getattr(error, "orig", None)
+    for candidate in (wrapped, getattr(wrapped, "__cause__", None)):
+        if getattr(candidate, "sqlstate", None) == LOCK_NOT_AVAILABLE:
+            return "lock_timeout"
+    return type(error).__name__
+
+
 async def run_import(
     client: AwinClient,
     units: UnitOpener | None,
@@ -239,15 +263,16 @@ async def run_import(
 ) -> RunReport:
     """Run the import; ``units`` may be ``None`` only for a dry run. Raises ``ImportFailed``."""
     progress = _Progress(RunReport(), STAGE_FETCH)
+    deadline = asyncio.timeout(options.max_seconds)
     try:
-        async for progress in _progress(client, units, options, now):
-            pass
+        async with deadline:
+            async for progress in _progress(client, units, options, now):
+                pass
     except AwinError as error:
         raise ImportFailed(progress.report, STAGE_FETCH, error.reason.value) from None
     except ImportAborted as error:
         raise ImportFailed(progress.report, progress.stage, error.reason) from None
     except Exception as error:  # noqa: BLE001  (the type is reported, never the message)
-        raise ImportFailed(
-            progress.report, progress.stage, type(error).__name__
-        ) from None
+        cause = RUN_DEADLINE if deadline.expired() else _cause(error)
+        raise ImportFailed(progress.report, progress.stage, cause) from None
     return progress.report

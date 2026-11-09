@@ -13,7 +13,7 @@ from app.core.awin_client import AwinError, AwinReason
 from app.core.config import Settings, settings
 from commands import import_awin_offers as command
 from commands.import_awin_offers import FAILURE_MESSAGE, report_to_sentry
-from tests.awin_samples import CODE, NOW, raw_item, raw_page
+from tests.awin_samples import CODE, NOW, PUBLISHER_ID, raw_item, raw_page
 from tests.fakes_awin import FakeAwinClient
 from tests.fakes_awin_import import FakeDatabase
 
@@ -45,6 +45,7 @@ def run(
     return command.main(
         args,
         client=client,
+        publisher_id=PUBLISHER_ID,
         units=database.unit,
         reporter=reporter or Reporter(),
         now=NOW,
@@ -181,6 +182,8 @@ def test_a_dry_run_validates_prints_and_writes_nothing(
         ["--limit", "5001"],
         ["--max-pages", "0"],
         ["--max-pages", "51"],
+        ["--max-seconds", "0"],
+        ["--max-seconds", "86401"],
         ["--updated-since", "2026-13-01"],
         ["--updated-since", "yesterday"],
         ["--updated-since", "20261101"],
@@ -331,6 +334,7 @@ def test_an_unexpected_error_before_the_run_exits_1_with_its_type(
     code = command.main(
         [],
         client=FakeAwinClient([[raw_item(1)]]),
+        publisher_id=PUBLISHER_ID,
         units=explode,
         reporter=Reporter(),
         now=NOW,
@@ -484,3 +488,42 @@ def test_invalid_or_missing_app_settings_exit_2_without_a_traceback_or_a_request
     assert finished.returncode == 2, finished.stderr
     assert "settings are invalid" in finished.stderr
     assert "Traceback" not in finished.stderr
+
+
+def test_a_link_for_another_publisher_is_skipped_and_counted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    other = raw_item(
+        1, urlTracking="https://www.awin1.com/cread.php?awinmid=77&awinaffid=999"
+    )
+
+    code = run([], FakeAwinClient([[other, raw_item(2)]]))
+
+    assert code == 0
+    assert "tracking_owner_mismatch 1" in capsys.readouterr().out
+
+
+def test_a_run_past_its_deadline_exits_1_with_what_was_committed(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    class Stalls(FakeAwinClient):
+        async def fetch_promotions(
+            self, filters: Any, *, page: int, page_size: int
+        ) -> Any:
+            if page == 2:
+                await asyncio.sleep(3600)  # cancelled by the deadline, never waited for
+            return await super().fetch_promotions(
+                filters, page=page, page_size=page_size
+            )
+
+    real_timeout = asyncio.timeout
+    # --max-seconds is at least 1; the deadline is brought down to zero so nothing really waits
+    monkeypatch.setattr(asyncio, "timeout", lambda _seconds: real_timeout(0))
+    db = FakeDatabase()
+
+    code = run(["--limit", "500"], Stalls([raw_page(1, 200), raw_page(201, 200)]), db)
+
+    err = capsys.readouterr().err
+    assert code == 1 and "failed (run_deadline)" in err and "created 200" in err

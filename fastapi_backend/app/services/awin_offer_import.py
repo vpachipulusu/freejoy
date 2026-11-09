@@ -153,9 +153,6 @@ class ImportStore(Protocol):
         self, offer_id: str, values: dict[str, Any]
     ) -> OfferRecord: ...
     async def insert_link(self, values: dict[str, Any]) -> AffiliateLinkRecord: ...
-    async def update_link(
-        self, link_id: str, values: dict[str, Any]
-    ) -> AffiliateLinkRecord: ...
     async def insert_offer_import(self, values: dict[str, Any]) -> None: ...
     async def update_offer_import(
         self, import_id: str, values: dict[str, Any]
@@ -343,30 +340,47 @@ class OfferImporter:
         ):  # deleted between the lookup and the lock; the next run recreates it
             raise LookupError("imported offer vanished")
         links = await self.store.list_links(offer.id)
-        untouched = (
-            offer.status is OfferStatus.DRAFT
-            and len(links) == 1
-            and fingerprint(offer, links) == known.applied_content_hash
-        )
-        if untouched:
-            return await self._refresh(promotion, known, offer, links, digest)
+        if await self._may_refresh(promotion, known, offer, links):
+            return await self._refresh(promotion, known, offer, links[0], digest)
         if digest == known.source_hash:  # already recorded: nothing new for a reviewer
             return ItemResult(Outcome.UNCHANGED)
         return await self._note_source_change(known, digest)
+
+    async def _may_refresh(
+        self,
+        promotion: Promotion,
+        known: OfferImportRecord,
+        offer: OfferRecord,
+        links: list[AffiliateLinkRecord],
+    ) -> bool:
+        """True only for an untouched import whose refresh would rewrite text and nothing else.
+
+        The text of an untouched draft may be refreshed. A destination the editor may have looked at is
+        never rewritten in place (the tracking URL must be unchanged), and neither is an offer whose
+        advertiser is no longer the merchant it was imported under.
+        """
+        if (
+            offer.status is not OfferStatus.DRAFT
+            or len(links) != 1
+            or fingerprint(offer, links) != known.applied_content_hash
+            or links[0].destination_url != promotion.tracking_url
+        ):
+            return False
+        merchant_id = await self.store.find_merchant_id(
+            PROVIDER, str(promotion.advertiser_id)
+        )
+        return merchant_id == offer.merchant_id
 
     async def _refresh(
         self,
         promotion: Promotion,
         known: OfferImportRecord,
         offer: OfferRecord,
-        links: list[AffiliateLinkRecord],
+        link: AffiliateLinkRecord,
         digest: str,
     ) -> ItemResult:
         changes = _differences(offer, refresh_values(promotion))
         updated = await self.store.update_offer(offer.id, changes) if changes else offer
-        link, link_changes = links[0], _differences(links[0], link_values(promotion))
-        if link_changes:
-            link = await self.store.update_link(link.id, link_changes)
         await self.store.update_offer_import(
             known.id,
             {
@@ -377,47 +391,24 @@ class OfferImporter:
                 "source_changed_at": None,
             },
         )
-        if not changes and not link_changes:
+        if not changes:
             return ItemResult(Outcome.UNCHANGED)
-        await self._audit_refreshed(known, offer, changes, link, link_changes)
+        before, after = changed_values(offer, changes, AUDITED_NON_TEXT_FIELDS)
+        await self.auditor.record_system_action(
+            SOURCE,
+            action="admin.offers.update",
+            resource=OFFERS,
+            resource_id=offer.id,
+            before=before,
+            after=after,
+            details={
+                "provider": known.provider,
+                "external_id": known.external_id,
+                "fields": sorted(changes),
+                "reason": "source_refreshed",
+            },
+        )
         return ItemResult(Outcome.UPDATED)
-
-    async def _audit_refreshed(
-        self,
-        known: OfferImportRecord,
-        offer: OfferRecord,
-        changes: dict[str, Any],
-        link: AffiliateLinkRecord,
-        link_changes: dict[str, Any],
-    ) -> None:
-        origin = {"provider": known.provider, "external_id": known.external_id}
-        if changes:
-            before, after = changed_values(offer, changes, AUDITED_NON_TEXT_FIELDS)
-            await self.auditor.record_system_action(
-                SOURCE,
-                action="admin.offers.update",
-                resource=OFFERS,
-                resource_id=offer.id,
-                before=before,
-                after=after,
-                details={
-                    **origin,
-                    "fields": sorted(changes),
-                    "reason": "source_refreshed",
-                },
-            )
-        if link_changes:
-            await self.auditor.record_system_action(
-                SOURCE,
-                action="admin.offer_links.update",
-                resource=LINKS,
-                resource_id=link.id,
-                details={
-                    "offer_id": offer.id,
-                    "fields": sorted(link_changes),
-                    "destination_host": _host(link.destination_url),
-                },
-            )
 
     async def _note_source_change(
         self, known: OfferImportRecord, digest: str

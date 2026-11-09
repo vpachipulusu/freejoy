@@ -35,7 +35,7 @@ from app.services.awin_import_run import RunOptions, RunReport, Unit, run_import
 from app.services.offer_lifecycle import OfferAction
 from commands.import_awin_offers import database_units
 from tests._subprocess_support import BACKEND_ROOT, inherited_environment
-from tests.awin_samples import CODE, raw_item, raw_page
+from tests.awin_samples import CODE, PUBLISHER_ID, raw_item, raw_page, tracking_for
 from tests.fakes_awin import FakeAwinClient
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -101,11 +101,15 @@ async def run(
     items: list[Any],
     *,
     now: datetime = NOW,
+    lock_timeout_ms: int = 30_000,
     **options: Any,
 ) -> RunReport:
     maker = async_sessionmaker(engine, expire_on_commit=False)
     return await run_import(
-        FakeAwinClient([items]), database_units(maker), RunOptions(**options), now
+        FakeAwinClient([items]),
+        database_units(maker, lock_timeout_ms),
+        RunOptions(publisher_id=PUBLISHER_ID, **options),
+        now,
     )
 
 
@@ -258,7 +262,7 @@ async def test_an_import_creates_a_draft_with_provenance_and_audit_rows(
     category = (await rows(engine, "SELECT slug, enabled FROM categories"))[0]
     merchant = (await rows(engine, "SELECT name, active, website FROM merchants"))[0]
     assert tuple(category) == ("imported-uncategorised", False)
-    assert tuple(merchant) == ("Acme Stores", False, "https://www.acme.example")
+    assert tuple(merchant) == ("Acme Stores", False, None)
     actors = await rows(
         engine,
         "SELECT user_id, metadata->>'actor' FROM audit_logs"
@@ -330,27 +334,23 @@ async def test_a_slug_taken_by_a_person_falls_back_to_the_promotion_id(
 # --- refresh and edit protection -----------------------------------------------------------
 
 
-async def test_an_untouched_import_is_refreshed_in_place(engine: AsyncEngine) -> None:
+async def test_an_untouched_import_has_its_text_refreshed_in_place(
+    engine: AsyncEngine,
+) -> None:
     await run(engine, [raw_item(1)])
     offer_id = await first_offer(engine)
+    destination = await scalar(engine, "SELECT destination_url FROM affiliate_links")
 
     report = await run(
-        engine,
-        [
-            raw_item(
-                1,
-                title="Source retitled",
-                urlTracking="https://www.awin1.com/cread.php?moved=1",
-            )
-        ],
-        now=NOW + timedelta(days=1),
+        engine, [raw_item(1, title="Source retitled")], now=NOW + timedelta(days=1)
     )
 
     assert report.tally.updated == 1
     assert await first_offer(engine) == offer_id
     assert await scalar(engine, "SELECT title FROM offers") == "Source retitled"
-    assert await scalar(engine, "SELECT destination_url FROM affiliate_links") == (
-        "https://www.awin1.com/cread.php?moved=1"
+    assert (
+        await scalar(engine, "SELECT destination_url FROM affiliate_links")
+        == destination
     )
     assert await scalar(engine, "SELECT count(*) FROM affiliate_links") == 1
     assert await scalar(engine, "SELECT source_changed_at FROM offer_imports") is None
@@ -359,6 +359,30 @@ async def test_an_untouched_import_is_refreshed_in_place(engine: AsyncEngine) ->
         engine, [raw_item(1, title="Retitled twice")], now=NOW + timedelta(days=2)
     )
     assert again.tally.updated == 1
+
+
+async def test_a_changed_tracking_url_is_held_back_and_the_rows_stay_identical(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1)])
+    offers = await rows(engine, "SELECT * FROM offers")
+    links = await rows(engine, "SELECT * FROM affiliate_links")
+    moved = raw_item(1, urlTracking=tracking_for(1, moved="1"))
+
+    first = await run(engine, [moved], now=NOW + timedelta(days=1))
+    second = await run(engine, [moved], now=NOW + timedelta(days=2))
+
+    assert first.tally.source_changed == 1 and second.tally.unchanged == 1
+    assert await rows(engine, "SELECT * FROM offers") == offers
+    assert await rows(engine, "SELECT * FROM affiliate_links") == links
+    assert (
+        await scalar(engine, "SELECT source_changed_at FROM offer_imports") is not None
+    )
+    marked = await scalar(
+        engine,
+        "SELECT count(*) FROM audit_logs WHERE action = 'admin.offers.source_changed'",
+    )
+    assert marked == 1
 
 
 async def test_an_offer_edited_through_the_admin_service_is_never_overwritten(
@@ -471,7 +495,12 @@ async def test_a_failing_batch_rolls_back_whole_while_earlier_batches_stay(
             )
 
     with pytest.raises(run_module.ImportFailed) as failed:
-        await run_import(FakeAwinClient([raw_page(1, 6)]), units, RunOptions(), NOW)
+        await run_import(
+            FakeAwinClient([raw_page(1, 6)]),
+            units,
+            RunOptions(publisher_id=PUBLISHER_ID),
+            NOW,
+        )
 
     assert failed.value.cause == "RuntimeError"
     assert failed.value.report.tally.created == 2
@@ -510,6 +539,60 @@ async def test_an_offer_an_editor_is_saving_is_waited_for_then_judged_as_edited(
 
     assert report.tally.source_changed == 1
     assert await scalar(engine, "SELECT title FROM offers") == "Saved by an editor"
+
+
+async def test_a_stuck_editor_transaction_fails_the_run_instead_of_waiting_for_ever(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1), raw_item(2)])
+    offer_id = await first_offer(engine)
+    editor = await engine.connect()
+    try:
+        transaction = await editor.begin()
+        await editor.execute(
+            text("SELECT id FROM offers WHERE id = :id FOR UPDATE"), {"id": offer_id}
+        )
+        feed = [raw_item(n, title=f"Source retitled {n}") for n in (1, 2)]
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+
+        with pytest.raises(run_module.ImportFailed) as failed:
+            await run_import(
+                FakeAwinClient([feed]),
+                database_units(maker, lock_timeout_ms=300),
+                RunOptions(publisher_id=PUBLISHER_ID),
+                NOW,
+            )
+        await transaction.rollback()
+    finally:
+        await editor.close()
+
+    assert failed.value.cause == "lock_timeout"
+    assert (
+        await scalar(engine, "SELECT count(*) FROM offers WHERE title LIKE 'Source%'")
+        == 0
+    )
+    rerun = await run(
+        engine, [raw_item(n, title=f"Source retitled {n}") for n in (1, 2)]
+    )
+    assert rerun.tally.updated == 2  # a rerun carries on once the lock is gone
+
+
+async def test_a_second_run_waits_for_the_run_lock_only_as_long_as_the_timeout(
+    engine: AsyncEngine,
+) -> None:
+    holder = await engine.connect()
+    try:
+        transaction = await holder.begin()
+        await holder.execute(text("SELECT pg_advisory_xact_lock(7460046001)"))
+
+        with pytest.raises(run_module.ImportFailed) as failed:
+            await run(engine, [raw_item(1)], lock_timeout_ms=300)
+        await transaction.rollback()
+    finally:
+        await holder.close()
+
+    assert failed.value.cause == "lock_timeout"
+    assert await scalar(engine, "SELECT count(*) FROM offers") == 0
 
 
 # --- the command line ----------------------------------------------------------------------

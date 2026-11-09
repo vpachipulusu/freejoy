@@ -9,11 +9,13 @@ What an import writes, and what it deliberately does not:
 * Postage is ``CHECK_TERMS`` and ``requires_card`` stays false: nothing is claimed that the feed does
   not say. ``eligibility`` is the promotion's terms (or a neutral line that sends the reader to them).
 * Voucher codes are not stored (the model has no field and free text would hide the code from
-  review). ``publisher_notes`` (internal, never serialised by the public API) says that one exists.
+  review). ``publisher_notes`` (internal, never serialised by the public API) says that one exists and
+  names the Awin type (``voucher`` or ``promotion``), since both import as ``VOUCHER``.
 * The category is the disabled "Imported (uncategorised)" one, so ``category_disabled`` blocks
   publishing until an editor chooses a real category.
 * The merchant is created inactive, so ``merchant_inactive`` blocks publishing until an editor
-  activates it. Its website is the origin of the promotion's own ``url``, never a tracking host.
+  activates it. It has no website (the editor sets it when activating) and its slug always carries
+  the advertiser id, so an import never reserves a bare brand slug.
 
 ``fingerprint`` hashes every field an editor can change on an offer, its status and verification
 date, and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids,
@@ -26,23 +28,17 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit
 
-from app.core.affiliate_hosts import host_matches
-from app.core.plain_text import plain_line
+from app.core.plain_text import fit_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import OfferStatus, OfferType, PostageKind
 from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.repositories.awin_import import IMPORT_CATEGORY_SLUG
-from app.services.awin_promotions import (
-    NETWORK_HOSTS,
-    PROVIDER,
-    Promotion,
-)
+from app.services.awin_promotions import PROVIDER, Promotion
 from app.services.offer_rules import EDITABLE_FIELDS
 
 IMAGE_TINT = "cream"
-IMAGE_ALT = "Illustration of a voucher ticket"
+IMAGE_ALT = "Illustration of an offer"
 IMAGE_LABEL_LENGTH = 40
 DEFAULT_ELIGIBILITY = "See the offer terms on the merchant's site before you claim."
 AVAILABILITY = (
@@ -65,11 +61,22 @@ REFRESH_FIELDS = (
 )
 
 
+def _type_note(promotion: Promotion) -> str:
+    """What Awin called the promotion, so the editor can choose the offer type (both import as VOUCHER)."""
+    if promotion.kind == "voucher" and promotion.has_voucher_code:
+        detail = "voucher (code listed at Awin, not stored: add it by hand)"
+    elif promotion.kind == "voucher":
+        detail = "voucher (no code listed)"
+    else:
+        detail = "promotion (no code)"
+    return f"Awin type: {detail}; choose the offer type."
+
+
 def _notes(promotion: Promotion) -> str:
-    notes = f"Imported from Awin (promotion {promotion.promotion_id}). Review every field before publishing."
-    if promotion.has_voucher_code:
-        notes += " Awin lists a voucher code for this promotion; the importer does not store codes."
-    return notes
+    return (
+        f"Imported from Awin (promotion {promotion.promotion_id}). {_type_note(promotion)} "
+        "Review every field before publishing."
+    )
 
 
 def refresh_values(promotion: Promotion) -> dict[str, Any]:
@@ -99,7 +106,7 @@ def offer_values(
         "status": OfferStatus.DRAFT,
         "featured": False,
         "image_tint": IMAGE_TINT,
-        "image_label": plain_line(promotion.advertiser_name, IMAGE_LABEL_LENGTH),
+        "image_label": fit_line(promotion.advertiser_name, IMAGE_LABEL_LENGTH),
         "image_alt": IMAGE_ALT,
         "postage_kind": PostageKind.CHECK_TERMS,
         "postage_amount_minor": None,
@@ -122,21 +129,11 @@ def link_values(promotion: Promotion) -> dict[str, Any]:
     }
 
 
-def merchant_website(promotion: Promotion) -> str | None:
-    """The origin of the promotion's own URL, or ``None`` (no URL, or one on a network's host)."""
-    if promotion.source_url is None:
-        return None
-    host = urlsplit(promotion.source_url).hostname
-    if not host or host_matches(host, NETWORK_HOSTS):
-        return None
-    return f"https://{host}"
-
-
 def merchant_values(promotion: Promotion, slug: str) -> dict[str, Any]:
     return {
         "name": promotion.advertiser_name,
         "slug": slug,
-        "website": merchant_website(promotion),
+        "website": None,  # the editor sets it when activating the merchant
         "logo_url": None,
         "active": False,
     }
@@ -173,15 +170,11 @@ def offer_slug_candidates(promotion: Promotion) -> tuple[str, ...]:
 
 
 def merchant_slug_candidates(promotion: Promotion) -> tuple[str, ...]:
-    """The advertiser name, then the name plus the advertiser id, then ``awin-advertiser-<id>``."""
+    """Always suffixed with the advertiser id (an import never reserves a bare brand slug), then ``awin-advertiser-<id>``."""
     suffix = str(promotion.advertiser_id)
     fallback = f"{PROVIDER}-advertiser-{suffix}"
-    try:
-        plain = slugify(promotion.advertiser_name)
-    except InvalidSlug:
-        return (fallback,)
     with_id = _slug_with_suffix(promotion.advertiser_name, suffix)
-    return tuple(dict.fromkeys(s for s in (plain, with_id, fallback) if s))
+    return (with_id, fallback) if with_id else (fallback,)
 
 
 def _canonical(value: Any) -> Any:

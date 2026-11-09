@@ -85,6 +85,7 @@ class AwinReason(enum.StrEnum):
     REDIRECTED = "redirected"
     UNEXPECTED_STATUS = "unexpected_status"
     RESPONSE_TOO_LARGE = "response_too_large"
+    UNSUPPORTED_ENCODING = "unsupported_encoding"
     INVALID_JSON = "invalid_json"
     UNRECOGNISED_RESPONSE = "unrecognised_response"
 
@@ -220,8 +221,11 @@ class HttpxAwinClient:
         limiter: CallLimiter | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        if publisher_id < 1:
-            raise ValueError("publisher id must be positive")
+        if isinstance(publisher_id, bool) or publisher_id < 1:
+            raise ValueError("publisher id must be a positive integer")
+        secret = token.get_secret_value()
+        if not secret or not all("!" <= char <= "~" for char in secret):
+            raise ValueError("the token must be printable ASCII without whitespace")
         _quiet_http_loggers()
         self._url = f"{BASE_URL}/publisher/{publisher_id}/promotions"
         self._publisher_id = publisher_id
@@ -297,6 +301,7 @@ class HttpxAwinClient:
         headers = {
             "Authorization": f"Bearer {self._token.get_secret_value()}",
             "Accept": "application/json",
+            "Accept-Encoding": "identity",  # so the size cap counts the bytes on the wire
             "User-Agent": USER_AGENT,
         }
         async with self._http.stream(
@@ -306,6 +311,9 @@ class HttpxAwinClient:
             if failure is not None:  # the error body is never read
                 retry = _retry_after(response.headers.get("retry-after"))
                 return _Outcome(failure=failure, retry_after=retry)
+            encoding = response.headers.get("content-encoding", "identity")
+            if encoding.strip().lower() not in ("", "identity"):
+                return _Outcome(failure=AwinReason.UNSUPPORTED_ENCODING)
             return await self._decode(response)
 
     @staticmethod

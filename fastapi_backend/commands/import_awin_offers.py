@@ -35,13 +35,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.awin_client import AwinClient, HttpxAwinClient
 from app.repositories.audit import AuditRepository
-from app.repositories.awin_import import AwinImportRepository
+from app.repositories.awin_import import DEFAULT_LOCK_TIMEOUT_MS, AwinImportRepository
 from app.services.audit import AuditService
 from app.services.awin_import_run import (
     DEFAULT_LIMIT,
     DEFAULT_MAX_PAGES,
+    DEFAULT_MAX_SECONDS,
     MAX_LIMIT,
     MAX_MAX_PAGES,
+    MAX_MAX_SECONDS,
     ImportFailed,
     RunOptions,
     RunReport,
@@ -68,12 +70,15 @@ class Reporter(Protocol):
     ) -> object: ...
 
 
-def database_units(maker: async_sessionmaker[AsyncSession]) -> UnitOpener:
+def database_units(
+    maker: async_sessionmaker[AsyncSession],
+    lock_timeout_ms: int = DEFAULT_LOCK_TIMEOUT_MS,
+) -> UnitOpener:
     @asynccontextmanager
     async def open_unit() -> AsyncIterator[Unit]:
         async with maker() as session:
             yield Unit(
-                AwinImportRepository(session),
+                AwinImportRepository(session, lock_timeout_ms),
                 session,
                 AuditService(AuditRepository(session)),
             )
@@ -148,6 +153,15 @@ def _parse(argv: Sequence[str]) -> argparse.Namespace:
         help=f"most pages to fetch, 1 to {MAX_MAX_PAGES} (default {DEFAULT_MAX_PAGES}); Awin allows 20 calls a minute",
     )
     parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=DEFAULT_MAX_SECONDS,
+        help=(
+            f"time limit for the whole run, 1 to {MAX_MAX_SECONDS} (default {DEFAULT_MAX_SECONDS}); "
+            "on expiry the run fails (run_deadline) and what was committed stays"
+        ),
+    )
+    parser.add_argument(
         "--updated-since",
         type=_iso_date,
         default=None,
@@ -166,6 +180,7 @@ def _invalid(args: argparse.Namespace) -> str | None:
     for name, value, cap in (
         ("--limit", args.limit, MAX_LIMIT),
         ("--max-pages", args.max_pages, MAX_MAX_PAGES),
+        ("--max-seconds", args.max_seconds, MAX_MAX_SECONDS),
     ):
         if not MIN_VALUE <= value <= cap:
             return f"{name} must be between {MIN_VALUE} and {cap}."
@@ -270,8 +285,10 @@ async def _run(
                 await engine.dispose()
 
 
-def _options(args: argparse.Namespace) -> RunOptions:
+def _options(args: argparse.Namespace, publisher_id: int) -> RunOptions:
     return RunOptions(
+        publisher_id=publisher_id,
+        max_seconds=args.max_seconds,
         dry_run=args.dry_run,
         limit=args.limit,
         max_pages=args.max_pages,
@@ -279,8 +296,8 @@ def _options(args: argparse.Namespace) -> RunOptions:
     )
 
 
-def _real_client() -> AwinClient | str:
-    """The real client, or the message saying which settings are missing."""
+def _credentials() -> tuple[int, SecretStr] | str:
+    """The publisher id and token from the settings, or the message saying what is wrong."""
     try:
         from app.core.config import settings
     except ValidationError:  # the message is withheld: it could name a value
@@ -294,7 +311,7 @@ def _real_client() -> AwinClient | str:
         return f"set {' and '.join(missing)} (see fastapi_backend/.env.example) before running."
     assert settings.AWIN_PUBLISHER_ID is not None
     assert settings.AWIN_OAUTH_API_TOKEN is not None
-    return build_client(settings.AWIN_PUBLISHER_ID, settings.AWIN_OAUTH_API_TOKEN)
+    return settings.AWIN_PUBLISHER_ID, settings.AWIN_OAUTH_API_TOKEN
 
 
 def _real_units() -> tuple[UnitOpener, AsyncEngine]:
@@ -306,11 +323,12 @@ def _real_units() -> tuple[UnitOpener, AsyncEngine]:
 def _execute(
     args: argparse.Namespace,
     client: AwinClient,
+    publisher_id: int,
     units: UnitOpener | None,
     now: datetime,
     reporter: Reporter,
 ) -> int:
-    options = _options(args)
+    options = _options(args, publisher_id)
     engine: AsyncEngine | None = None
     try:
         if units is None and not args.dry_run:
@@ -331,6 +349,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     client: AwinClient | None = None,
+    publisher_id: int | None = None,
     units: UnitOpener | None = None,
     reporter: Reporter | None = None,
     now: datetime | None = None,
@@ -342,11 +361,20 @@ def main(
         return stop.code if isinstance(stop.code, int) else 2
     if (problem := _invalid(args)) is not None:
         return _fail(problem, 2)
-    built = client if client is not None else _real_client()
-    if isinstance(built, str):
-        return _fail(built, 2)
+    if client is None or publisher_id is None:
+        credentials = _credentials()
+        if isinstance(credentials, str):
+            return _fail(credentials, 2)
+        configured_id, token = credentials
+        client = client or build_client(configured_id, token)
+        publisher_id = publisher_id or configured_id
     return _execute(
-        args, built, units, now or datetime.now(UTC), reporter or report_to_sentry
+        args,
+        client,
+        publisher_id,
+        units,
+        now or datetime.now(UTC),
+        reporter or report_to_sentry,
     )
 
 

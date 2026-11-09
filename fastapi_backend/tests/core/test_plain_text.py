@@ -157,3 +157,51 @@ def test_hostile_input_takes_linear_time(raw: str) -> None:
     plain_paragraphs(raw, 20, 2000)
 
     assert time.perf_counter() - started < 1.0
+
+
+DOTTED_I = chr(0x130)  # "I" with a dot: .lower() turns it into two characters
+
+
+def test_a_script_element_is_dropped_whole_even_after_characters_that_change_length_when_lowered() -> (
+    None
+):
+    raw = "<script>" + DOTTED_I * 10 + "</script>shown?"
+
+    assert plain_line(raw, 200) == "shown?"
+
+
+def test_lowering_for_tag_search_never_changes_the_length() -> None:
+    from app.core.plain_text import _ascii_lower
+
+    text = "AbC" + DOTTED_I * 5 + "SCRIPT"
+
+    lowered = _ascii_lower(text)
+
+    assert len(lowered) == len(text) and lowered.endswith("script")
+    assert lowered[3:8] == DOTTED_I * 5  # non-ASCII is left alone
+
+
+def test_a_lone_less_than_before_a_letter_loses_only_the_sign_not_the_rest() -> None:
+    assert plain_line("Spend a<b and save", 200) == "Spend ab and save"
+    assert plain_line("1 <a2 and <!x", 200) == "1 a2 and !x"
+
+
+def test_many_unterminated_openers_still_finish_at_once() -> None:
+    import time
+
+    started = time.perf_counter()
+    result = plain_line("<a " * 6000, 300)
+
+    assert time.perf_counter() - started < 0.5
+    assert "<" not in result
+
+
+def test_fit_line_collapses_and_cuts_without_cleaning() -> None:
+    from app.core.plain_text import fit_line
+
+    assert fit_line("  a   b  ", 50) == "a b"
+    assert fit_line("alpha beta gamma delta", 14) == "alpha beta" + ELLIPSIS
+    assert (
+        fit_line("&amp;lt;b&amp;gt;", 50) == "&amp;lt;b&amp;gt;"
+    )  # no second decoding
+    assert fit_line(fit_line("x " * 40, 20), 20) == fit_line("x " * 40, 20)

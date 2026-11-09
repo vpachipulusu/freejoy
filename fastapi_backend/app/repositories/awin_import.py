@@ -26,6 +26,8 @@ from app.repositories.base import BaseRepository
 
 # One constant for every importer run: ``pg_advisory_xact_lock`` makes concurrent runs take turns.
 IMPORT_LOCK_KEY = 7_460_046_001
+# Longest a batch waits for the run lock or an offer an editor has open before it fails (``lock_timeout``).
+DEFAULT_LOCK_TIMEOUT_MS = 30_000
 IMPORT_CATEGORY_SLUG = "imported-uncategorised"
 
 
@@ -57,14 +59,25 @@ def _import_record(row: OfferImport) -> OfferImportRecord:
 
 
 class AwinImportRepository(BaseRepository):
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, lock_timeout_ms: int = DEFAULT_LOCK_TIMEOUT_MS
+    ) -> None:
         super().__init__(session)
+        self._lock_timeout_ms = lock_timeout_ms
         self._offers = AdminOfferRepository(session)
         self._merchants = AdminMerchantRepository(session)
         self._categories = AdminCategoryRepository(session)
 
     async def lock_import_run(self) -> None:
-        """Block until no other import transaction holds the lock; released at commit or rollback."""
+        """Wait (at most ``lock_timeout_ms``) until no other import holds the lock; released at commit.
+
+        The timeout is set for the rest of the transaction, so a row lock held by a stuck admin
+        transaction later in the batch fails the batch as well (SQLSTATE 55P03) instead of waiting forever.
+        """
+        await self._session.execute(
+            text("SELECT set_config('lock_timeout', :ms, true)"),
+            {"ms": str(self._lock_timeout_ms)},
+        )
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"), {"key": IMPORT_LOCK_KEY}
         )
@@ -73,7 +86,11 @@ class AwinImportRepository(BaseRepository):
 
     async def find_import_category(self) -> CategoryRecord | None:
         found = await self._session.scalar(
-            select(Category.id).where(Category.slug == IMPORT_CATEGORY_SLUG)
+            select(Category.id)
+            .where(Category.slug == IMPORT_CATEGORY_SLUG)
+            .with_for_update(
+                read=True
+            )  # FOR SHARE: a concurrent enable or disable waits for this batch
         )
         return await self._categories.get(found) if found else None
 
@@ -139,11 +156,6 @@ class AwinImportRepository(BaseRepository):
 
     async def insert_link(self, values: dict[str, Any]) -> AffiliateLinkRecord:
         return await self._offers.insert_link(values)
-
-    async def update_link(
-        self, link_id: str, values: dict[str, Any]
-    ) -> AffiliateLinkRecord:
-        return await self._offers.update_link(link_id, values)
 
     # --- provenance -------------------------------------------------------------------------
 

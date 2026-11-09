@@ -14,7 +14,7 @@ from app.services.awin_import_run import (
     RunReport,
     run_import,
 )
-from tests.awin_samples import CODE, NOW, raw_item, raw_page
+from tests.awin_samples import CODE, NOW, PUBLISHER_ID, raw_item, raw_page
 from tests.fakes_awin import FakeAwinClient
 from tests.fakes_awin_import import FakeDatabase
 
@@ -32,7 +32,9 @@ async def go(
     client: FakeAwinClient, db: FakeDatabase | None = None, **options: Any
 ) -> RunReport:
     database = db or FakeDatabase()
-    return await run_import(client, database.unit, RunOptions(**options), NOW)
+    return await run_import(
+        client, database.unit, RunOptions(publisher_id=PUBLISHER_ID, **options), NOW
+    )
 
 
 async def failing(
@@ -289,7 +291,9 @@ async def test_a_dry_run_fetches_and_validates_but_opens_no_database_unit() -> N
 async def test_a_dry_run_needs_no_database_at_all() -> None:
     client = FakeAwinClient([[raw_item(1)]])
 
-    report = await run_import(client, None, RunOptions(dry_run=True), NOW)
+    report = await run_import(
+        client, None, RunOptions(publisher_id=PUBLISHER_ID, dry_run=True), NOW
+    )
 
     assert report.valid == 1
 
@@ -353,3 +357,58 @@ async def test_a_slug_skip_is_logged_with_its_id_and_reason(
 
     assert report.tally.skipped == {"slug_unavailable": 1}
     assert "promotion_id=1001 reason=slug_unavailable" in caplog.text
+
+
+async def test_a_run_that_outlives_its_deadline_fails_with_what_was_done_so_far() -> (
+    None
+):
+    import asyncio
+
+    class Stalls(FakeAwinClient):
+        async def fetch_promotions(
+            self, filters: Any, *, page: int, page_size: int
+        ) -> Any:
+            if page == 2:
+                await asyncio.sleep(
+                    3600
+                )  # cancelled by the deadline, never actually waited for
+            return await super().fetch_promotions(
+                filters, page=page, page_size=page_size
+            )
+
+    db = FakeDatabase()
+    client = Stalls([raw_page(1, 200), raw_page(201, 200)])
+
+    with pytest.raises(ImportFailed) as caught:
+        await run_import(
+            client,
+            db.unit,
+            RunOptions(publisher_id=PUBLISHER_ID, limit=500, max_seconds=0),
+            NOW,
+        )
+
+    assert caught.value.cause == module.RUN_DEADLINE
+    assert caught.value.report.tally.created == 200
+    assert len(db.committed.offers) == 200
+
+
+async def test_a_database_lock_timeout_is_reported_as_its_own_cause() -> None:
+    class LockNotAvailable(Exception):
+        sqlstate = "55P03"
+
+    class Wrapped(Exception):
+        def __init__(self) -> None:
+            super().__init__("lock wait")
+            self.orig = LockNotAvailable()
+
+    def refuses() -> Any:
+        raise Wrapped()
+
+    with pytest.raises(ImportFailed) as caught:
+        await run_import(
+            FakeAwinClient([[raw_item(1)]]),
+            refuses,
+            RunOptions(publisher_id=PUBLISHER_ID),
+            NOW,
+        )
+    assert caught.value.cause == "lock_timeout"

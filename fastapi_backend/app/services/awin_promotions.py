@@ -34,13 +34,14 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from app.core.affiliate_hosts import PROVIDER_HOSTS, destination_allowed, host_matches
+from app.core.affiliate_hosts import destination_allowed, host_matches
 from app.core.catalogue_urls import InvalidUrl, validate_https_url
-from app.core.plain_text import TextTooLong, plain_line, plain_paragraphs
+from app.core.plain_text import TextTooLong, fit_line, plain_line, plain_paragraphs
+from app.services.awin_tracking import NETWORK_HOSTS, tracking_problem
 
 PROVIDER = "awin"
 HASH_VERSION = (
-    1  # bump when the normalisation changes: every promotion then reads as changed once
+    2  # bump when the normalisation changes: every promotion then reads as changed once
 )
 
 MAX_ID = 10**12
@@ -59,7 +60,6 @@ _DATE = re.compile(
     r"(?:\.([0-9]{1,9}))?Z?",
     re.ASCII,
 )
-NETWORK_HOSTS = frozenset().union(*PROVIDER_HOSTS.values())
 MICROSECOND_DIGITS = 6
 
 
@@ -82,6 +82,9 @@ class SkipReason(enum.StrEnum):
     MISSING_TRACKING_URL = "missing_tracking_url"
     INVALID_TRACKING_URL = "invalid_tracking_url"
     TRACKING_HOST_NOT_ALLOWED = "tracking_host_not_allowed"
+    TRACKING_SHAPE_UNRECOGNISED = "tracking_shape_unrecognised"
+    TRACKING_OWNER_MISMATCH = "tracking_owner_mismatch"
+    TRACKING_DESTINATION_MISMATCH = "tracking_destination_mismatch"
     REGION_MISMATCH = "region_mismatch"
     INVALID_VOUCHER = "invalid_voucher"
     DUPLICATE_IN_FEED = "duplicate_in_feed"
@@ -227,7 +230,9 @@ def _source_url(item: dict[str, Any]) -> str | None:
     return url
 
 
-def _tracking_url(item: dict[str, Any]) -> str:
+def _tracking_url(
+    item: dict[str, Any], publisher_id: int, advertiser_id: int, source_url: str | None
+) -> str:
     text = _url_text(item.get("urlTracking"))
     if text is None:
         raise _Reject(SkipReason.MISSING_TRACKING_URL)
@@ -240,6 +245,14 @@ def _tracking_url(item: dict[str, Any]) -> str:
         PROVIDER, host, merchant_website=None, allow_sample=False
     ):
         raise _Reject(SkipReason.TRACKING_HOST_NOT_ALLOWED)
+    problem = tracking_problem(
+        url,
+        publisher_id=publisher_id,
+        advertiser_id=advertiser_id,
+        source_url=source_url,
+    )
+    if problem is not None:
+        raise _Reject(SkipReason(problem))
     return url
 
 
@@ -273,7 +286,7 @@ def _has_voucher_code(item: dict[str, Any]) -> bool:
     return bool(code.strip())
 
 
-def _build(item: dict[str, Any], now: datetime) -> Promotion:
+def _build(item: dict[str, Any], now: datetime, publisher_id: int) -> Promotion:
     promotion_id = _positive_id(item.get("promotionId"), SkipReason.INVALID_ID)
     kind = item.get("type")
     if not isinstance(kind, str) or kind not in SUPPORTED_TYPES:
@@ -284,31 +297,35 @@ def _build(item: dict[str, Any], now: datetime) -> Promotion:
     terms = _terms(item.get("terms"))
     start_at, end_at = _window(item, now)
     _check_region(item)
+    source_url = _source_url(item)
     return Promotion(
         promotion_id=promotion_id,
         kind=kind,
         advertiser_id=advertiser_id,
         advertiser_name=advertiser_name,
         title=title,
-        summary=plain_line(description[0], MAX_SUMMARY_LENGTH)
-        if description
-        else title,
+        summary=fit_line(description[0], MAX_SUMMARY_LENGTH) if description else title,
         description=description,
         terms=terms,
         start_at=start_at,
         end_at=end_at,
-        source_url=_source_url(item),
-        tracking_url=_tracking_url(item),
+        source_url=source_url,
+        tracking_url=_tracking_url(item, publisher_id, advertiser_id, source_url),
         has_voucher_code=_has_voucher_code(item),
     )
 
 
-def parse_promotion(item: object, now: datetime) -> Promotion | Rejected:
-    """The validated promotion, or the reason it was refused. Never raises for bad input."""
+def parse_promotion(
+    item: object, now: datetime, publisher_id: int
+) -> Promotion | Rejected:
+    """The validated promotion, or the reason it was refused. Never raises for bad input.
+
+    ``publisher_id`` is ours: a tracking link must carry it (``awin_tracking``).
+    """
     if not isinstance(item, dict):
         return Rejected(SkipReason.INVALID_ITEM)
     try:
-        return _build(item, now)
+        return _build(item, now, publisher_id)
     except _Reject as rejection:
         return Rejected(rejection.reason)
 
@@ -323,7 +340,7 @@ def source_hash(promotion: Promotion) -> str:
         "v": HASH_VERSION,
         "promotion_id": promotion.promotion_id,
         "kind": promotion.kind,
-        "advertiser": [promotion.advertiser_id, promotion.advertiser_name],
+        "advertiser_id": promotion.advertiser_id,
         "title": promotion.title,
         "summary": promotion.summary,
         "description": list(promotion.description),

@@ -17,7 +17,6 @@ from app.services.awin_offer_mapping import (
     link_values,
     merchant_slug_candidates,
     merchant_values,
-    merchant_website,
     offer_slug_candidates,
     offer_values,
     refresh_values,
@@ -155,17 +154,38 @@ def test_every_required_text_column_is_filled_within_the_admin_limits() -> None:
     assert len(values["publisher_notes"]) <= 2000
 
 
-def test_publisher_notes_record_the_origin_and_flag_a_code_without_storing_it() -> None:
-    notes = offer_values(make_promotion(has_voucher_code=True), "c", "m", "s")[
-        "publisher_notes"
-    ]
-    plain = offer_values(make_promotion(has_voucher_code=False), "c", "m", "s")[
-        "publisher_notes"
-    ]
+def notes_for(**changes: Any) -> str:
+    return offer_values(make_promotion(**changes), "c", "m", "s")["publisher_notes"]
 
-    assert "1001" in notes and "Awin" in notes
-    assert "code" in notes.lower() and "does not store" in notes.lower()
-    assert "code" not in plain.lower()
+
+def test_publisher_notes_record_the_origin_and_the_awin_type() -> None:
+    voucher = notes_for(kind="voucher", has_voucher_code=True)
+    no_code = notes_for(kind="voucher", has_voucher_code=False)
+    promotion = notes_for(kind="promotion", has_voucher_code=False)
+
+    assert "1001" in voucher and "Awin" in voucher
+    assert "Awin type: voucher" in voucher and "not stored" in voucher
+    assert "Awin type: voucher (no code listed); choose the offer type." in no_code
+    assert "Awin type: promotion (no code); choose the offer type." in promotion
+    assert "code" not in promotion.replace("no code", "").lower()
+
+
+def test_the_image_alt_text_does_not_call_every_offer_a_voucher() -> None:
+    values = offer_values(make_promotion(kind="promotion"), "c", "m", "s")
+
+    assert "voucher" not in values["image_alt"].lower()
+    assert values["image_alt"] == "Illustration of an offer"
+
+
+def test_the_image_label_is_not_cleaned_twice() -> None:
+    plain_name = "&lt;b&gt;"  # what plain-text cleaning leaves of an advertiser called "&amp;lt;b&amp;gt;"
+    values = offer_values(make_promotion(advertiser_name=plain_name), "c", "m", "s")
+
+    assert values["image_label"] == plain_name
+    again = offer_values(
+        make_promotion(advertiser_name=values["image_label"]), "c", "m", "s"
+    )
+    assert again["image_label"] == values["image_label"]
 
 
 def test_a_refresh_rewrites_only_the_imported_fields() -> None:
@@ -208,18 +228,15 @@ def test_a_merchant_is_created_inactive_with_the_advertiser_name() -> None:
     assert values["logo_url"] is None
 
 
-def test_the_merchant_website_is_only_the_origin_of_the_source_url() -> None:
-    promotion = make_promotion(source_url="https://www.acme.example/sale?a=1#x")
-
-    assert merchant_website(promotion) == "https://www.acme.example"
-    assert merchant_values(promotion, "x")["website"] == "https://www.acme.example"
-
-
 @pytest.mark.parametrize(
-    "url", [None, "https://www.awin1.com/cread.php", "https://prf.hn/click/1"]
+    "url", [None, "https://www.acme.example/sale", "https://www.awin1.com/cread.php"]
 )
-def test_no_website_without_a_source_url_or_on_a_network_host(url: str | None) -> None:
-    assert merchant_website(make_promotion(source_url=url)) is None
+def test_an_imported_merchant_has_no_website_the_editor_sets_it(
+    url: str | None,
+) -> None:
+    values = merchant_values(make_promotion(source_url=url), "acme-stores-77")
+
+    assert values["website"] is None
 
 
 def test_the_import_category_can_never_be_published_into() -> None:
@@ -267,15 +284,22 @@ def test_a_title_with_no_letters_falls_back_to_the_id_only() -> None:
     assert offer_slug_candidates(make_promotion(title="!!!")) == ("awin-1001",)
 
 
-def test_merchant_slug_candidates_fall_back_to_the_advertiser_id() -> None:
+def test_merchant_slugs_always_carry_the_advertiser_id() -> None:
     plain = merchant_slug_candidates(make_promotion())
     odd = merchant_slug_candidates(make_promotion(advertiser_name="!!!"))
 
-    assert plain[0] == "acme-stores" and "acme-stores-77" in plain
-    assert plain[-1] == "awin-advertiser-77"
+    assert plain == ("acme-stores-77", "awin-advertiser-77")
     assert odd == ("awin-advertiser-77",)
+    assert "acme-stores" not in plain  # an import never reserves a bare brand slug
     for slug in (*plain, *odd):
         assert validate_catalogue_slug(slug) == slug
+
+
+def test_a_very_long_advertiser_name_still_gives_a_valid_suffixed_slug() -> None:
+    (slug, _) = merchant_slug_candidates(make_promotion(advertiser_name="long " * 60))
+
+    assert slug.endswith("-77") and len(slug) <= 80
+    assert validate_catalogue_slug(slug) == slug
 
 
 # --- the fingerprint -----------------------------------------------------------------------

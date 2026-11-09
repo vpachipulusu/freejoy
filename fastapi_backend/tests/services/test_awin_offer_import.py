@@ -18,7 +18,7 @@ from app.services.awin_offer_import import (
 from app.services.awin_offer_mapping import fingerprint
 from app.services.awin_promotions import Promotion, source_hash
 from app.services.offer_lifecycle import PublishFacts, PublishReason, publish_blockers
-from tests.awin_samples import CODE, TRACKING, promotion
+from tests.awin_samples import CODE, promotion, tracking_for
 from tests.fakes_awin_import import T0, FakeDatabase
 
 LATER = T0 + timedelta(days=1)
@@ -161,7 +161,7 @@ async def test_the_voucher_code_is_stored_nowhere() -> None:
         default=str,
     )
     assert CODE not in everything
-    assert "does not store codes" in only_offer(db).publisher_notes
+    assert "not stored" in only_offer(db).publisher_notes
 
 
 async def test_every_batch_takes_the_run_lock_first() -> None:
@@ -186,7 +186,7 @@ async def test_a_new_advertiser_gets_an_inactive_merchant_mapped_by_advertiser_i
     state = db.committed
     (merchant,) = state.merchants.values()
     assert merchant.name == "Acme Stores" and merchant.active is False
-    assert merchant.website == "https://www.acme.example"
+    assert merchant.website is None  # the editor sets it when activating
     assert state.merchant_imports == {("awin", "77"): merchant.id}
     assert only_offer(db).merchant_id == merchant.id
 
@@ -213,7 +213,7 @@ async def test_a_merchant_with_the_same_name_is_never_reused_or_touched() -> Non
     assert len(db.committed.merchants) == 2
     assert dataclasses.asdict(db.committed.merchants[human.id]) == before
     other = next(m for m in db.committed.merchants.values() if m.id != human.id)
-    assert other.slug == "acme-stores-77" and other.active is False
+    assert other.slug == "awin-advertiser-77" and other.active is False
 
 
 async def test_a_renamed_advertiser_does_not_change_or_activate_its_merchant() -> None:
@@ -290,11 +290,8 @@ async def test_an_untouched_import_is_refreshed_when_the_source_changes() -> Non
     db = FakeDatabase()
     await run(db, promotion())
     created = only_offer(db)
-    changed = promotion(
-        title="Brand new title",
-        endDate="2026-12-15T00:00:00.000",
-        urlTracking=f"{TRACKING}&moved=1",
-    )
+    created_link = next(iter(db.committed.links.values()))
+    changed = promotion(title="Brand new title", endDate="2026-12-15T00:00:00.000")
 
     tally = await run(db, changed, now=LATER)
 
@@ -305,7 +302,7 @@ async def test_an_untouched_import_is_refreshed_when_the_source_changes() -> Non
     assert offer.title == "Brand new title"
     assert offer.end_at == datetime(2026, 12, 15, tzinfo=UTC)
     assert offer.id == created.id and offer.slug == created.slug
-    assert link.destination_url == changed.tracking_url
+    assert link.destination_url == created_link.destination_url == changed.tracking_url
     assert record.source_hash == record.applied_source_hash == source_hash(changed)
     assert record.applied_content_hash == fingerprint(offer, [link])
     assert record.applied_at == LATER and record.source_changed_at is None
@@ -351,17 +348,19 @@ async def test_a_refresh_audits_the_change_without_the_copy() -> None:
     assert "Secret new title" not in json.dumps(audit, default=str)
 
 
-async def test_a_change_that_moves_no_stored_field_updates_the_hashes_quietly() -> None:
+async def test_a_change_that_only_renames_the_advertiser_is_not_a_change_at_all() -> (
+    None
+):
     db = FakeDatabase()
     await run(db, promotion())
-    db.committed.audits.clear()
-    # the advertiser's name is part of the source hash but not of any offer field
+    db.edit_offer(only_offer(db).id, title="Edited by a person")
+    before = snapshot(db)
     renamed = promotion(advertiser={"id": 77, "name": "Acme Renamed", "joined": True})
 
     tally = await run(db, renamed, now=LATER)
 
-    assert tally.unchanged == 1 and db.committed.audits == []
-    assert only_import(db).source_hash == source_hash(renamed)
+    assert tally.unchanged == 1 and snapshot(db) == before
+    assert only_import(db).source_changed_at is None
 
 
 # --- the edit protection -------------------------------------------------------------------
@@ -616,20 +615,89 @@ async def test_a_known_source_change_is_not_noted_or_audited_again_on_every_run(
     assert tally.unchanged == 1 and snapshot(db) == before
 
 
-async def test_a_refresh_that_moves_the_link_audits_the_link_by_host_only() -> None:
+async def test_a_changed_tracking_url_is_never_written_over_an_untouched_draft() -> (
+    None
+):
     db = FakeDatabase()
     await run(db, promotion())
     db.committed.audits.clear()
+    offers, links = dict(db.committed.offers), dict(db.committed.links)
+    moved = promotion(urlTracking=tracking_for(1001, moved="1"))
 
-    await run(db, promotion(urlTracking=f"{TRACKING}&moved=1"), now=LATER)
+    tally = await run(db, moved, now=LATER)
 
-    link_audits = [
-        a for a in db.committed.audits if a["action"] == "admin.offer_links.update"
-    ]
-    assert len(link_audits) == 1
-    assert link_audits[0]["details"]["fields"] == ["destination_url"]
-    assert link_audits[0]["details"]["destination_host"] == "www.awin1.com"
-    assert "https://" not in json.dumps(link_audits, default=str)
+    assert tally.source_changed == 1 and tally.updated == 0
+    assert dict(db.committed.offers) == offers and dict(db.committed.links) == links
+    record = only_import(db)
+    assert record.source_changed_at == LATER and record.source_hash == source_hash(
+        moved
+    )
+    assert actions(db) == ["admin.offers.source_changed"]
+
+
+async def test_the_pending_tracking_change_is_neither_refreshed_nor_audited_again() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    moved = promotion(urlTracking=tracking_for(1001, moved="1"))
+    await run(db, moved, now=LATER)
+    before = snapshot(db)
+
+    tally = await run(db, moved, now=LATER + timedelta(days=1))
+
+    assert tally.unchanged == 1 and snapshot(db) == before
+
+
+async def test_a_text_change_still_refreshes_an_untouched_draft_when_the_link_is_unchanged() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    link = next(iter(db.committed.links.values()))
+
+    tally = await run(db, promotion(title="Text only change"), now=LATER)
+
+    assert tally.updated == 1 and only_offer(db).title == "Text only change"
+    assert next(iter(db.committed.links.values())) == link
+
+
+async def test_a_tracking_change_together_with_text_is_held_back_whole() -> None:
+    db = FakeDatabase()
+    await run(db, promotion())
+    title = only_offer(db).title
+
+    tally = await run(
+        db,
+        promotion(title="New text", urlTracking=tracking_for(1001, moved="1")),
+        now=LATER,
+    )
+
+    assert tally.source_changed == 1 and only_offer(db).title == title
+
+
+async def test_a_promotion_that_moves_to_another_advertiser_is_not_refreshed_under_the_old_merchant() -> (
+    None
+):
+    db = FakeDatabase()
+    await run(db, promotion())
+    offers = dict(db.committed.offers)
+    moved = promotion(
+        advertiser={"id": 78, "name": "Other Brand", "joined": True},
+        urlTracking=(
+            "https://www.awin1.com/cread.php?awinmid=78&awinaffid=424242"
+            "&ued=https%3A%2F%2Fwww.acme.example%2Fsale-1001"
+        ),
+        title="Same promotion, new advertiser",
+    )
+
+    tally = await run(db, moved, now=LATER)
+
+    assert tally.source_changed == 1 and tally.updated == 0
+    assert dict(db.committed.offers) == offers
+    assert (
+        len(db.committed.merchants) == 1
+    )  # no merchant was made for the new advertiser
 
 
 def test_the_fingerprint_fields_are_pinned_so_a_new_editable_field_is_a_deliberate_change() -> (

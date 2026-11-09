@@ -97,7 +97,7 @@ def probe() -> int:
 
 def run(argv: list[str]) -> int:
     from commands import import_awin_offers as command
-    from tests.awin_samples import raw_item
+    from tests.awin_samples import PUBLISHER_ID, raw_item
     from tests.fakes_awin import FakeAwinClient
 
     def refuse(*_: object) -> None:
@@ -109,7 +109,9 @@ def run(argv: list[str]) -> int:
         raw_item(n, title=f"Offer {n}{'' if suffix == '-' else ' ' + suffix}")
         for n in range(1, int(count) + 1)
     ]
-    return command.main(arguments, client=FakeAwinClient([items]))
+    return command.main(
+        arguments, client=FakeAwinClient([items]), publisher_id=PUBLISHER_ID
+    )
 
 
 if __name__ == "__main__":

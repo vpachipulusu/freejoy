@@ -451,3 +451,73 @@ async def test_aclose_closes_the_http_client() -> None:
     await client.aclose()
 
     assert client.http_client.is_closed
+
+
+async def test_the_request_asks_for_an_unencoded_body_so_the_size_cap_counts_real_bytes() -> (
+    None
+):
+    recorder = Recorder(ok([ITEM]))
+    client, _, _ = build(recorder)
+
+    await fetch(client)
+
+    assert recorder.requests[0].headers["accept-encoding"] == "identity"
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "zstd", "gzip, br"])
+async def test_a_response_that_carries_a_content_encoding_is_refused(
+    encoding: str,
+) -> None:
+    import gzip
+    import zlib
+
+    body = zlib.compress(b"[]") if encoding == "deflate" else gzip.compress(b"[]")
+    recorder = Recorder(
+        httpx.Response(200, content=body, headers={"content-encoding": encoding})
+    )
+    client, _, _ = build(recorder)
+
+    error = await failure(client)
+
+    assert error.reason is AwinReason.UNSUPPORTED_ENCODING
+    assert len(recorder.requests) == 1  # not retried
+
+
+@pytest.mark.parametrize("encoding", ["identity", "Identity", ""])
+async def test_an_identity_encoding_is_fine(encoding: str) -> None:
+    client, _, _ = build(
+        Recorder(
+            httpx.Response(200, json=[ITEM], headers={"content-encoding": encoding})
+        )
+    )
+
+    page = await fetch(client)
+
+    assert len(page.items) == 1
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "with space",
+        "line\nbreak",
+        "carriage\rreturn",
+        "tab\tinside",
+        "caf\u00e9",
+        "",
+        "trail ",
+    ],
+)
+def test_a_token_that_cannot_be_a_header_value_is_refused_without_echoing_it(
+    token: str,
+) -> None:
+    with pytest.raises(ValueError) as caught:
+        HttpxAwinClient(PUBLISHER_ID, SecretStr(token))
+
+    assert token not in str(caught.value) or token == ""
+    assert "token" in str(caught.value)
+
+
+def test_a_boolean_is_not_a_publisher_id() -> None:
+    with pytest.raises(ValueError, match="publisher"):
+        HttpxAwinClient(True, SecretStr(TOKEN))  # type: ignore[arg-type]

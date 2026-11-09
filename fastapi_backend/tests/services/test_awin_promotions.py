@@ -9,6 +9,7 @@ import pytest
 
 from app.services.awin_promotions import (
     MAX_DESCRIPTION_PARAGRAPHS,
+    MAX_SUMMARY_LENGTH,
     MAX_TERMS_LENGTH,
     MAX_TITLE_LENGTH,
     Promotion,
@@ -19,7 +20,8 @@ from app.services.awin_promotions import (
 )
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
-TRACKING = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242"
+PUBLISHER_ID = 424242
+TRACKING = f"https://www.awin1.com/cread.php?awinmid=77&awinaffid={PUBLISHER_ID}"
 
 
 def make_item(**changes: Any) -> dict[str, Any]:
@@ -45,13 +47,13 @@ def make_item(**changes: Any) -> dict[str, Any]:
 
 
 def parsed(**changes: Any) -> Promotion:
-    result = parse_promotion(make_item(**changes), NOW)
+    result = parse_promotion(make_item(**changes), NOW, PUBLISHER_ID)
     assert isinstance(result, Promotion), result
     return result
 
 
 def rejected(item: object) -> SkipReason:
-    result = parse_promotion(item, NOW)
+    result = parse_promotion(item, NOW, PUBLISHER_ID)
     assert isinstance(result, Rejected), result
     return result.reason
 
@@ -128,12 +130,12 @@ def test_dates_are_read_strictly_as_utc(raw: str, expected: datetime) -> None:
 
 def test_a_missing_url_leaves_no_source_url() -> None:
     assert parsed(url=None).source_url is None
-    assert parse_promotion(without("url"), NOW) == parsed(url=None)
+    assert parse_promotion(without("url"), NOW, PUBLISHER_ID) == parsed(url=None)
 
 
 def test_regions_that_include_the_uk_or_everywhere_are_accepted() -> None:
     assert parsed(regions={"all": True, "list": []})
-    assert parse_promotion(without("regions"), NOW)
+    assert parse_promotion(without("regions"), NOW, PUBLISHER_ID)
 
 
 # --- length and text -----------------------------------------------------------------------
@@ -321,9 +323,9 @@ def test_a_tracking_url_must_be_on_an_awin_host(url: str) -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "https://www.awin1.com/cread.php",
-        "https://AWIN1.COM/cread.php",
-        "https://a.b.awin1.com/x",
+        f"https://www.awin1.com/cread.php?awinmid=77&awinaffid={PUBLISHER_ID}",
+        f"https://AWIN1.COM/cread.php?awinmid=77&awinaffid={PUBLISHER_ID}",
+        f"https://a.b.awin1.com/cread.php?awinmid=77&awinaffid={PUBLISHER_ID}",
     ],
 )
 def test_awin_hosts_and_their_subdomains_are_accepted(url: str) -> None:
@@ -358,7 +360,9 @@ def test_text_far_beyond_any_sane_length_is_refused_whole() -> None:
 
 
 def test_a_rejection_never_carries_the_item() -> None:
-    result = parse_promotion(make_item(title=None, description="SECRET-COPY"), NOW)
+    result = parse_promotion(
+        make_item(title=None, description="SECRET-COPY"), NOW, PUBLISHER_ID
+    )
 
     assert isinstance(result, Rejected)
     assert "SECRET-COPY" not in repr(result)
@@ -374,7 +378,7 @@ def test_the_hash_ignores_key_order_and_fields_the_importer_does_not_use() -> No
     reordered["somethingNew"] = {"added": "later"}
 
     assert source_hash(parsed()) == source_hash(
-        parse_promotion(reordered, NOW)  # type: ignore[arg-type]
+        parse_promotion(reordered, NOW, PUBLISHER_ID)  # type: ignore[arg-type]
     )
 
 
@@ -386,10 +390,9 @@ def test_the_hash_ignores_key_order_and_fields_the_importer_does_not_use() -> No
         {"terms": "Other terms."},
         {"endDate": "2026-12-02T00:00:00.000"},
         {"url": "https://www.acme.example/other"},
-        {"urlTracking": "https://www.awin1.com/cread.php?awinmid=78"},
+        {"urlTracking": TRACKING + "&clickref=other"},
         {"type": "promotion"},
         {"voucher": {"code": None}},
-        {"advertiser": {"id": 77, "name": "Acme Renamed", "joined": True}},
     ],
 )
 def test_the_hash_changes_when_anything_that_is_stored_changes(
@@ -411,3 +414,34 @@ def test_a_changed_voucher_code_does_not_change_the_hash_because_codes_are_not_s
     second = parsed(voucher={"code": "BBB"})
 
     assert source_hash(first) == source_hash(second)
+
+
+def test_the_hash_ignores_the_advertiser_name_because_nothing_is_written_from_it() -> (
+    None
+):
+    renamed = parsed(advertiser={"id": 77, "name": "Acme Renamed", "joined": True})
+
+    assert source_hash(renamed) == source_hash(parsed())
+
+
+def test_the_hash_covers_the_advertiser_id() -> None:
+    other = parsed(
+        advertiser={"id": 78, "name": "Acme Stores", "joined": True},
+        urlTracking=f"https://www.awin1.com/cread.php?awinmid=78&awinaffid={PUBLISHER_ID}",
+    )
+
+    assert source_hash(other) != source_hash(parsed())
+
+
+def test_the_summary_is_the_first_paragraph_not_a_second_decoding_of_it() -> None:
+    promotion = parsed(description="AT&amp;amp;T deal &amp;lt;b&amp;gt; x\nSecond")
+
+    assert promotion.description[0] == "AT&amp;T deal &lt;b&gt; x"
+    assert promotion.summary == promotion.description[0]
+
+
+def test_a_long_first_paragraph_is_cut_to_the_summary_limit() -> None:
+    promotion = parsed(description="word " * 200)
+
+    assert len(promotion.summary) <= MAX_SUMMARY_LENGTH
+    assert promotion.summary.endswith("\N{HORIZONTAL ELLIPSIS}")

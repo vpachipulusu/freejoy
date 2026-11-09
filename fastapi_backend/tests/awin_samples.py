@@ -2,12 +2,24 @@
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 from app.services.awin_promotions import Promotion, parse_promotion
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
 CODE = "SAVE10-SECRET"
-TRACKING = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&ued=x"
+PUBLISHER_ID = 424242
+ADVERTISER_ID = 77
+TRACKING = (
+    f"https://www.awin1.com/cread.php?awinmid={ADVERTISER_ID}&awinaffid={PUBLISHER_ID}"
+)
+
+
+def tracking_for(promotion_id: int, **extra: str) -> str:
+    """A link in the shape the importer accepts: ours, the advertiser's, deep-linking to the item's url."""
+    deep = quote(f"https://www.acme.example/sale-{promotion_id}", safe="")
+    pairs = {"ued": deep, "clickref": str(promotion_id), **extra}
+    return TRACKING + "".join(f"&{key}={value}" for key, value in pairs.items())
 
 
 def raw_item(promotion_id: int = 1001, **changes: Any) -> dict[str, Any]:
@@ -15,7 +27,7 @@ def raw_item(promotion_id: int = 1001, **changes: Any) -> dict[str, Any]:
     item: dict[str, Any] = {
         "promotionId": promotion_id,
         "type": "voucher",
-        "advertiser": {"id": 77, "name": "Acme Stores", "joined": True},
+        "advertiser": {"id": ADVERTISER_ID, "name": "Acme Stores", "joined": True},
         "title": f"10% off everything ({promotion_id})",
         "description": "<p>Save <b>10%</b> on all orders.</p><p>Ends soon.</p>",
         "terms": "New customers only.",
@@ -23,7 +35,7 @@ def raw_item(promotion_id: int = 1001, **changes: Any) -> dict[str, Any]:
         "endDate": "2026-12-01T00:00:00.000",
         "dateAdded": "2026-10-30T00:00:00.000",
         "url": f"https://www.acme.example/sale-{promotion_id}",
-        "urlTracking": f"{TRACKING}&p={promotion_id}",
+        "urlTracking": tracking_for(promotion_id),
         "regions": {
             "all": False,
             "list": [{"name": "United Kingdom", "countryCode": "GB"}],
@@ -34,7 +46,7 @@ def raw_item(promotion_id: int = 1001, **changes: Any) -> dict[str, Any]:
 
 
 def promotion(promotion_id: int = 1001, **changes: Any) -> Promotion:
-    result = parse_promotion(raw_item(promotion_id, **changes), NOW)
+    result = parse_promotion(raw_item(promotion_id, **changes), NOW, PUBLISHER_ID)
     assert isinstance(result, Promotion), result
     return result
 

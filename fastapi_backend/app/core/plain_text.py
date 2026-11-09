@@ -65,12 +65,24 @@ class TextTooLong(ValueError):
     """The raw text is longer than ``MAX_RAW_LENGTH``."""
 
 
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _ascii_lower(text: str) -> str:
+    """Lower-case ASCII letters only, so offsets in the result are offsets in ``text``.
+
+    ``str.lower`` can change the length (a dotted capital I becomes two characters), which would
+    make an index found in the lowered copy point somewhere else in the original.
+    """
+    return text.translate(_ASCII_LOWER)
+
+
 class _Finder:
     """``str.find`` that remembers a miss, so repeated misses cost one scan in total."""
 
     def __init__(self, text: str) -> None:
         self._text = text
-        self._lower = text.lower()
+        self._lower = _ascii_lower(text)
         self._missing: set[str] = set()
 
     def find(self, needle: str, start: int, *, lowered: bool = False) -> int:
@@ -99,7 +111,7 @@ def _tag_span(finder: _Finder, text: str, index: int) -> tuple[int, str | None, 
         return (end + 3 if end >= 0 else len(text)), None, False
     end = finder.find(">", index + 1)
     if end < 0:
-        return len(text), None, False
+        return index + 1, None, False  # never closed: drop only the ``<``
     named = _TAG_NAME.match(text, index)
     if named is None:
         return end + 1, None, False
@@ -189,6 +201,11 @@ def _fit(line: str, max_length: int) -> str:
 
 def _collapse(text: str) -> str:
     return " ".join(text.split())
+
+
+def fit_line(text: str, max_length: int) -> str:
+    """Collapse whitespace and cut to ``max_length``, with no cleaning: for text that is already plain."""
+    return _fit(_collapse(text), max_length)
 
 
 def plain_line(raw: str, max_length: int) -> str:

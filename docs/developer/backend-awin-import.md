@@ -56,6 +56,7 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | `--dry-run` | off | Fetch and validate, write nothing, open no database connection, print counts. |
 | `--limit N` | 500 (1 to 5000) | Most promotions read in one run (valid or not). The page size follows it, within Awin's 10 to 200. |
 | `--max-pages N` | 10 (1 to 50) | Most pages fetched. Awin allows 20 calls a minute, so 50 pages take about 2 minutes (20, 20 and 10 calls). |
+| `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1) and what was committed stays; a rerun carries on. |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
 
 | Exit | Meaning |
@@ -78,7 +79,7 @@ import-awin-offers: skipped by reason: not_joined 2, tracking_host_not_allowed 2
 Skip reasons (`SkipReason`): `invalid_item`, `invalid_id`, `unsupported_type`, `invalid_advertiser`, `not_joined`,
 `invalid_title`, `invalid_text`, `field_too_long`, `invalid_date`, `invalid_window`, `ended`, `invalid_url`,
 `source_url_on_tracking_host`, `missing_tracking_url`, `invalid_tracking_url`, `tracking_host_not_allowed`,
-`region_mismatch`, `invalid_voucher`, `duplicate_in_feed`, `slug_unavailable`.
+`tracking_shape_unrecognised`, `tracking_owner_mismatch`, `tracking_destination_mismatch`, `region_mismatch`, `invalid_voucher`, `duplicate_in_feed`, `slug_unavailable`.
 
 ## How a run works
 
@@ -128,11 +129,11 @@ run would do). It needs outbound HTTPS to `api.awin.com`, `DATABASE_URL`, and op
 | Title, summary, description | The cleaned title; the first paragraph of the description (or the title); the description paragraphs. |
 | `eligibility` | The promotion's terms, or "See the offer terms on the merchant's site before you claim." |
 | `availability` | A fixed "Listed for UK customers. Check the merchant's terms for dates and exclusions." |
-| Image | Placeholder: tint `cream`, label = the advertiser name (40 characters), fixed alt text. |
+| Image | Placeholder: tint `cream`, label = the advertiser name (40 characters), neutral alt text ("Illustration of an offer"). |
 | `start_at`, `end_at` | The parsed dates (see the assumption about the end date). |
 | `source_url` | The promotion's own `url`. |
-| `publisher_notes` (internal, never serialised) | "Imported from Awin (promotion N). Review every field before publishing." |
-| Affiliate link | One `awin` link, `destination_url` = `urlTracking`, active. Created through the same host rules the admin API applies. |
+| `publisher_notes` (internal, never serialised) | "Imported from Awin (promotion N). Awin type: promotion (no code); choose the offer type. Review every field before publishing." A voucher says "voucher (code listed at Awin, not stored: add it by hand)" or "voucher (no code listed)". Both Awin types import as `VOUCHER`, so this line is how the editor learns which it was. |
+| Affiliate link | One `awin` link, `destination_url` = `urlTracking`, active, only after the link is pinned to our publisher id and the advertiser (see [the tracking link](#the-tracking-link-is-pinned)). Never rewritten in place by a later run. |
 | Slug | The title slug plus `-<promotionId>` (for example `10-off-everything-1001`), else `awin-<id>`. Generated once and never changed, so it is stable for one promotion. A slug taken by a person's offer falls back to `awin-<id>`; if that is taken too the item is skipped (`slug_unavailable`). |
 
 **Voucher codes are not stored.** The offer model has no field for one, and putting a code in free text would hide it
@@ -147,15 +148,14 @@ code by hand. A change of code alone is therefore not seen as a change at the so
   the site. If it is ever found enabled, the importer refuses to run (`import_category_enabled`) rather than create
   offers that could be published into a public category. It is created by the command rather than by the migration so
   that the downgrade needs no data handling.
-- **Merchant.** (The website below is a value from the feed. A `direct` affiliate link may only point at the
-  merchant's website host, so an editor who later attaches a `direct` link is trusting that host; the merchant is
-  inactive and every offer needs an editor first, so this is a review step, not an automatic grant.)
-  `merchant_imports` maps an Awin advertiser id to a merchant (by id, never by name). A new advertiser
-  gets a new merchant: `active = false` (so `merchant_inactive` blocks publishing), the cleaned advertiser name, no logo,
-  and a website only when the promotion's own `url` gives one (the origin, for example `https://www.acme.example`, never a
-  network tracking host). The slug is the name, else name plus advertiser id, else `awin-advertiser-<id>`. An existing
-  merchant with the same name is **never reused or touched**. Merchants are created once and never refreshed or
-  activated by a later run.
+- **Merchant.** `merchant_imports` maps an Awin advertiser id to a merchant (by id, never by name). A new advertiser
+  gets a new merchant: `active = false` (so `merchant_inactive` blocks publishing), the cleaned advertiser name, no logo
+  and **no website**: the editor sets it when activating the merchant (a `direct` affiliate link may only point at the
+  merchant's website host, so that host is an editor's decision, not a feed value). The slug is always the name plus the
+  advertiser id (for example `acme-stores-77`), else `awin-advertiser-<id>`, so an import never reserves a bare brand
+  slug. An existing merchant with the same name is **never reused or touched**. Merchants are created once and never
+  refreshed or activated by a later run. A promotion id that later arrives under a different advertiser is not
+  refreshed under the old merchant (see below).
 
 ## Provenance model
 
@@ -187,8 +187,8 @@ On each item the importer compares hashes, in this order:
 | --- | --- |
 | No provenance row | Create (`created`). |
 | `source_hash` equals the new hash | Nothing is written (`unchanged`). A second run changes nothing, not even `updated_at`. |
-| Source changed, the offer is `DRAFT` **and** has exactly one link **and** its fingerprint equals `applied_content_hash` | Refresh the imported fields and the link, re-store both hashes (`updated`). |
-| Source changed (or a marker is pending), anything else (edited, published, expired, archived) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared; if the editor reverts every edit, the next run
+| Source changed, the offer is `DRAFT` **and** has exactly one link **and** its fingerprint equals `applied_content_hash` **and** that link's destination equals the new tracking URL **and** the merchant mapped from the item's advertiser id is the offer's merchant | Refresh the imported **text** fields, re-store both hashes (`updated`). A link is never rewritten. |
+| Source changed (or a marker is pending), anything else (edited, published, expired, archived, **or only the tracking URL moved, or the advertiser changed**) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared; if the editor reverts every edit, the next run
 refreshes the offer with the pending source. A change already recorded is not noted or audited again. |
 
 **Why a fingerprint and not `updated_at`.** `updated_at` also moves for the importer's own writes and for housekeeping
@@ -201,15 +201,28 @@ editable field a deliberate change (stored fingerprints would stop matching, whi
  an e2e test edits through the real admin service, and another holds
 the offer's row lock as an editor would: the importer waits for it and then judges the saved offer.
 
+## The tracking link is pinned
+
+`validate_https_url` and the Awin host allowlist only prove a link is on an Awin host. `awin_tracking.tracking_problem`
+pins the link itself (fail closed; the shapes are an [unverified assumption](#unverified-assumptions-the-first-dry-run-confirms-or-breaks)):
+no fragment; the path is `/cread.php` (`awinmid` = advertiser id, `awinaffid` = publisher id, optional deep link `ued`)
+or `/awclick.php` (`mid`, `id`, optional `p`); the query is parsed strictly (no `;` separators, no malformed pairs) and no id
+or deep-link parameter appears twice; the publisher parameter equals `AWIN_PUBLISHER_ID` and the advertiser parameter
+equals the item's advertiser id; a deep link is a clean https URL, not on any network tracking host, and on the same host
+as the item's `url` (`www.` may differ). Reasons: `tracking_shape_unrecognised` (shape, duplicate or missing id
+parameter), `tracking_owner_mismatch` (another publisher or advertiser), `tracking_destination_mismatch` (a deep link
+that is unsafe or goes elsewhere).
+
 ## Audit
 
 Every create, refresh and source-change marker writes an `audit_logs` row through
 `AuditService.record_system_action` (the path `check_offer_health` uses): `user_id` is null and `metadata.actor` is
 `commands.import_awin_offers`. Actions reuse the admin vocabulary: `admin.categories.create`,
 `admin.merchants.create`, `admin.offers.create`, `admin.offer_links.create`, `admin.offers.update` (with
-`details.reason = source_refreshed` and the field names, never the text), `admin.offer_links.update`, and
-`admin.offers.source_changed`. Rows hold ids, enums, slugs, counts and a link's destination **host**; never copy, a full
-URL, a code or a token (a test greps the stored rows).
+`details.reason = source_refreshed` and the field names, never the text) and `admin.offers.source_changed`. Rows hold ids,
+enums, slugs, counts and a link's destination **host**; never a title, description, terms, a full URL, a code or a
+token (a test greps the stored rows). A slug is a lossy copy of the words it was made from (an offer slug of its title,
+a merchant slug of the advertiser name), the same as the admin create rows already hold.
 
 ## Reporting and Sentry
 
@@ -224,10 +237,10 @@ Without `SENTRY_DSN` nothing is sent; if sending fails stderr names the error ty
 
 httpx, fixed host, TLS verification on, `trust_env=False` (proxy variables ignored), redirects **not followed** (a
 redirect is `redirected`; following one would carry the header elsewhere), timeouts (connect 5 s, read 20 s, write 10 s,
-pool 5 s) and a 30 s deadline per attempt, a 4 MiB response cap enforced while streaming, error bodies never read.
+pool 5 s) and a 30 s deadline per attempt, a 4 MiB response cap enforced while streaming over an unencoded body (`Accept-Encoding: identity`, and a response with any other `Content-Encoding` is refused as `unsupported_encoding`, so the cap counts real bytes), error bodies never read.
 Failures become a reason code and nothing else (`AwinError`): `auth_failed` (401 or 403: stop at once), `rate_limited`
 (429), `server_error` (5xx), `timeout`, `connection_error`, `tls_error` (not retried), `client_error` (other 4xx),
-`redirected`, `unexpected_status`, `response_too_large`, `invalid_json`, `unrecognised_response`. Only 429, 5xx,
+`redirected`, `unexpected_status`, `response_too_large`, `unsupported_encoding`, `invalid_json`, `unrecognised_response`. Only 429, 5xx,
 timeouts and dropped connections are retried: at most 4 attempts, backoff 1, 2, 4 seconds, `Retry-After` honoured (whole
 seconds, capped at 60 s). The error is raised outside the `except` block, so it has no `__cause__` or `__context__` that
 could hold a library message.
@@ -252,38 +265,48 @@ Awin's page does not document these. Each is handled defensively; the **first dr
    `regions.list[].countryCode` upper-case, dates exactly `YYYY-MM-DDTHH:MM:SS.fff` (an optional `Z` is tolerated). An item
    that differs is skipped with a reason code, so a wrong assumption shows as a skip count (for example everything
    `invalid_date` or `invalid_id`).
-5. **`endDate` semantics.** Read as the instant given in UTC. If Awin means "through the end of that day", the offer is
-   treated as ending up to a day early (it can only be published again by an editor, and the expiry job would expire a
-   published one early). Check one real promotion.
-6. **`urlTracking` host.** Assumed to be on `awin1.com` (or a subdomain), the one host the allowlist holds, which is
+5. **`endDate` semantics.** Read as the instant given in UTC. If Awin means "through the end of that day", a promotion
+   on its last day is skipped as `ended` (a midnight end date has already passed), and an imported offer is treated as
+   ending up to a day early (the expiry job would expire a published one early). Check one real promotion.
+6. **`urlTracking` host and shape.** Assumed to be on `awin1.com` (or a subdomain), the one host the allowlist holds, which is
    itself unverified. If Awin uses another domain, every item is skipped as `tracking_host_not_allowed` and nothing is
    imported; fix by adding the confirmed host to `PROVIDER_HOSTS` in a reviewed change
-   ([freejoy-affiliate.md](freejoy-affiliate.md#provider-host-allowlist)), never by relaxing the check.
-7. **`url` is the merchant's own page** (not a tracking URL). It becomes `source_url` and the merchant website's origin.
+   ([freejoy-affiliate.md](freejoy-affiliate.md#provider-host-allowlist)), never by relaxing the check. The link's *shape* is a second assumption, below (11).
+7. **`url` is the merchant's own page** (not a tracking URL). It becomes `source_url`, and the tracking link's deep link must point at the same host.
 8. **A `voucher` object exists only on vouchers, `code` may be null**, and `voucher.code` is a string when set.
 9. **Error status codes.** 401 or 403 mean a bad token, 429 a throttle; error bodies are never read, so their shape does
    not matter.
 10. **`updatedSince`** filters on a date Awin maintains and takes `yyyy-MM-dd`.
+11. **The shape of a tracking link** (`app/services/awin_tracking.py`). Awin's promotions documentation says nothing about
+    the URL. The importer assumes the two shapes Awin links are commonly written in: `/cread.php` with `awinmid`
+    (advertiser id), `awinaffid` (publisher id) and an optional deep link `ued`, or `/awclick.php` with `mid`, `id` and an
+    optional `p`. If real links differ, every item is skipped as `tracking_shape_unrecognised` and the dry-run shows the
+    count. See [the tracking link](#the-tracking-link-is-pinned).
 
 ### The owner's first run (a real token is an owner step)
 
 1. Put `AWIN_PUBLISHER_ID` and `AWIN_OAUTH_API_TOKEN` in `fastapi_backend/.env` (never commit it).
 2. `uv run python -m commands.import_awin_offers --dry-run --limit 20 --max-pages 1`. It touches no database.
 3. Read the counts. Exit 0 with mostly `valid` means 1, 3 and 4 held. `unrecognised_response` breaks 1;
-   `invalid_date` or `invalid_id` breaks 4; `tracking_host_not_allowed` breaks 6; `auth_failed` is the token or
-   publisher id.
+   `invalid_date` or `invalid_id` breaks 4; `tracking_host_not_allowed` breaks 6; `tracking_shape_unrecognised`,
+   `tracking_owner_mismatch` or `tracking_destination_mismatch` in numbers break 11 (or the publisher id is wrong);
+   `auth_failed` is the token or publisher id.
 4. Only then run it without `--dry-run` against a database you own, then open the admin offers list: the drafts are in
    "Imported (uncategorised)".
 
 ## Known limits
 
-- **A refresh can land during a review.** An editor who has read an imported draft may find the importer refreshed it
-  (it was still an untouched import) before they clicked verify. The admin verify and publish actions carry no
-  "version I reviewed" check (a change to the admin API, out of scope here); `updated_at` moves on a refresh.
-- **The tracking URL is checked for host, not for ownership.** It must be on an Awin host, but its `awinmid` and
-  `awinaffid` query values are not compared with the advertiser id and the publisher id (their shape is one of the
-  unverified assumptions). The editor reviewing the draft is the control.
-
+- **The text of an untouched draft can still be refreshed during a review.** An editor who has read an imported draft
+  may find the importer rewrote its title, summary, description, terms or dates (it was still an untouched import)
+  before they clicked verify. A moved tracking link is never written, but text can be. So **do not run the importer while
+  imported drafts are being reviewed**. The complete fix is a review token on the admin verify and publish actions
+  ("verify the version I read"), which is a separate story, out of scope here.
+- **Growth.** Nothing bounds the number of drafts and merchants across runs, only within one: a run creates at most
+  `--limit` new offers and merchants (the item cap). Repeated runs against a feed that keeps adding promotions keep adding
+  drafts.
+- **A server-side page-size cap would end a run quietly.** If Awin returns fewer items per page than asked for and the
+  response has no `pagination.totalPages`, the run reads a short page as the last one, stops after page 1 and exits 0
+  (a `totalPages`, when present, is believed over a short page).
 - **Not in the feed any more.** An offer whose promotion has left the feed (ended, left the programme) is not
   archived or expired by this command; drafts stay drafts, and published offers still expire through
   `check_offer_health` when their `end_at` passes.

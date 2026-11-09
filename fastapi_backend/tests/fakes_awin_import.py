@@ -168,13 +168,6 @@ class FakeImportStore:
         self.s.links[record.id] = record
         return record
 
-    async def update_link(
-        self, link_id: str, values: dict[str, Any]
-    ) -> AffiliateLinkRecord:
-        record = dataclasses.replace(self.s.links[link_id], **values)
-        self.s.links[link_id] = record
-        return record
-
     async def insert_offer_import(self, values: dict[str, Any]) -> None:
         record = OfferImportRecord(id=self.s.next_id("imp"), **values)
         self.s.imports[(record.provider, record.external_id)] = record
