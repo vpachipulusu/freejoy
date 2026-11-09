@@ -3,7 +3,7 @@
 SQLAlchemy models for the platform database are in `fastapi_backend/app/models/platform/`, one aggregate per file
 (`user`, `admin_user`, `organization`, `membership`, `invitation`, `audit_log`, `app_setting`, `feature_flag`,
 `email_template`, `seo_meta`, `url_redirect`, `stripe_event`) plus the Freejoy catalogue (`category`, `merchant`,
-`offer`, `affiliate_link`, `click_event`, `email_subscriber`), registered in the package `__init__.py`. Alembic revision
+`offer`, `affiliate_link`, `click_event`, `email_subscriber`) and the import provenance (`catalogue_import`), registered in the package `__init__.py`. Alembic revision
 `0001` (`alembic_migrations/versions/0001_baseline.py`) creates the platform tables; revision `0002`
 (`0002_freejoy_catalogue.py`) adds the six catalogue tables and never edits `0001`.
 
@@ -47,6 +47,7 @@ SQLAlchemy models for the platform database are in `fastapi_backend/app/models/p
 | `merchants` | Unique `slug`; `website` and `logo_url` are null until a licensed logo exists; `active` (default true). |
 | `offers` | Unique `slug`; `offer_type`, `status` (default `DRAFT`), `freshness` (editorial, nullable), `postage_kind`. Carries every field an offer page shows: image tint, label and alt, `steps`, `availability`, `eligibility`, `subscription_terms`, `requires_card`, `last_verified_at`. CHECKs: `postage_amount_minor` and `postage_currency` (an upper-case 3-letter code, `GBP`) are set exactly when `postage_kind` is `COST`; a `PUBLISHED` offer must have `last_verified_at` (the page always shows "Last checked"). `start_at` stays nullable: the Phase 2 mapper falls back to `created_at` for the frontend's `startAt`. `publisher_notes` is internal: the API never serialises it and it holds no personal contact data. Indexes `(status, end_at)`, `(category_id, status)` and `merchant_id`. |
 | `affiliate_links` | Per-offer destination and `tracking_id` for a `provider`; `destination_url` is read server-side only. Index `(offer_id, active)`. |
+| `offer_imports`, `merchant_imports` | Provenance for the Awin importer (migration `0004`): which provider promotion an offer came from and which advertiser a merchant stands for, unique `(provider, external_id)`, FKs that cascade, plus the hashes that tell a change at the source from an edit by a person. See [backend-awin-import.md](backend-awin-import.md). |
 | `click_events` | One row per outbound click. See the privacy rule below. Indexes `(offer_id, occurred_at)`, `occurred_at` (migration `0003`, serves the retention job) and `affiliate_link_id` (the `SET NULL` delete runs on every link delete). |
 | `email_subscribers` | Double opt-in alert subscribers; see the email decision below. |
 
