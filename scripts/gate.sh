@@ -16,6 +16,24 @@ step() {  # step <name> <dir> <command...>
   local rc=$?
   echo "=== $name exit=$rc" | tee -a "$LOG"
   [ "$rc" -eq 0 ] || FAILED=1
+  return "$rc"
+}
+
+# The alembic cycle drops every table of the database it runs on, so GATE_TEST_DATABASE_URL must name a
+# local throwaway database: host localhost or 127.0.0.1 and a name ending in _test (any ?query is ignored).
+require_local_test_database() {  # require_local_test_database <url>
+  local url="${1%%\?*}" rest host name
+  rest="${url#*://}"; rest="${rest##*@}"
+  host="${rest%%/*}"; host="${host%%:*}"
+  name="${rest#*/}"; name="${name%%/*}"
+  case "$host" in localhost|127.0.0.1) ;; *)
+    echo "=== REFUSED: GATE_TEST_DATABASE_URL host '$host' is not localhost or 127.0.0.1; the gate rebuilds this database" | tee -a "$LOG"
+    exit 2 ;;
+  esac
+  case "$name" in ?*_test) ;; *)
+    echo "=== REFUSED: GATE_TEST_DATABASE_URL database '$name' does not end in _test; the gate rebuilds this database" | tee -a "$LOG"
+    exit 2 ;;
+  esac
 }
 
 FE="$ROOT/nextjs-frontend"; BE="$ROOT/fastapi_backend"
@@ -23,6 +41,7 @@ FE="$ROOT/nextjs-frontend"; BE="$ROOT/fastapi_backend"
 # fastapi_backend/.env (settings, Alembic and the schema commands honour this switch).
 export IGNORE_ENV_FILE=1
 : >"$LOG"
+[ -z "$DB" ] || require_local_test_database "$DB"
 step "frontend lint" "$FE" npm run lint
 step "frontend typecheck" "$FE" npm run typecheck
 step "frontend unit+coverage" "$FE" npm run test:coverage
@@ -36,12 +55,17 @@ step "backend openapi fresh" "$BE" uv run python -m commands.check_openapi_schem
 if [ -n "$DB" ]; then
   # DATABASE_URL_DIRECT wins over DATABASE_URL in Alembic, so pin it to the test database too.
   export TEST_DATABASE_URL="$DB" DATABASE_URL="$DB" DATABASE_URL_DIRECT="$DB" ENVIRONMENT=test
-  step "backend pytest+cov (with e2e)" "$BE" uv run pytest -n auto --dist loadfile --cov --cov-report=term-missing:skip-covered
-  step "alembic upgrade head" "$BE" uv run alembic upgrade head
-  step "alembic check" "$BE" uv run alembic check
-  step "alembic downgrade base" "$BE" uv run alembic downgrade base
-  step "alembic upgrade head (again)" "$BE" uv run alembic upgrade head
+  if step "backend pytest+cov (with e2e)" "$BE" uv run pytest -n auto --dist loadfile --cov --cov-report=term-missing:skip-covered; then
+    step "alembic upgrade head" "$BE" uv run alembic upgrade head
+    step "alembic check" "$BE" uv run alembic check
+    step "alembic downgrade base" "$BE" uv run alembic downgrade base
+    step "alembic upgrade head (again)" "$BE" uv run alembic upgrade head
+  else
+    echo "=== alembic cycle SKIPPED: backend pytest failed" | tee -a "$LOG"
+  fi
 else
+  # Really database-less: no inherited database may be picked up by a *_e2e test or Alembic.
+  unset TEST_DATABASE_URL DATABASE_URL_DIRECT
   echo "=== GATE_TEST_DATABASE_URL unset: e2e tests skipped, alembic cycle NOT run" | tee -a "$LOG"
   step "backend pytest+cov (no e2e)" "$BE" uv run pytest -n auto --dist loadfile --cov --cov-report=term-missing:skip-covered
 fi
