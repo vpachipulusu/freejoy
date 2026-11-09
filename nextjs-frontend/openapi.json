@@ -7005,7 +7005,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -7142,7 +7142,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -7269,7 +7269,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -7396,7 +7396,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -7523,7 +7523,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -7660,7 +7660,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__v1__admin_offers_schemas__OfferResponse"
+                  "$ref": "#/components/schemas/OfferWriteResponse"
                 }
               }
             }
@@ -16079,6 +16079,267 @@
           "COMPETITION"
         ],
         "title": "OfferType"
+      },
+      "OfferWriteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "merchant_id": {
+            "type": "string",
+            "title": "Merchant Id"
+          },
+          "offer_type": {
+            "$ref": "#/components/schemas/OfferType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OfferStatus"
+          },
+          "featured": {
+            "type": "boolean",
+            "title": "Featured"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "review_token": {
+            "type": "string",
+            "title": "Review Token"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "description": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Description"
+          },
+          "image_tint": {
+            "type": "string",
+            "title": "Image Tint"
+          },
+          "image_label": {
+            "type": "string",
+            "title": "Image Label"
+          },
+          "image_alt": {
+            "type": "string",
+            "title": "Image Alt"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "postage_kind": {
+            "$ref": "#/components/schemas/PostageKind"
+          },
+          "postage_amount_minor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postage Amount Minor"
+          },
+          "postage_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postage Currency"
+          },
+          "requires_card": {
+            "type": "boolean",
+            "title": "Requires Card"
+          },
+          "subscription_terms": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Terms"
+          },
+          "eligibility": {
+            "type": "string",
+            "title": "Eligibility"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publisher_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Notes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/AffiliateLinkOut"
+            },
+            "type": "array",
+            "title": "Links"
+          },
+          "previous_review_token": {
+            "type": "string",
+            "title": "Previous Review Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "slug",
+          "category_id",
+          "merchant_id",
+          "offer_type",
+          "status",
+          "featured",
+          "end_at",
+          "last_verified_at",
+          "updated_at",
+          "review_token",
+          "summary",
+          "description",
+          "image_tint",
+          "image_label",
+          "image_alt",
+          "source_url",
+          "postage_kind",
+          "postage_amount_minor",
+          "postage_currency",
+          "requires_card",
+          "subscription_terms",
+          "eligibility",
+          "availability",
+          "steps",
+          "start_at",
+          "freshness",
+          "publisher_notes",
+          "created_at",
+          "links",
+          "previous_review_token"
+        ],
+        "title": "OfferWriteOut",
+        "description": "The offer after a write, plus the token of the state the write replaced.\n\nRead under the same row lock, before the write. If it is not the token the editor loaded, somebody else\nchanged the offer first and the response already contains their change."
+      },
+      "OfferWriteResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/OfferWriteOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "OfferWriteResponse"
       },
       "OffersPage": {
         "properties": {

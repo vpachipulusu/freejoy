@@ -29,6 +29,7 @@ from tests.fakes_admin_catalogue import (
 ACTOR = AdminContext("admin1", "admin", frozenset({"offers.publish"}))
 REFS = ReviewRefs(
     category_name="Home",
+    category_short_name="Home",
     category_enabled=True,
     merchant_name="Acme",
     merchant_website="https://www.acme.example",
@@ -199,6 +200,7 @@ async def test_a_link_added_after_loading_makes_the_token_stale():
         ("merchant_logos", "mer1", "https://cdn.example.com/new.png"),
         ("merchants", "mer1", False),
         ("category_names", "cat1", "Renamed category"),
+        ("category_short_names", "cat1", "Short"),
         ("categories", "cat1", False),
     ],
     ids=lambda c: c[0],
@@ -312,6 +314,7 @@ def test_the_token_changes_when_any_link_detail_changes(changes):
         {"merchant_logo_url": "https://cdn.example.com/logo.png"},
         {"merchant_active": False},
         {"category_name": "Renamed"},
+        {"category_short_name": "Renamed"},
         {"category_enabled": False},
     ],
 )
@@ -373,3 +376,84 @@ def test_the_token_is_opaque_hex_and_reveals_no_text_of_the_offer():
 
     assert len(token) == 64 and int(token, 16) >= 0
     assert "Secretive" not in token
+
+
+# --- previous_review_token: the state a write replaced ----------------------------------------
+
+
+async def write(service, kind, token=None):
+    if kind == "update":
+        return await service.update_offer(ACTOR, "off1", {"title": "Edited"})
+    if kind == "verify":
+        return await service.verify(ACTOR, "off1", None, review_token=token)
+    action = {"publish": OfferAction.PUBLISH}.get(kind) or OfferAction(kind)
+    return await service.transition(ACTOR, "off1", action, review_token=token)
+
+
+WRITES = [
+    ("update", OfferStatus.DRAFT),
+    ("verify", OfferStatus.DRAFT),
+    ("publish", OfferStatus.DRAFT),
+    ("unpublish", OfferStatus.PUBLISHED),
+    ("expire", OfferStatus.PUBLISHED),
+    ("archive", OfferStatus.PUBLISHED),
+]
+
+
+@pytest.mark.parametrize(("kind", "status"), WRITES)
+async def test_a_write_returns_the_token_of_the_state_it_replaced(kind, status):
+    service, *_ = build(reviewable(status=status), links=[link("l1")])
+    loaded = await loaded_token(service)
+
+    detail = await write(service, kind, loaded)
+
+    assert detail.previous_review_token == loaded
+    assert detail.review_token != loaded
+    assert detail.review_token == await loaded_token(service)
+
+
+@pytest.mark.parametrize(("kind", "status"), WRITES)
+async def test_a_foreign_change_before_the_write_shows_in_the_previous_token(
+    kind, status
+):
+    service, store, *_ = build(reviewable(status=status), links=[link("l1")])
+    loaded = await loaded_token(service)
+    store.links["l1"] = replace(
+        store.links["l1"], destination_url="https://shop.example.com/foreign"
+    )
+    foreign = await loaded_token(service)
+    # Publish and verify refuse a stale token; the steps that need none and a save go through.
+    token = foreign if kind in ("publish", "verify") else None
+
+    detail = await write(service, kind, token)
+
+    assert foreign != loaded
+    assert detail.previous_review_token == foreign
+    assert detail.previous_review_token != loaded
+
+
+async def test_reads_and_creates_carry_no_previous_token():
+    service, *_ = build(reviewable())
+
+    assert (await service.get_offer("off1")).previous_review_token is None
+
+
+# --- the response token is computed inside the transaction -------------------------------------
+
+
+class RefsFailAfterWrite(FakeOfferStore):
+    """review_refs fails once the offer has been written (the response's own token computation)."""
+
+    async def review_refs(self, category_id, merchant_id, *, share=False):
+        if not share and self.offers["off1"].title == "Edited":
+            raise RuntimeError("token computation failed")
+        return await super().review_refs(category_id, merchant_id, share=share)
+
+
+async def test_a_failure_computing_the_response_token_commits_nothing():
+    service, *_, session = build(reviewable(), store=RefsFailAfterWrite())
+
+    with pytest.raises(RuntimeError):
+        await service.update_offer(ACTOR, "off1", {"title": "Edited"})
+
+    assert session.commits == 0

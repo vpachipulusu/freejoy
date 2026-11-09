@@ -131,6 +131,7 @@ class FakeOfferStore:
         self.merchant_names: dict[str, str] = {}
         self.merchant_logos: dict[str, str | None] = {}
         self.category_names: dict[str, str] = {}
+        self.category_short_names: dict[str, str] = {}
         self.locked: list[str] = []
         self.filters: list[tuple[OfferFilters, int, int]] = []
 
@@ -180,6 +181,11 @@ class FakeOfferStore:
                 None
                 if enabled is None
                 else self.category_names.get(category_id, category_id)
+            ),
+            category_short_name=(
+                None
+                if enabled is None
+                else self.category_short_names.get(category_id, category_id)
             ),
             category_enabled=enabled,
             merchant_name=(

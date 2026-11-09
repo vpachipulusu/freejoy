@@ -179,8 +179,15 @@ async def test_the_list_carries_no_token(client, engine, world):
         ("merchant", {"name": "Renamed Ltd"}),
         ("merchant", {"logo_url": "https://cdn.example.com/logo.png"}),
         ("category", {"name": "Renamed category"}),
+        ("category", {"short_name": "Renamed"}),
     ],
-    ids=["merchant-website", "merchant-name", "merchant-logo", "category-name"],
+    ids=[
+        "merchant-website",
+        "merchant-name",
+        "merchant-logo",
+        "category-name",
+        "category-short-name",
+    ],
 )
 async def test_a_merchant_or_category_edit_after_loading_makes_it_409(
     client, engine, world, step, kind, patch
@@ -252,3 +259,89 @@ async def test_taking_an_offer_down_needs_no_token_even_when_the_offer_changed(
     assert result.json()["data"]["status"] == "DRAFT"
     actions = [r[1] for r in await audit_rows(engine)]
     assert "admin.offers.unpublish" in actions
+
+
+async def foreign_link_change(client, headers, url):
+    """Somebody else points the offer's link elsewhere (after the editor loaded the page)."""
+    link = await client.post(f"{url}/links", json=LINK, headers=headers)
+    return link.json()["data"]["id"]
+
+
+async def test_a_save_returns_the_state_it_replaced_equal_to_the_loaded_token_when_nothing_changed(
+    client, engine, world
+):
+    headers, url = world
+    loaded = await review_token(client, headers, url)
+
+    saved = await client.patch(url, json={"title": "Edited"}, headers=headers)
+
+    data = saved.json()["data"]
+    assert data["previous_review_token"] == loaded
+    assert data["review_token"] != loaded
+    assert data["review_token"] == await review_token(client, headers, url)
+
+
+async def test_a_save_after_a_foreign_link_change_returns_a_previous_token_the_editor_never_loaded(
+    client, engine, world
+):
+    headers, url = world
+    loaded = await review_token(client, headers, url)
+    await foreign_link_change(client, headers, url)
+
+    saved = await client.patch(url, json={"title": "Edited"}, headers=headers)
+
+    data = saved.json()["data"]
+    assert data["previous_review_token"] != loaded
+    assert data["review_token"] != data["previous_review_token"]
+
+
+@pytest.mark.parametrize("step", ["unpublish", "expire", "archive"])
+async def test_a_step_without_a_token_returns_the_state_it_replaced(
+    client, engine, world, step
+):
+    headers, url = world
+    await verified(client, headers, url)
+    await approve(client, headers, url, "publish")
+    loaded = await review_token(client, headers, url)
+    unchanged = await client.post(f"{url}/{step}", headers=headers)
+    assert unchanged.json()["data"]["previous_review_token"] == loaded
+
+
+@pytest.mark.parametrize("step", ["unpublish", "expire", "archive"])
+async def test_a_step_after_a_foreign_change_returns_a_different_previous_token(
+    client, engine, world, step
+):
+    headers, url = world
+    await verified(client, headers, url)
+    await approve(client, headers, url, "publish")
+    loaded = await review_token(client, headers, url)
+    await client.patch(url, json={"summary": "Foreign summary"}, headers=headers)
+
+    result = await client.post(f"{url}/{step}", headers=headers)
+
+    assert result.json()["data"]["previous_review_token"] != loaded
+
+
+async def test_a_failure_computing_the_response_token_rolls_the_write_back(
+    client, engine, world, monkeypatch
+):
+    import app.services.admin_offers as service_module
+
+    headers, url = world
+    real = service_module.compute_review_token
+    calls = {"n": 0}
+
+    def failing(*args, **kwargs):
+        calls["n"] += 1
+        # the first call is the token of the stored state, the second one is the response's own
+        if calls["n"] >= 2:
+            raise RuntimeError("token computation failed")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "compute_review_token", failing)
+    before = await snapshot(engine)
+
+    result = await client.patch(url, json={"title": "Edited"}, headers=headers)
+
+    assert result.status_code == 500
+    assert await snapshot(engine) == before

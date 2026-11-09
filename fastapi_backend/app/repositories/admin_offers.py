@@ -70,6 +70,7 @@ class ReviewRefs:
     """What a visitor sees of an offer's category and merchant (a field is None when the row is missing)."""
 
     category_name: str | None
+    category_short_name: str | None
     category_enabled: bool | None
     merchant_name: str | None
     merchant_website: str | None
@@ -190,7 +191,7 @@ class AdminOfferRepository(BaseRepository):
         With ``share`` both rows are read FOR SHARE, so a concurrent edit of either waits for this
         transaction and the token compared under the offer's row lock cannot go stale before the commit.
         """
-        category = select(Category.name, Category.enabled).where(
+        category = select(Category.name, Category.short_name, Category.enabled).where(
             Category.id == category_id
         )
         merchant = select(
@@ -205,6 +206,7 @@ class AdminOfferRepository(BaseRepository):
         found_merchant = (await self._session.execute(merchant)).first()
         return ReviewRefs(
             category_name=found_category.name if found_category else None,
+            category_short_name=found_category.short_name if found_category else None,
             category_enabled=found_category.enabled if found_category else None,
             merchant_name=found_merchant.name if found_merchant else None,
             merchant_website=found_merchant.website if found_merchant else None,

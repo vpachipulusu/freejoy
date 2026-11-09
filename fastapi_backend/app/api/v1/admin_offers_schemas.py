@@ -225,6 +225,16 @@ class OfferOut(OfferSummaryOut):
     links: list[AffiliateLinkOut]
 
 
+class OfferWriteOut(OfferOut):
+    """The offer after a write, plus the token of the state the write replaced.
+
+    Read under the same row lock, before the write. If it is not the token the editor loaded, somebody else
+    changed the offer first and the response already contains their change.
+    """
+
+    previous_review_token: str
+
+
 class OffersPage(BaseModel):
     offers: list[OfferSummaryOut]
     total_count: int
@@ -242,6 +252,11 @@ class OfferResponse(BaseModel):
     data: OfferOut
 
 
+class OfferWriteResponse(BaseModel):
+    success: Literal[True] = True
+    data: OfferWriteOut
+
+
 class LinkResponse(BaseModel):
     success: Literal[True] = True
     data: AffiliateLinkOut
@@ -255,10 +270,21 @@ def summary_out(record: OfferRecord) -> OfferSummaryOut:
     return OfferSummaryOut.model_validate(record, from_attributes=True)
 
 
-def offer_out(detail: OfferDetail) -> OfferOut:
-    fields = {
+def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
+    return {
         **detail.offer.__dict__,
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
     }
-    return OfferOut(**fields)
+
+
+def offer_out(detail: OfferDetail) -> OfferOut:
+    return OfferOut(**_offer_fields(detail))
+
+
+def offer_write_out(detail: OfferDetail) -> OfferWriteOut:
+    if detail.previous_review_token is None:
+        raise ValueError("a write response needs the token of the state it replaced")
+    return OfferWriteOut(
+        **_offer_fields(detail), previous_review_token=detail.previous_review_token
+    )
