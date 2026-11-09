@@ -17,6 +17,10 @@ from pathlib import Path
 
 IGNORE_ENV_FILE = "IGNORE_ENV_FILE"
 ENV_FILE = ".env"
+# The file Alembic and the scripts read: always fastapi_backend/.env. ``Settings`` reads ENV_FILE
+# relative to the working directory, so the two are the same file whenever the process runs from
+# fastapi_backend/ (every documented command does) and may differ from anywhere else.
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ENV_FILE
 TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
@@ -32,8 +36,8 @@ def settings_env_file() -> str | None:
 def load_env_file(path: Path | None = None) -> bool:
     """Load ``.env`` into ``os.environ`` (existing variables win) unless the switch is on.
 
-    Without ``path`` the file is looked up from this module's directory upwards, which is
-    where ``fastapi_backend/.env`` lives. Returns whether a file was read.
+    Without ``path`` it reads ``BACKEND_ENV_FILE`` only; no parent directory is searched.
+    Returns whether a file was read.
     """
     if env_file_ignored():
         return False
@@ -41,4 +45,4 @@ def load_env_file(path: Path | None = None) -> bool:
         load_dotenv,
     )  # only the scripts need it; keep it off the settings import path
 
-    return load_dotenv(dotenv_path=path)
+    return load_dotenv(dotenv_path=path or BACKEND_ENV_FILE)

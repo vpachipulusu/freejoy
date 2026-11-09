@@ -9,8 +9,8 @@ import pytest
 
 from app.core import env_file
 from app.core.config import Settings
+from tests._subprocess_support import BACKEND_ROOT, inherited_environment
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
 LEAKED = "Leaked From Dotenv"
 
 
@@ -18,17 +18,6 @@ def _write_env_file(directory: Path, *lines: str) -> Path:
     path = directory / ".env"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
-
-
-def _child_environment(**changes: str | None) -> dict[str, str]:
-    """The pytest environment as a subprocess sees it, with ``changes`` applied (None removes)."""
-    child = {**os.environ, "PYTHONPATH": str(BACKEND_ROOT)}
-    for name, value in changes.items():
-        if value is None:
-            child.pop(name, None)
-        else:
-            child[name] = value
-    return child
 
 
 def _read_app_name(directory: Path, environment: dict[str, str]) -> str:
@@ -111,7 +100,7 @@ def test_a_subprocess_started_by_a_test_ignores_the_dotenv_file(
 ) -> None:
     _write_env_file(tmp_path, f"APP_NAME={LEAKED}")
 
-    app_name = _read_app_name(tmp_path, _child_environment())
+    app_name = _read_app_name(tmp_path, inherited_environment())
 
     assert app_name == Settings.model_fields["APP_NAME"].default
 
@@ -123,7 +112,28 @@ def test_the_dotenv_file_is_still_read_outside_the_tests(tmp_path: Path) -> None
 
     app_name = _read_app_name(
         tmp_path,
-        _child_environment(**{env_file.IGNORE_ENV_FILE: None, "APP_NAME": None}),
+        inherited_environment(**{env_file.IGNORE_ENV_FILE: None, "APP_NAME": None}),
     )
 
     assert app_name == LEAKED
+
+
+def test_alembic_reads_the_backend_env_file_not_one_found_by_searching_upwards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A .env in a parent directory must never be picked up; only the backend's own file counts.
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    _write_env_file(tmp_path, f"ENV_FILE_PROBE={LEAKED}")
+    monkeypatch.setattr(env_file, "BACKEND_ENV_FILE", backend / ".env")
+    monkeypatch.delenv(env_file.IGNORE_ENV_FILE, raising=False)
+    monkeypatch.setenv("ENV_FILE_PROBE", "unset-me")
+    monkeypatch.delenv("ENV_FILE_PROBE")
+
+    assert env_file.load_env_file() is False
+
+    assert "ENV_FILE_PROBE" not in os.environ
+
+
+def test_the_default_env_file_is_fastapi_backend_slash_dot_env() -> None:
+    assert env_file.BACKEND_ENV_FILE == BACKEND_ROOT / ".env"

@@ -3,14 +3,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app.core.env_file import IGNORE_ENV_FILE
+from app.core.settings_environment import isolate_settings_environment
 
-# The schema is committed (ADR-008), so it must not depend on one developer's machine: a
-# local .env or an exported APP_NAME/APP_VERSION would change info.title and info.version.
-# This runs before app.main builds the settings and the app.
-os.environ[IGNORE_ENV_FILE] = "1"
-for _brand_setting in ("APP_NAME", "APP_VERSION"):
-    os.environ.pop(_brand_setting, None)
+# The schema is committed (ADR-008), so it must not depend on one developer's machine: a local
+# .env or an exported APP_NAME/APP_VERSION would change info.title and info.version. Nothing
+# else is needed either: the command runs in any shell, with no .env and nothing exported. This
+# must run before app.main builds the settings.
+isolate_settings_environment(os.environ)
 
 from app.main import app
 

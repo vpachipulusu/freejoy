@@ -1,6 +1,6 @@
 import os
 
-from tests._env_isolation import isolate_settings_environment
+from app.core.settings_environment import isolate_settings_environment
 
 # app.core.config builds its settings when it is first imported, so the machine's own
 # values (a git-ignored .env, exported APP_NAME, a real SENTRY_DSN, ...) have to go before
