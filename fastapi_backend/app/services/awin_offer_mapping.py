@@ -33,6 +33,7 @@ from app.core.plain_text import plain_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import OfferStatus, OfferType, PostageKind
 from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
+from app.repositories.awin_import import IMPORT_CATEGORY_SLUG
 from app.services.awin_promotions import (
     NETWORK_HOSTS,
     PROVIDER,
@@ -40,7 +41,6 @@ from app.services.awin_promotions import (
 )
 from app.services.offer_rules import EDITABLE_FIELDS
 
-IMPORT_CATEGORY_SLUG = "imported-uncategorised"
 IMAGE_TINT = "cream"
 IMAGE_ALT = "Illustration of a voucher ticket"
 IMAGE_LABEL_LENGTH = 40
