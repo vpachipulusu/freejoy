@@ -23,11 +23,16 @@ import logging
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from app.core.affiliate_hosts import DIRECT_PROVIDER, destination_allowed
+from app.core.affiliate_hosts import (
+    DIRECT_PROVIDER,
+    PROVIDER_HOSTS,
+    destination_allowed,
+    host_matches,
+)
 from app.core.catalogue_urls import InvalidUrl, validate_https_url
 from app.core.url_probe import ProbeReason, ProbeResult, ProbeStatus, UrlProbe
 from app.repositories.offer_health import DirectLinkTarget, SourceUrlTarget
@@ -37,7 +42,10 @@ logger = logging.getLogger("yourapp.offer_health")
 DEFAULT_LIMIT = 500
 DEFAULT_CONCURRENCY = 5
 MAX_EVENT_FINDINGS = 50
-_LONGEST_AGO = datetime.min.replace(tzinfo=None)
+MAX_HOST_FAILURES = 3
+HOST_FAILURE_REASONS = frozenset({ProbeReason.TIMEOUT, ProbeReason.CONNECTION_ERROR})
+_LONGEST_AGO = datetime.min.replace(tzinfo=UTC)
+_TRACKING_HOSTS = frozenset(h for hosts in PROVIDER_HOSTS.values() for h in hosts)
 
 
 class TargetKind(enum.StrEnum):
@@ -66,9 +74,10 @@ class CheckTarget:
 @dataclass(frozen=True)
 class Targets:
     items: tuple[CheckTarget, ...]
-    not_followable: (
-        int  # direct links skipped because /go/ would not follow them either
-    )
+    # direct links skipped because /go/ would not follow them either
+    not_followable: int
+    # URLs on a network's tracking host: never requested
+    tracking_host_skipped: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,7 @@ class Finding:
 class ReachabilityReport:
     findings: tuple[Finding, ...]
     not_followable: int = 0
+    tracking_host_skipped: int = 0
 
     @property
     def checked(self) -> int:
@@ -100,6 +110,9 @@ class ReachabilityReport:
             for f in self.findings
             if f.status in (ProbeStatus.UNREACHABLE, ProbeStatus.REFUSED)
         )
+
+    def count_reason(self, reason: ProbeReason) -> int:
+        return sum(1 for finding in self.findings if finding.reason is reason)
 
     def reason_counts(self) -> dict[str, int]:
         return dict(Counter(finding.reason.value for finding in self.problems))
@@ -130,10 +143,25 @@ def _link_is_followable(link: DirectLinkTarget) -> bool:
     )
 
 
+def _on_tracking_host(url: str) -> bool:
+    """Whether a valid URL points at a network's tracking host (or a subdomain of one).
+
+    Such a URL is never requested, whichever field holds it: a request to it records a click at
+    the network. A URL that fails validation is not judged here; the probe refuses it unsent.
+    """
+    try:
+        host = urlsplit(validate_https_url(url)).hostname or ""
+    except InvalidUrl:
+        return False
+    return host_matches(host, _TRACKING_HOSTS)
+
+
 def _by_staleness(target: CheckTarget) -> tuple[datetime, str, str]:
-    verified = target.last_verified_at
-    when = verified.replace(tzinfo=None) if verified else _LONGEST_AGO
-    return when, target.offer_id, target.link_id or ""
+    return (
+        target.last_verified_at or _LONGEST_AGO,
+        target.offer_id,
+        target.link_id or "",
+    )
 
 
 async def collect_targets(
@@ -141,8 +169,17 @@ async def collect_targets(
 ) -> Targets:
     """Up to ``limit`` URLs to check, offers least recently verified first."""
     sources = await store.list_source_url_targets(now, limit)
-    direct_links = await store.list_direct_link_targets(now, limit)
-    followable = [link for link in direct_links if _link_is_followable(link)]
+    direct = [
+        link
+        for link in await store.list_direct_link_targets(now, limit)
+        if link.provider == DIRECT_PROVIDER
+    ]
+    tracking = sum(_on_tracking_host(s.url) for s in sources) + sum(
+        _on_tracking_host(link.url) for link in direct
+    )
+    sources = [s for s in sources if not _on_tracking_host(s.url)]
+    direct = [link for link in direct if not _on_tracking_host(link.url)]
+    followable = [link for link in direct if _link_is_followable(link)]
     items = [
         CheckTarget(TargetKind.SOURCE_URL, s.offer_id, None, s.url, s.last_verified_at)
         for s in sources
@@ -157,10 +194,7 @@ async def collect_targets(
         for link in followable
     ]
     ordered = sorted(items, key=_by_staleness)[:limit]
-    skipped = sum(1 for link in direct_links if link.provider == DIRECT_PROVIDER) - len(
-        followable
-    )
-    return Targets(tuple(ordered), skipped)
+    return Targets(tuple(ordered), len(direct) - len(followable), tracking)
 
 
 async def _check(probe: UrlProbe, url: str) -> ProbeResult:
@@ -181,32 +215,57 @@ def _log_problem(finding: Finding) -> None:
     )
 
 
+def _not_checked(target: CheckTarget) -> Finding:
+    return Finding(
+        target.offer_id,
+        target.link_id,
+        target.kind,
+        ProbeStatus.INCONCLUSIVE,
+        ProbeReason.NOT_CHECKED,
+    )
+
+
 async def probe_targets(
     probe: UrlProbe,
     targets: Sequence[CheckTarget],
     *,
     concurrency: int = DEFAULT_CONCURRENCY,
+    max_seconds: float | None = None,
 ) -> list[Finding]:
     """Check every target, at most ``concurrency`` at once and one at a time per host.
 
     Findings come back in the order of ``targets``. Unreachable and refused results are logged
-    (ids and reason code only).
+    (ids and reason code only). Two bounds keep a run from hanging on bad hosts:
+
+    * after ``MAX_HOST_FAILURES`` consecutive timeouts or connection errors on one host, its
+      remaining targets are not requested and come back ``inconclusive / host_skipped``;
+    * when ``max_seconds`` passes, requests still unfinished are cancelled and their targets come
+      back ``inconclusive / not_checked``.
     """
     gate = asyncio.Semaphore(concurrency)
     host_locks: dict[str, asyncio.Lock] = {}
+    host_failures: dict[str, int] = {}
+    done: dict[int, Finding] = {}
 
-    async def one(target: CheckTarget) -> Finding:
-        lock = host_locks.setdefault(_host_of(target.url), asyncio.Lock())
-        async with (
-            lock,
-            gate,
-        ):  # the host lock first, so a queue on one host holds no slot
-            result = await _check(probe, target.url)
-        return Finding(
+    async def one(index: int, target: CheckTarget) -> None:
+        host = _host_of(target.url)
+        async with host_locks.setdefault(host, asyncio.Lock()), gate:
+            if host_failures.get(host, 0) >= MAX_HOST_FAILURES:
+                result = ProbeResult(ProbeStatus.INCONCLUSIVE, ProbeReason.HOST_SKIPPED)
+            else:
+                result = await _check(probe, target.url)
+                failed = result.reason in HOST_FAILURE_REASONS
+                host_failures[host] = host_failures.get(host, 0) + 1 if failed else 0
+        done[index] = Finding(
             target.offer_id, target.link_id, target.kind, result.status, result.reason
         )
 
-    findings = list(await asyncio.gather(*(one(target) for target in targets)))
+    try:
+        async with asyncio.timeout(max_seconds):
+            await asyncio.gather(*(one(i, t) for i, t in enumerate(targets)))
+    except TimeoutError:
+        pass  # whatever finished is in ``done``; the rest is reported as not checked
+    findings = [done.get(i) or _not_checked(t) for i, t in enumerate(targets)]
     for finding in findings:
         if finding.status in (ProbeStatus.UNREACHABLE, ProbeStatus.REFUSED):
             _log_problem(finding)

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.core import url_probe
 from app.core.url_probe import (
     HttpxUrlProbe,
     ProbeReason,
@@ -442,3 +443,9 @@ async def test_the_system_resolver_returns_unique_addresses_in_order(
     addresses = await SystemResolver().resolve("shop.example.org")
 
     assert list(addresses) == [PUBLIC_V6, PUBLIC_V4]
+
+
+def test_connections_are_never_kept_alive_and_http2_is_off() -> None:
+    # Together these bind the certificate check to the Host header: see the comment in url_probe.
+    assert url_probe.MAX_KEEPALIVE_CONNECTIONS == 0
+    assert url_probe.USE_HTTP2 is False

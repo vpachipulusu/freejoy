@@ -46,6 +46,12 @@ READ_TIMEOUT = 10.0
 TOTAL_TIMEOUT = 20.0
 MAX_ADDRESS_ATTEMPTS = 3
 MAX_CONNECTIONS = 20
+# No kept-alive connections and no HTTP/2: every check opens its own HTTP/1.1 connection to the
+# pinned address. That is what ties the certificate check (SNI) to the ``Host`` header we send.
+# A pooled or multiplexed connection could be reused for another name that shares the address
+# (connection coalescing), so a certificate valid for one name would then answer for another.
+MAX_KEEPALIVE_CONNECTIONS = 0
+USE_HTTP2 = False
 HEAD_FALLBACK_STATUSES = frozenset({405, 501})
 _QUIET_LOGGERS = ("httpx", "httpcore")
 
@@ -78,6 +84,10 @@ class ProbeReason(enum.StrEnum):
     INVALID_URL = "invalid_url"
     BLOCKED_ADDRESS = "blocked_address"
     PROBE_ERROR = "probe_error"  # a bug or an odd answer on our side, not a verdict
+    HOST_SKIPPED = (
+        "host_skipped"  # not requested: the host failed repeatedly in this run
+    )
+    NOT_CHECKED = "not_checked"  # not requested: the run's time limit was reached
 
 
 @dataclass(frozen=True)
@@ -156,7 +166,12 @@ def _quiet_http_loggers() -> None:
 
 
 class HttpxUrlProbe:
-    """``UrlProbe`` over httpx, pinned to the address that passed the safety check."""
+    """``UrlProbe`` over httpx, pinned to the address that passed the safety check.
+
+    Do not use it in a process where Sentry is already initialised: the SDK's httpx integration
+    would record each request URL (the pinned address and path) as a breadcrumb and add tracing
+    headers to the requests. The offer health command starts Sentry only after the last request.
+    """
 
     def __init__(
         self,
@@ -179,8 +194,10 @@ class HttpxUrlProbe:
                 pool=READ_TIMEOUT,
             ),
             limits=httpx.Limits(
-                max_connections=MAX_CONNECTIONS, max_keepalive_connections=0
+                max_connections=MAX_CONNECTIONS,
+                max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
             ),
+            http2=USE_HTTP2,
             follow_redirects=False,
             trust_env=False,
         )

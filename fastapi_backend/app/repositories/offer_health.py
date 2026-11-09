@@ -5,7 +5,7 @@ to decide what to expire, so an offer is in exactly one of the two sets.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
 
@@ -30,7 +30,7 @@ class DueOffer:
 @dataclass(frozen=True)
 class SourceUrlTarget:
     offer_id: str
-    url: str
+    url: str = field(repr=False)
     last_verified_at: datetime | None
 
 
@@ -39,8 +39,8 @@ class DirectLinkTarget:
     offer_id: str
     link_id: str
     provider: str
-    url: str
-    merchant_website: str | None
+    url: str = field(repr=False)
+    merchant_website: str | None = field(repr=False)
     last_verified_at: datetime | None
 
 

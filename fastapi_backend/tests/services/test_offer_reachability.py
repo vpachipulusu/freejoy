@@ -1,14 +1,17 @@
 """Reachability targets and results: which URLs are requested, and what is reported about them."""
 
+import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
+from app.core.affiliate_hosts import PROVIDER_HOSTS
 from app.core.url_probe import ProbeReason, ProbeResult, ProbeStatus
 from app.repositories.offer_health import DirectLinkTarget, SourceUrlTarget
 from app.services.offer_reachability import (
     MAX_EVENT_FINDINGS,
+    MAX_HOST_FAILURES,
     CheckTarget,
     Finding,
     ReachabilityReport,
@@ -328,3 +331,163 @@ def test_the_event_context_lists_a_bounded_number_of_problems() -> None:
 
     assert len(context["findings"]) == MAX_EVENT_FINDINGS
     assert context["findings_omitted"] == 5
+
+
+TRACKING_HOSTS = sorted(
+    {host for hosts in PROVIDER_HOSTS.values() for host in hosts}
+    | {f"www.{host}" for hosts in PROVIDER_HOSTS.values() for host in hosts}
+    | {"click.linksynergy.com"}
+)
+
+
+@pytest.mark.parametrize("host", TRACKING_HOSTS)
+async def test_a_tracking_host_is_never_collected_whatever_field_holds_it(
+    host: str,
+) -> None:
+    store = FakeHealthStore(
+        sources=[source("o1", f"https://{host}/x?a=1")],
+        links=[
+            link("o2", "l2", f"https://{host}/y", website=f"https://{host}"),
+            link("o3", "l3", f"https://{host}/z", website=None),
+        ],
+    )
+    probe = FakeUrlProbe()
+
+    collected = await collect_targets(store, NOW, limit=10)
+    await probe_targets(probe, collected.items)
+
+    assert collected.items == ()
+    assert collected.tracking_host_skipped == 3
+    assert collected.not_followable == 0
+    assert probe.urls == []
+
+
+async def test_a_look_alike_of_a_tracking_host_is_still_checked() -> None:
+    store = FakeHealthStore(sources=[source("o1", "https://awin1.com.evil.example/x")])
+
+    collected = await collect_targets(store, NOW, limit=10)
+
+    assert len(collected.items) == 1 and collected.tracking_host_skipped == 0
+
+
+class TimeoutProbe(FakeUrlProbe):
+    """Every request to a host whose name starts with ``dead`` times out."""
+
+    async def check(self, url: str) -> ProbeResult:
+        await super().check(url)
+        if "//dead" in url:
+            return ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT)
+        return OK
+
+
+async def test_a_host_that_keeps_timing_out_is_skipped_after_three_requests() -> None:
+    probe = TimeoutProbe()
+    targets = [target(f"o{n}", f"https://dead.example/{n}") for n in range(10)]
+
+    findings = await probe_targets(probe, targets)
+
+    assert MAX_HOST_FAILURES == 3
+    assert len(probe.urls) == 3
+    skipped = [f for f in findings if f.reason is ProbeReason.HOST_SKIPPED]
+    assert len(skipped) == 7
+    assert {f.status for f in skipped} == {ProbeStatus.INCONCLUSIVE}
+    assert [f.reason for f in findings[:3]] == [ProbeReason.TIMEOUT] * 3
+
+
+async def test_connection_errors_also_trip_the_breaker_and_other_hosts_are_unaffected() -> (
+    None
+):
+    class Mixed(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            await super().check(url)
+            if "//dead" in url:
+                return ProbeResult(
+                    ProbeStatus.UNREACHABLE, ProbeReason.CONNECTION_ERROR
+                )
+            return OK
+
+    probe = Mixed()
+    targets = [target(f"d{n}", f"https://dead.example/{n}") for n in range(5)] + [
+        target("fine", "https://fine.example/")
+    ]
+
+    findings = await probe_targets(probe, targets)
+
+    assert len(probe.urls) == 4
+    assert findings[-1].status is ProbeStatus.REACHABLE
+
+
+async def test_a_success_or_another_failure_resets_the_host_failure_count() -> None:
+    answers = iter(
+        [ProbeReason.TIMEOUT, ProbeReason.TIMEOUT, ProbeReason.OK]
+        + [ProbeReason.TIMEOUT, ProbeReason.CLIENT_ERROR]
+        + [ProbeReason.TIMEOUT, ProbeReason.TIMEOUT]
+    )
+
+    class Scripted(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            await super().check(url)
+            reason = next(answers)
+            status = (
+                ProbeStatus.REACHABLE
+                if reason is ProbeReason.OK
+                else ProbeStatus.UNREACHABLE
+            )
+            return ProbeResult(status, reason)
+
+    probe = Scripted()
+    targets = [target(f"o{n}", f"https://same.example/{n}") for n in range(7)]
+
+    findings = await probe_targets(probe, targets)
+
+    assert len(probe.urls) == 7
+    assert all(f.reason is not ProbeReason.HOST_SKIPPED for f in findings)
+
+
+async def test_unfinished_targets_are_reported_as_not_checked_when_time_runs_out() -> (
+    None
+):
+    class Sleepy(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            if "fast" in url:
+                return OK
+            await asyncio.sleep(10)
+            return OK
+
+    targets = [target("a", "https://fast.example/")] + [
+        target(f"s{n}", f"https://slow{n}.example/") for n in range(4)
+    ]
+
+    started = asyncio.get_running_loop().time()
+    findings = await probe_targets(Sleepy(), targets, concurrency=5, max_seconds=0.05)
+
+    assert asyncio.get_running_loop().time() - started < 2
+    assert findings[0].status is ProbeStatus.REACHABLE
+    unfinished = findings[1:]
+    assert [f.reason for f in unfinished] == [ProbeReason.NOT_CHECKED] * 4
+    assert {f.status for f in unfinished} == {ProbeStatus.INCONCLUSIVE}
+    assert [f.offer_id for f in findings] == ["a", "s0", "s1", "s2", "s3"]
+
+
+async def test_staleness_compares_instants_not_wall_clock_digits() -> None:
+    earlier_but_later_digits = datetime(
+        2026, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=1))
+    )
+    later = datetime(2025, 12, 31, 23, 45, tzinfo=UTC)
+    store = FakeHealthStore(
+        sources=[
+            source("later", "https://a.example/1", later),
+            source("earlier", "https://a.example/2", earlier_but_later_digits),
+        ]
+    )
+
+    assert [t.offer_id for t in await targets_of(store)] == ["earlier", "later"]
+
+
+def test_the_repositorys_url_bearing_records_hide_their_urls_in_repr() -> None:
+    shown = repr(source("o1", "https://secret.example/x?t=1")) + repr(
+        link("o2", "l2", "https://secret.example/y?t=2", website="https://site.example")
+    )
+
+    assert "secret.example" not in shown and "site.example" not in shown
+    assert "t=1" not in shown and "t=2" not in shown
