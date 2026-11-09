@@ -4,8 +4,8 @@
 git-ignored ``.env`` in the working directory. That is right for ``uvicorn`` and for
 the management commands, but the test suite and the OpenAPI schema commands must give the
 same result on every machine, so they turn the file off before anything imports the
-settings by setting ``IGNORE_ENV_FILE=1`` (see ``tests/_env_isolation.py`` and
-``commands/generate_openapi_schema.py``). The variable is read from the process
+settings by setting ``IGNORE_ENV_FILE=1`` (see ``app/core/settings_environment.py``, which
+``tests/conftest.py`` and ``commands/generate_openapi_schema.py`` call). The variable is read from the process
 environment, so child processes inherit it.
 
 This module must stay free of imports from ``app`` so that Alembic can use it without

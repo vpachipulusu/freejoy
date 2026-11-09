@@ -5,14 +5,6 @@ from typing import Any
 
 from app.core.settings_environment import isolate_settings_environment
 
-# The schema is committed (ADR-008), so it must not depend on one developer's machine: a local
-# .env or an exported APP_NAME/APP_VERSION would change info.title and info.version. Nothing
-# else is needed either: the command runs in any shell, with no .env and nothing exported. This
-# must run before app.main builds the settings.
-isolate_settings_environment(os.environ)
-
-from app.main import app
-
 # Defaults to the frontend schema that the generated TypeScript client is built from
 # (ADR-008); set OPENAPI_OUTPUT_FILE to write elsewhere.
 DEFAULT_OUTPUT_FILE = (
@@ -22,6 +14,14 @@ OUTPUT_FILE = os.getenv("OPENAPI_OUTPUT_FILE") or DEFAULT_OUTPUT_FILE
 
 
 def generate_openapi_schema(output_file: str | Path) -> None:
+    # The schema is committed (ADR-008), so it must not depend on one developer's machine: a local
+    # .env or an exported APP_NAME/APP_VERSION would change info.title and info.version. Nothing
+    # else is needed either: the command runs in any shell, with no .env and nothing exported.
+    # The isolation has to come before app.main builds the settings, and importing this module
+    # does neither (the import below is deliberately here).
+    isolate_settings_environment(os.environ)
+    from app.main import app
+
     schema = app.openapi()
     output_path = Path(output_file)
 

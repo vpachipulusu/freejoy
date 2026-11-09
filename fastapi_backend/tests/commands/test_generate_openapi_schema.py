@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,7 +41,7 @@ def test_remove_operation_id_tag(sample_openapi_schema, expected_output_schema):
 
 @pytest.fixture
 def mock_app(mocker):
-    app = mocker.patch("commands.generate_openapi_schema.app")
+    app = mocker.patch("app.main.app")
     app.openapi.return_value = {
         "openapi": "3.1.0",
         "info": {"title": "FastAPI", "version": "0.1.0"},
@@ -129,3 +131,24 @@ def test_the_generated_schema_does_not_depend_on_exported_settings(
     exported = _generate(tmp_path, tmp_path / "exported.json", **EXPORTED_SETTINGS)
 
     assert exported == clean
+
+
+def test_importing_the_module_is_inert() -> None:
+    # Importing must not touch os.environ or build the settings: the isolation runs when the
+    # schema is generated, not when something merely imports the module.
+    code = (
+        "import os, sys\n"
+        "before = dict(os.environ)\n"
+        "import commands.generate_openapi_schema\n"
+        "assert dict(os.environ) == before, 'the import changed os.environ'\n"
+        "assert 'app.core.config' not in sys.modules, 'the import built the settings'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=from_scratch_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
