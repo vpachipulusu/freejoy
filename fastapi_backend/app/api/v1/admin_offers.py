@@ -2,7 +2,7 @@
 
 Permissions: ``offers.read`` for reads, ``offers.write`` for create, update and links,
 ``offers.publish`` for publish, unpublish, expire, archive and verify (they change what the
-public sees or the "Last checked" claim). Every read returns a ``review_token``; ``verify`` and
+public sees or the "Last checked" claim). The offer read (and every write's response) returns a ``review_token``; ``verify`` and
 ``publish`` require the one the editor loaded and answer 409 ``offer_changed`` when the offer or
 its links changed since (the other transitions do not need it). Every write stages its audit row in the same
 transaction (``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.

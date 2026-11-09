@@ -11,17 +11,19 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   them (category disabled, no destination left, ``end_at`` in the past) are refused.
 * ``verify`` and ``publish`` are the steps that say "a person reviewed this": they need the
   ``review_token`` the admin read returned (``offer_fingerprint.review_token``: a hash of the
-  reviewable content and the affiliate links) and refuse with ``OfferChanged`` when it no longer
-  matches. The token is recomputed after the offer row is locked, and every writer of the offer or
-  its links takes that lock first (editor edits, link edits, the Awin importer), so nothing can
-  change the offer between the check and the write. ``unpublish``, ``expire`` and ``archive`` only
-  take content off the public site (or end an offer's life), claim nothing was reviewed and need no
-  token.
+  offer's content, its links in click order and its merchant's and category's public fields) and
+  refuse with ``OfferChanged`` when it no longer matches. The token is recomputed after the offer
+  row is locked and the category and merchant are read FOR SHARE (lock order: offer, category,
+  merchant, as in publish). Writers of the offer or its links (editor edits, link edits, the Awin
+  importer, the expiry job) take the offer lock first and edits of the category or merchant take
+  their own row lock, so none can change what was compared before the transition commits.
+  ``unpublish``, ``expire`` and ``archive`` only take content off the public site (or end an
+  offer's life), claim nothing was reviewed and need no token.
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -37,6 +39,7 @@ from app.repositories.admin_offers import (
     OfferFilters,
     OfferPage,
     OfferRecord,
+    ReviewRefs,
 )
 from app.services.admin_catalogue_common import (
     AuditRecorder,
@@ -73,7 +76,7 @@ from app.services.offer_rules import (
     check_window,
 )
 
-__all__ = ["AdminOfferService", "OfferDetail", "OfferListItem", "OfferListing"]
+__all__ = ["AdminOfferService", "OfferDetail"]
 
 LINK_FIELDS = frozenset({"provider", "destination_url", "tracking_id", "active"})
 LINK_AUDITED = frozenset({"provider", "active"})
@@ -85,9 +88,9 @@ class OfferStore(Protocol):
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
     ) -> OfferPage: ...
-    async def list_links_by_offer(
-        self, offer_ids: Sequence[str]
-    ) -> dict[str, list[AffiliateLinkRecord]]: ...
+    async def review_refs(
+        self, category_id: str, merchant_id: str, *, share: bool = False
+    ) -> ReviewRefs: ...
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
@@ -110,22 +113,7 @@ class OfferStore(Protocol):
 class OfferDetail:
     offer: OfferRecord
     links: list[AffiliateLinkRecord]
-
-    @property
-    def review_token(self) -> str:
-        return compute_review_token(self.offer, self.links)
-
-
-@dataclass(frozen=True)
-class OfferListItem:
-    offer: OfferRecord
     review_token: str
-
-
-@dataclass(frozen=True)
-class OfferListing:
-    offers: list[OfferListItem]
-    total_count: int
 
 
 def _host(url: str) -> str:
@@ -157,19 +145,14 @@ class AdminOfferService:
 
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
-    ) -> OfferListing:
-        page = await self.store.list_offers(filters, *clamp_page(limit, offset))
-        links = await self.store.list_links_by_offer([o.id for o in page.offers])
-        items = [
-            OfferListItem(o, compute_review_token(o, links[o.id])) for o in page.offers
-        ]
-        return OfferListing(items, page.total_count)
+    ) -> OfferPage:
+        return await self.store.list_offers(filters, *clamp_page(limit, offset))
 
     async def get_offer(self, offer_id: str) -> OfferDetail:
         offer = await self.store.get(offer_id)
         if offer is None:
             raise CatalogueNotFound("offer")
-        return OfferDetail(offer, await self.store.list_links(offer_id))
+        return await self._detail(offer)
 
     async def create_offer(
         self, actor: AdminContext, data: Mapping[str, Any]
@@ -196,7 +179,7 @@ class AdminOfferService:
             after=_snapshot(created),
         )
         await self.session.commit()
-        return OfferDetail(created, [])
+        return await self._detail(created)
 
     async def update_offer(
         self, actor: AdminContext, offer_id: str, changes: Mapping[str, Any]
@@ -226,7 +209,7 @@ class AdminOfferService:
             details={"fields": sorted(values)},
         )
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return await self._detail(updated)
 
     async def transition(
         self,
@@ -258,7 +241,7 @@ class AdminOfferService:
             after={"status": target.value},
         )
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return await self._detail(updated)
 
     async def verify(
         self,
@@ -282,7 +265,7 @@ class AdminOfferService:
             details={"note": note} if note else None,
         )
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return await self._detail(updated)
 
     async def create_link(
         self, actor: AdminContext, offer_id: str, data: Mapping[str, Any]
@@ -373,12 +356,25 @@ class AdminOfferService:
             raise CatalogueNotFound("offer")
         return offer
 
+    async def _detail(self, offer: OfferRecord) -> OfferDetail:
+        """The offer with its links and the review token of exactly that snapshot."""
+        links = await self.store.list_links(offer.id)
+        refs = await self.store.review_refs(offer.category_id, offer.merchant_id)
+        return OfferDetail(offer, links, compute_review_token(offer, links, refs))
+
     async def _require_unchanged(self, locked: OfferRecord, token: str | None) -> None:
-        """The editor's token must match the offer and its links as they are under the row lock."""
+        """The editor's token must match what is stored now, read under the offer's row lock.
+
+        Order: links (the offer lock covers every writer of them), then the category and the merchant
+        FOR SHARE, so an edit of either waits for this transaction.
+        """
         if not token:
             raise InvalidInput("review_token_required")
         links = await self.store.list_links(locked.id)
-        if compute_review_token(locked, links) != token:
+        refs = await self.store.review_refs(
+            locked.category_id, locked.merchant_id, share=True
+        )
+        if compute_review_token(locked, links, refs) != token:
             raise OfferChanged()
 
     async def _require_references(self, category_id: str, merchant_id: str) -> None:

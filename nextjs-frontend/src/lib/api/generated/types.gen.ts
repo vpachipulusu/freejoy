@@ -2016,10 +2016,6 @@ export type OfferSummaryOut = {
      * Updated At
      */
     updated_at: string;
-    /**
-     * Review Token
-     */
-    review_token: string;
 };
 
 /**

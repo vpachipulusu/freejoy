@@ -583,7 +583,7 @@ async def test_a_partial_admin_sending_an_invalid_body_gets_403_not_422(
 # --- the review token ---------------------------------------------------------------------------
 
 
-async def test_the_detail_and_the_list_return_the_same_opaque_review_token(harness):
+async def test_the_detail_returns_an_opaque_review_token_and_the_list_does_not(harness):
     harness.offers.offers["off1"] = offer("off1")
     harness.offers.links["l1"] = link("l1")
 
@@ -592,7 +592,7 @@ async def test_the_detail_and_the_list_return_the_same_opaque_review_token(harne
         listed = (await client.get("/v1/admin/offers")).json()["data"]["offers"][0]
 
     assert len(detail["review_token"]) == 64
-    assert listed["review_token"] == detail["review_token"]
+    assert "review_token" not in listed
 
 
 async def test_publish_and_verify_without_a_token_are_422_and_change_nothing(harness):

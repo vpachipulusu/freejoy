@@ -1,4 +1,4 @@
-"""From a validated Awin promotion to the rows the catalogue stores, and the fingerprint of an edit.
+"""From a validated Awin promotion to the rows the catalogue stores.
 
 What an import writes, and what it deliberately does not:
 

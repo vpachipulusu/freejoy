@@ -163,19 +163,79 @@ async def test_a_missing_token_is_422_and_nothing_is_written(client, engine, wor
     assert await snapshot(engine) == before
 
 
-async def test_the_list_token_is_the_detail_token_and_works_for_verify(
+async def test_the_list_carries_no_token(client, engine, world):
+    headers, _url = world
+
+    listed = (await client.get(OFFERS, headers=headers)).json()["data"]["offers"][0]
+
+    assert "review_token" not in listed
+
+
+@pytest.mark.parametrize("step", ["publish", "verify"])
+@pytest.mark.parametrize(
+    ("kind", "patch"),
+    [
+        ("merchant", {"website": "https://www.elsewhere.example"}),
+        ("merchant", {"name": "Renamed Ltd"}),
+        ("merchant", {"logo_url": "https://cdn.example.com/logo.png"}),
+        ("category", {"name": "Renamed category"}),
+    ],
+    ids=["merchant-website", "merchant-name", "merchant-logo", "category-name"],
+)
+async def test_a_merchant_or_category_edit_after_loading_makes_it_409(
+    client, engine, world, step, kind, patch
+):
+    headers, url = world
+    await verified(client, headers, url)
+    stale = await review_token(client, headers, url)
+    offer = (await client.get(url, headers=headers)).json()["data"]
+    target = offer["merchant_id"] if kind == "merchant" else offer["category_id"]
+    collection = "merchants" if kind == "merchant" else "categories"
+    edited = await client.patch(
+        f"/v1/admin/{collection}/{target}", json=patch, headers=headers
+    )
+    assert edited.status_code == 200
+    before = await snapshot(engine)
+
+    result = await client.post(
+        f"{url}/{step}", json={"review_token": stale}, headers=headers
+    )
+
+    assert (result.status_code, result.json()["code"]) == CHANGED_CODE
+    assert await snapshot(engine) == before
+
+
+async def test_swapping_two_links_after_loading_makes_publish_409(
     client, engine, world
 ):
     headers, url = world
-    listed = (await client.get(OFFERS, headers=headers)).json()["data"]["offers"][0]
-    detail_token = await review_token(client, headers, url)
+    await verified(client, headers, url)
+    first = await client.post(f"{url}/links", json=LINK, headers=headers)
+    second = await client.post(
+        f"{url}/links",
+        json={**LINK, "destination_url": "https://www.awin1.com/c?x=9"},
+        headers=headers,
+    )
+    first_id, second_id = first.json()["data"]["id"], second.json()["data"]["id"]
+    stale = await review_token(client, headers, url)
+    for link_id, destination in (
+        (first_id, "https://www.awin1.com/c?x=9"),
+        (second_id, "https://www.awin1.com/c?x=1"),
+    ):
+        patched = await client.patch(
+            f"{url}/links/{link_id}",
+            json={"destination_url": destination},
+            headers=headers,
+        )
+        assert patched.status_code == 200
+    before = await snapshot(engine)
 
     result = await client.post(
-        f"{url}/verify", json={"review_token": listed["review_token"]}, headers=headers
+        f"{url}/publish", json={"review_token": stale}, headers=headers
     )
 
-    assert listed["review_token"] == detail_token
-    assert result.status_code == 200
+    assert (result.status_code, result.json()["code"]) == CHANGED_CODE
+    assert await snapshot(engine) == before
 
 
 async def test_taking_an_offer_down_needs_no_token_even_when_the_offer_changed(

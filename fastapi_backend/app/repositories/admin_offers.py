@@ -1,6 +1,5 @@
 """Queries behind the admin offers API. No business rules live here."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -64,6 +63,18 @@ class AffiliateLinkRecord:
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ReviewRefs:
+    """What a visitor sees of an offer's category and merchant (a field is None when the row is missing)."""
+
+    category_name: str | None
+    category_enabled: bool | None
+    merchant_name: str | None
+    merchant_website: str | None
+    merchant_logo_url: str | None
+    merchant_active: bool | None
 
 
 @dataclass(frozen=True)
@@ -171,6 +182,36 @@ class AdminOfferRepository(BaseRepository):
             .with_for_update(read=True)
         )
 
+    async def review_refs(
+        self, category_id: str, merchant_id: str, *, share: bool = False
+    ) -> ReviewRefs:
+        """The category and merchant fields a visitor sees, category first (the lock order).
+
+        With ``share`` both rows are read FOR SHARE, so a concurrent edit of either waits for this
+        transaction and the token compared under the offer's row lock cannot go stale before the commit.
+        """
+        category = select(Category.name, Category.enabled).where(
+            Category.id == category_id
+        )
+        merchant = select(
+            Merchant.name, Merchant.website, Merchant.logo_url, Merchant.active
+        ).where(Merchant.id == merchant_id)
+        if share:
+            category, merchant = (
+                category.with_for_update(read=True),
+                merchant.with_for_update(read=True),
+            )
+        found_category = (await self._session.execute(category)).first()
+        found_merchant = (await self._session.execute(merchant)).first()
+        return ReviewRefs(
+            category_name=found_category.name if found_category else None,
+            category_enabled=found_category.enabled if found_category else None,
+            merchant_name=found_merchant.name if found_merchant else None,
+            merchant_website=found_merchant.website if found_merchant else None,
+            merchant_logo_url=found_merchant.logo_url if found_merchant else None,
+            merchant_active=found_merchant.active if found_merchant else None,
+        )
+
     async def merchant_website(self, merchant_id: str) -> str | None:
         """The merchant's stored website, used to judge ``direct`` links."""
         return await self._session.scalar(
@@ -184,22 +225,6 @@ class AdminOfferRepository(BaseRepository):
             .order_by(AffiliateLink.created_at, AffiliateLink.id)
         )
         return [_link(row) for row in rows]
-
-    async def list_links_by_offer(
-        self, offer_ids: Sequence[str]
-    ) -> dict[str, list[AffiliateLinkRecord]]:
-        """The links of several offers in one query (an offer with none maps to an empty list)."""
-        grouped: dict[str, list[AffiliateLinkRecord]] = {i: [] for i in offer_ids}
-        if not offer_ids:
-            return grouped
-        rows = await self._session.scalars(
-            select(AffiliateLink)
-            .where(AffiliateLink.offer_id.in_(offer_ids))
-            .order_by(AffiliateLink.created_at, AffiliateLink.id)
-        )
-        for row in rows:
-            grouped[row.offer_id].append(_link(row))
-        return grouped
 
     async def count_active_links(self, offer_id: str) -> int:
         total = await self._session.scalar(

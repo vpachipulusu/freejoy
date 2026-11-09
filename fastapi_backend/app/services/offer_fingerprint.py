@@ -1,17 +1,18 @@
-"""The fingerprint of an offer: what a visitor reads and where a click goes, as one SHA-256 value.
+"""Two hashes of an offer: the importer's edit fingerprint and the admin's review token.
 
 ``fingerprint`` hashes every field an editor can change on an offer, its status and verification date,
 and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids, slugs,
-timestamps of the row or click counters). Two users of it:
+timestamps of the row or click counters). The Awin importer stores it as ``applied_content_hash`` each
+time it writes an offer; a later mismatch means a person changed the offer, so it is no longer an untouched
+import. Its bytes are a contract (stored hashes depend on them): ``tests/services/test_offer_fingerprint.py``
+pins the digest of a known offer. Bump ``FINGERPRINT_VERSION`` together with ``FINGERPRINT_FIELDS``: stored
+fingerprints then stop matching, which fails safe (nothing is refreshed).
 
-* The Awin importer stores it as ``applied_content_hash`` each time it writes an offer. A later mismatch
-  means a person changed the offer, so it is no longer an untouched import.
-* The admin API hands it out as the offer's ``review_token`` (``review_token``) and ``verify`` and
-  ``publish`` refuse a token that no longer matches, so an editor never approves content they did not see
-  (see ``admin_offers``).
-
-Bump ``FINGERPRINT_VERSION`` together with ``FINGERPRINT_FIELDS``: stored fingerprints then stop matching,
-which fails safe (nothing is refreshed) and an open review token goes stale (the editor reloads).
+``review_token`` is what the admin API hands out so that ``verify`` and ``publish`` apply to the version the
+editor read (see ``admin_offers``). It covers more than the fingerprint, because a visitor sees more than the
+offer row: the offer content (the fingerprint of the offer alone), its links in click order with their ids,
+and the merchant's and category's public fields. It is separate so the importer's hashes stay as they are.
+Bump ``REVIEW_TOKEN_VERSION`` when what it covers changes: open tokens go stale and editors reload.
 """
 
 import hashlib
@@ -20,15 +21,24 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
+from app.repositories.admin_offers import (
+    AffiliateLinkRecord,
+    OfferRecord,
+    ReviewRefs,
+)
 from app.services.offer_rules import EDITABLE_FIELDS
 
 FINGERPRINT_VERSION = 1
+REVIEW_TOKEN_VERSION = 1
 FINGERPRINT_FIELDS = tuple(sorted(EDITABLE_FIELDS | {"status", "last_verified_at"}))
 
 
 def _canonical(value: Any) -> Any:
     if isinstance(value, datetime):
+        if (
+            value.utcoffset() is None
+        ):  # a naive time would be read as the server's local time
+            raise TypeError("a naive datetime in a fingerprint")
         return value.astimezone(UTC).isoformat()
     raise TypeError(f"unexpected {type(value).__name__} in a fingerprint")
 
@@ -52,10 +62,38 @@ def fingerprint(offer: OfferRecord, links: Sequence[AffiliateLinkRecord]) -> str
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def review_token(offer: OfferRecord, links: Sequence[AffiliateLinkRecord]) -> str:
+def review_token(
+    offer: OfferRecord, links: Sequence[AffiliateLinkRecord], refs: ReviewRefs
+) -> str:
     """The opaque value an editor sends back to say "I reviewed this exact offer".
 
-    Not a secret and it reveals nothing the admin cannot already read: it is a one-way hash of
-    content the admin API returns beside it.
+    Links are hashed in click order, ``(created_at, id)`` (the first usable one decides where a click
+    goes), so swapping two destinations changes it. Not a secret, and it reveals nothing the admin cannot
+    already read: it is a one-way hash of content the admin API returns beside it.
     """
-    return fingerprint(offer, links)
+    state: Mapping[str, Any] = {
+        "v": REVIEW_TOKEN_VERSION,
+        "offer_id": offer.id,
+        "content": fingerprint(offer, ()),
+        "links": [
+            [
+                link.id,
+                link.provider,
+                link.destination_url,
+                link.tracking_id,
+                link.active,
+            ]
+            for link in sorted(links, key=lambda item: (item.created_at, item.id))
+        ],
+        "merchant": [
+            refs.merchant_name,
+            refs.merchant_website,
+            refs.merchant_logo_url,
+            refs.merchant_active,
+        ],
+        "category": [refs.category_name, refs.category_enabled],
+    }
+    payload = json.dumps(
+        state, sort_keys=True, separators=(",", ":"), default=_canonical
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

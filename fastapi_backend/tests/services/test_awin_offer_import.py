@@ -700,41 +700,6 @@ async def test_a_promotion_that_moves_to_another_advertiser_is_not_refreshed_und
     )  # no merchant was made for the new advertiser
 
 
-def test_the_fingerprint_fields_are_pinned_so_a_new_editable_field_is_a_deliberate_change() -> (
-    None
-):
-    from app.services.offer_fingerprint import FINGERPRINT_FIELDS, FINGERPRINT_VERSION
-
-    assert FINGERPRINT_VERSION == 1
-    assert FINGERPRINT_FIELDS == (
-        "availability",
-        "category_id",
-        "description",
-        "eligibility",
-        "end_at",
-        "featured",
-        "freshness",
-        "image_alt",
-        "image_label",
-        "image_tint",
-        "last_verified_at",
-        "merchant_id",
-        "offer_type",
-        "postage_amount_minor",
-        "postage_currency",
-        "postage_kind",
-        "publisher_notes",
-        "requires_card",
-        "source_url",
-        "start_at",
-        "status",
-        "steps",
-        "subscription_terms",
-        "summary",
-        "title",
-    )
-
-
 async def test_a_changed_source_url_is_held_back_and_never_written_in_place() -> None:
     db = FakeDatabase()
     await run(db, promotion())

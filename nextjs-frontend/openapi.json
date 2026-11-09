@@ -16051,10 +16051,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
-          },
-          "review_token": {
-            "type": "string",
-            "title": "Review Token"
           }
         },
         "type": "object",
@@ -16069,8 +16065,7 @@
           "featured",
           "end_at",
           "last_verified_at",
-          "updated_at",
-          "review_token"
+          "updated_at"
         ],
         "title": "OfferSummaryOut"
       },

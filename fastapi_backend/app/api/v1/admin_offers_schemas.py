@@ -26,8 +26,8 @@ from app.models.platform.offer import (
     OfferType,
     PostageKind,
 )
-from app.repositories.admin_offers import AffiliateLinkRecord
-from app.services.admin_offers import OfferDetail, OfferListItem
+from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
+from app.services.admin_offers import OfferDetail
 
 MAX_PARAGRAPHS = 20
 MAX_STEPS = 20
@@ -200,10 +200,10 @@ class OfferSummaryOut(BaseModel):
     end_at: datetime | None
     last_verified_at: datetime | None
     updated_at: datetime
-    review_token: str
 
 
 class OfferOut(OfferSummaryOut):
+    review_token: str
     summary: str
     description: list[str]
     image_tint: str
@@ -251,9 +251,8 @@ def link_out(record: AffiliateLinkRecord) -> AffiliateLinkOut:
     return AffiliateLinkOut(**record.__dict__)
 
 
-def summary_out(item: OfferListItem) -> OfferSummaryOut:
-    fields = {**item.offer.__dict__, "review_token": item.review_token}
-    return OfferSummaryOut.model_validate(fields)
+def summary_out(record: OfferRecord) -> OfferSummaryOut:
+    return OfferSummaryOut.model_validate(record, from_attributes=True)
 
 
 def offer_out(detail: OfferDetail) -> OfferOut:
