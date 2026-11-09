@@ -25,6 +25,7 @@ type OfferRowActionsProps = {
   offerId: string;
   offerTitle: string;
   status: OfferStatus;
+  reviewToken: string;
 };
 
 /**
@@ -32,7 +33,12 @@ type OfferRowActionsProps = {
  * Expire, Archive). The list is a hint: the API refuses anything the status table does not allow. While a step
  * runs the trigger is aria-disabled (it keeps focus) and a polite status says so.
  */
-export function OfferRowActions({ offerId, offerTitle, status }: OfferRowActionsProps) {
+export function OfferRowActions({
+  offerId,
+  offerTitle,
+  status,
+  reviewToken,
+}: OfferRowActionsProps) {
   const { run, isPending } = useOfferAction();
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -44,7 +50,7 @@ export function OfferRowActions({ offerId, offerTitle, status }: OfferRowActions
       setConfirmingArchive(true);
       return;
     }
-    run(offerId, action, offerTitle);
+    run(offerId, action, offerTitle, reviewToken);
   }
 
   return (
@@ -93,7 +99,7 @@ export function OfferRowActions({ offerId, offerTitle, status }: OfferRowActions
         open={confirmingArchive}
         onOpenChange={setConfirmingArchive}
         offerTitle={offerTitle}
-        onConfirm={() => run(offerId, 'archive', offerTitle)}
+        onConfirm={() => run(offerId, 'archive', offerTitle, reviewToken)}
         returnFocusTo={triggerRef}
       />
     </>

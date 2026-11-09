@@ -61,6 +61,7 @@ const OFFER_SUMMARY = {
   end_at: null,
   last_verified_at: '2026-01-02T00:00:00Z',
   updated_at: '2026-01-03T00:00:00Z',
+  review_token: 'a1b2c3-review-token',
 };
 
 const OFFER_OUT = {
@@ -175,23 +176,43 @@ describe('admin catalogue wrappers', () => {
     });
 
     it.each([
-      ['publish', '/v1/admin/offers/o1/publish'],
-      ['unpublish', '/v1/admin/offers/o1/unpublish'],
-      ['expire', '/v1/admin/offers/o1/expire'],
-      ['archive', '/v1/admin/offers/o1/archive'],
-      ['verify', '/v1/admin/offers/o1/verify'],
-    ] as const)('posts %s to its own route', async (action, path) => {
+      [{ action: 'publish', reviewToken: 'tok-1' }, '/v1/admin/offers/o1/publish'],
+      [{ action: 'unpublish' }, '/v1/admin/offers/o1/unpublish'],
+      [{ action: 'expire' }, '/v1/admin/offers/o1/expire'],
+      [{ action: 'archive' }, '/v1/admin/offers/o1/archive'],
+      [{ action: 'verify', reviewToken: 'tok-1' }, '/v1/admin/offers/o1/verify'],
+    ] as const)('posts %j to its own route', async (request, path) => {
       fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
-      await runAdminOfferAction('o1', action);
-      const request = fetchMock.mock.calls[0][0];
-      expect(request.method).toBe('POST');
-      expect(new URL(request.url).pathname).toBe(path);
+      await runAdminOfferAction('o1', request);
+      const sent = fetchMock.mock.calls[0][0];
+      expect(sent.method).toBe('POST');
+      expect(new URL(sent.url).pathname).toBe(path);
     });
 
-    it('sends an empty body with verify (the UI does not use the optional note)', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
-      await runAdminOfferAction('o1', 'verify');
-      expect(await fetchMock.mock.calls[0][0].json()).toEqual({});
+    it.each(['publish', 'verify'] as const)(
+      'sends the review token the admin loaded with %s (and no note: the UI does not use it)',
+      async (action) => {
+        fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
+        await runAdminOfferAction('o1', { action, reviewToken: 'tok-1' });
+        expect(await fetchMock.mock.calls[0][0].json()).toEqual({ review_token: 'tok-1' });
+      }
+    );
+
+    it.each(['unpublish', 'expire', 'archive'] as const)(
+      'sends no body with %s: taking an offer off the site needs no review token',
+      async (action) => {
+        fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
+        await runAdminOfferAction('o1', { action });
+        expect(await fetchMock.mock.calls[0][0].text()).toBe('');
+      }
+    );
+
+    it('hands the 409 offer_changed code back so the action can show its curated message', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({ success: false, error: 'backend words', code: 'offer_changed' }, 409)
+      );
+      const result = await runAdminOfferAction('o1', { action: 'publish', reviewToken: 'old' });
+      expect(result).toMatchObject({ success: false, status: 409, code: 'offer_changed' });
     });
 
     it('counts offers per status from the list totals, summing the total, without inventing numbers', async () => {
@@ -238,8 +259,10 @@ describe('admin catalogue wrappers', () => {
         categoryId: 'c1',
         lastVerifiedAt: '2026-01-02T00:00:00Z',
         status: 'PUBLISHED',
+        reviewToken: 'a1b2c3-review-token',
       });
       const detail = toOfferDetail(OFFER_OUT as never);
+      expect(detail.reviewToken).toBe('a1b2c3-review-token');
       expect(detail.steps).toEqual([
         { title: 'Go', detail: 'Click' },
         { title: '', detail: '' },

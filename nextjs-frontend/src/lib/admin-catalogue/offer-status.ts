@@ -33,6 +33,17 @@ export const OFFER_STATUS_ICONS: Partial<Record<OfferRowStatus, LucideIcon>> = {
 export const OFFER_ACTIONS = ['publish', 'unpublish', 'expire', 'archive', 'verify'] as const;
 export type OfferAction = (typeof OFFER_ACTIONS)[number];
 
+/**
+ * The steps that say "a person reviewed this exact offer": the API needs the review token of the offer as it was
+ * loaded and refuses (409 `offer_changed`) when it changed since. Taking an offer off the site needs none.
+ */
+export const REVIEWED_OFFER_ACTIONS = ['publish', 'verify'] as const;
+export type ReviewedOfferAction = (typeof REVIEWED_OFFER_ACTIONS)[number];
+
+export function isReviewedOfferAction(action: OfferAction): action is ReviewedOfferAction {
+  return (REVIEWED_OFFER_ACTIONS as readonly string[]).includes(action);
+}
+
 export const OFFER_ACTION_LABELS: Record<OfferAction, string> = {
   publish: 'Publish',
   unpublish: 'Unpublish',

@@ -58,7 +58,14 @@ describe('OfferRowActions', () => {
     ['ARCHIVED', ['Edit']],
   ])('offers the right steps for a %s offer', async (status, expected) => {
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status={status as 'DRAFT'} />);
+    render(
+      <OfferRowActions
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status={status as 'DRAFT'}
+      />
+    );
 
     const menu = await openMenu(user, 'Free coffee');
 
@@ -75,12 +82,16 @@ describe('OfferRowActions', () => {
 
   it('runs a step through the server action, announces it and refreshes', async () => {
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="DRAFT" />);
+    render(
+      <OfferRowActions offerId="o1" offerTitle="Free coffee" reviewToken="tok-1" status="DRAFT" />
+    );
 
     await openMenu(user, 'Free coffee');
     await user.click(screen.getByRole('menuitem', { name: 'Mark verified' }));
 
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'verify'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'verify', 'tok-1')
+    );
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith({
         title: 'Offer marked as verified',
@@ -96,7 +107,9 @@ describe('OfferRowActions', () => {
       error: 'This offer cannot be published yet: it has not been verified.',
     });
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="DRAFT" />);
+    render(
+      <OfferRowActions offerId="o1" offerTitle="Free coffee" reviewToken="tok-1" status="DRAFT" />
+    );
 
     await openMenu(user, 'Free coffee');
     await user.click(screen.getByRole('menuitem', { name: 'Publish' }));
@@ -112,7 +125,14 @@ describe('OfferRowActions', () => {
 
   it('asks before archiving, and archives only after confirmation', async () => {
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
+    render(
+      <OfferRowActions
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="PUBLISHED"
+      />
+    );
 
     await openMenu(user, 'Free coffee');
     await user.click(screen.getByRole('menuitem', { name: 'Archive' }));
@@ -129,7 +149,67 @@ describe('OfferRowActions', () => {
     await user.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive offer' })
     );
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive', 'tok-1')
+    );
+  });
+});
+
+describe('a publish or verify refused because the offer changed', () => {
+  const CHANGED = 'This offer changed since you opened it. Review it again.';
+
+  it.each(['Publish', 'Mark verified'])(
+    'the row menu shows the curated message and reloads the offer data (%s)',
+    async (label) => {
+      mocks.offerLifecycleAction.mockResolvedValue({ success: false, error: CHANGED });
+      const user = userEvent.setup();
+      render(
+        <OfferRowActions offerId="o1" offerTitle="Free coffee" reviewToken="tok-1" status="DRAFT" />
+      );
+
+      await openMenu(user, 'Free coffee');
+      await user.click(screen.getByRole('menuitem', { name: label }));
+
+      await waitFor(() =>
+        expect(mocks.toast).toHaveBeenCalledWith(
+          expect.objectContaining({ variant: 'destructive', description: CHANGED })
+        )
+      );
+      expect(mocks.refresh).toHaveBeenCalled();
+    }
+  );
+
+  it('the edit page buttons send the token they were given, and the new one after a refresh', async () => {
+    mocks.offerLifecycleAction.mockResolvedValue({ success: false, error: CHANGED });
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        status="DRAFT"
+        reviewToken="old-token"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenLastCalledWith('o1', 'publish', 'old-token')
+    );
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+
+    rerender(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        status="DRAFT"
+        reviewToken="new-token"
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenLastCalledWith('o1', 'publish', 'new-token')
+    );
   });
 });
 
@@ -137,7 +217,14 @@ describe('a server action call that throws', () => {
   it('toasts a curated failure instead of crashing', async () => {
     mocks.offerLifecycleAction.mockRejectedValue(new Error('SECRET'));
     const user = userEvent.setup();
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="DRAFT" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="DRAFT"
+      />
+    );
     await user.click(screen.getByRole('button', { name: 'Publish' }));
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith({
@@ -151,7 +238,14 @@ describe('a server action call that throws', () => {
 
 describe('OfferLifecycleButtons', () => {
   it('shows the steps as buttons in a named group', () => {
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="PUBLISHED"
+      />
+    );
     const group = screen.getByRole('group', { name: 'Offer status actions' });
     expect(
       within(group)
@@ -162,13 +256,29 @@ describe('OfferLifecycleButtons', () => {
 
   it('publishes through the server action', async () => {
     const user = userEvent.setup();
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="EXPIRED" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="EXPIRED"
+      />
+    );
     await user.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish', 'tok-1')
+    );
   });
 
   it('says an archived offer cannot change and offers no button', () => {
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="ARCHIVED" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="ARCHIVED"
+      />
+    );
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByText(/archived and cannot be changed/)).toBeInTheDocument();
   });
@@ -228,7 +338,9 @@ describe('while an action is in flight', () => {
     const pending = deferred<typeof ok>();
     mocks.offerLifecycleAction.mockReturnValue(pending.promise);
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="DRAFT" />);
+    render(
+      <OfferRowActions offerId="o1" offerTitle="Free coffee" reviewToken="tok-1" status="DRAFT" />
+    );
 
     const trigger = screen.getByRole('button', { name: 'Open menu for Free coffee' });
     await openMenu(user, 'Free coffee');
@@ -251,7 +363,14 @@ describe('while an action is in flight', () => {
 
   it('returns focus to the row trigger after the archive confirmation', async () => {
     const user = userEvent.setup();
-    render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
+    render(
+      <OfferRowActions
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="PUBLISHED"
+      />
+    );
     const trigger = screen.getByRole('button', { name: 'Open menu for Free coffee' });
 
     await openMenu(user, 'Free coffee');
@@ -260,7 +379,9 @@ describe('while an action is in flight', () => {
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive offer' })
     );
 
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive', 'tok-1')
+    );
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
@@ -268,7 +389,14 @@ describe('while an action is in flight', () => {
     const pending = deferred<typeof ok>();
     mocks.offerLifecycleAction.mockReturnValue(pending.promise);
     const user = userEvent.setup();
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="DRAFT" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="DRAFT"
+      />
+    );
 
     const publish = screen.getByRole('button', { name: 'Publish' });
     await user.dblClick(publish);
@@ -287,7 +415,14 @@ describe('while an action is in flight', () => {
 
   it('the lifecycle buttons return focus to Archive after the confirmation', async () => {
     const user = userEvent.setup();
-    render(<OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
+    render(
+      <OfferLifecycleButtons
+        offerId="o1"
+        offerTitle="Free coffee"
+        reviewToken="tok-1"
+        status="PUBLISHED"
+      />
+    );
     const archive = screen.getByRole('button', { name: 'Archive' });
 
     await user.click(archive);
@@ -295,7 +430,9 @@ describe('while an action is in flight', () => {
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive offer' })
     );
 
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'archive', 'tok-1')
+    );
     await waitFor(() => expect(archive).toHaveFocus());
   });
 
@@ -328,7 +465,12 @@ describe('beside a form with unsaved changes', () => {
     return (
       <DirtyFormProvider>
         <Reporter />
-        <OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="DRAFT" />
+        <OfferLifecycleButtons
+          offerId="o1"
+          offerTitle="Free coffee"
+          reviewToken="tok-1"
+          status="DRAFT"
+        />
       </DirtyFormProvider>
     );
   }
@@ -352,6 +494,8 @@ describe('beside a form with unsaved changes', () => {
     expect(publish).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     await user.click(publish);
-    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish'));
+    await waitFor(() =>
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith('o1', 'publish', 'tok-1')
+    );
   });
 });

@@ -22,6 +22,9 @@ type FailedResult = Extract<ApiResult<unknown>, { success: false }>;
 /** Resource ids go into URL paths: only the characters real ids contain are accepted. */
 export const resourceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
+/** The opaque review token of an offer goes into a request body: only its plain characters are accepted. */
+export const reviewTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+
 const SLUG_FOR_PATH = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Runs `action` only for a confirmed admin; everyone else gets the curated refusal and nothing is called. */

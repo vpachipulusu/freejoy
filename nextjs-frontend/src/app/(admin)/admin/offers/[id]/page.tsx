@@ -97,6 +97,7 @@ export default async function EditOfferPage({ params }: { params: Params }) {
             offerId={offer.id}
             offerTitle={offer.title}
             status={offer.status}
+            reviewToken={offer.reviewToken}
           />
         </div>
 

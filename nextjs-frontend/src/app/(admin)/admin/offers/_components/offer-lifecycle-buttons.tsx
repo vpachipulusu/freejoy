@@ -16,6 +16,7 @@ type OfferLifecycleButtonsProps = {
   offerId: string;
   offerTitle: string;
   status: OfferRowStatus;
+  reviewToken: string;
 };
 
 const DISABLED_STYLE = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
@@ -25,7 +26,12 @@ const DISABLED_STYLE = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-5
  * offer, so while the form beside them holds unsaved edits they wait (aria-disabled, with the reason written
  * out). While a step runs they are aria-disabled too, which keeps focus on the pressed button.
  */
-export function OfferLifecycleButtons({ offerId, offerTitle, status }: OfferLifecycleButtonsProps) {
+export function OfferLifecycleButtons({
+  offerId,
+  offerTitle,
+  status,
+  reviewToken,
+}: OfferLifecycleButtonsProps) {
   const { run, isPending } = useOfferAction();
   const dirty = useFormDirty();
   const [confirmingArchive, setConfirmingArchive] = useState(false);
@@ -46,7 +52,7 @@ export function OfferLifecycleButtons({ offerId, offerTitle, status }: OfferLife
   function choose(action: OfferAction): void {
     if (blocked) return;
     if (action === 'archive') setConfirmingArchive(true);
-    else run(offerId, action, offerTitle);
+    else run(offerId, action, offerTitle, reviewToken);
   }
 
   return (
@@ -77,7 +83,7 @@ export function OfferLifecycleButtons({ offerId, offerTitle, status }: OfferLife
         open={confirmingArchive}
         onOpenChange={setConfirmingArchive}
         offerTitle={offerTitle}
-        onConfirm={() => run(offerId, 'archive', offerTitle)}
+        onConfirm={() => run(offerId, 'archive', offerTitle, reviewToken)}
         returnFocusTo={archiveRef}
       />
     </>

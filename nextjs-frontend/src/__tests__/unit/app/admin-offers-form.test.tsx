@@ -513,7 +513,12 @@ describe('edit page: the form and the status buttons together', () => {
     const user = userEvent.setup();
     render(
       <DirtyFormProvider>
-        <OfferLifecycleButtons offerId="o1" offerTitle="Free coffee" status="DRAFT" />
+        <OfferLifecycleButtons
+          offerId="o1"
+          offerTitle="Free coffee"
+          reviewToken="tok-1"
+          status="DRAFT"
+        />
         <OfferForm
           mode="edit"
           offerId="o1"

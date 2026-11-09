@@ -194,6 +194,7 @@ describe('offerToFormValues', () => {
     endAt: '2026-05-01T12:00:00Z',
     lastVerifiedAt: null,
     updatedAt: '2026-01-01T00:00:00Z',
+    reviewToken: 'tok-1',
     summary: 'S',
     description: ['One', 'Two'],
     imageTint: 'mint',

@@ -5,6 +5,7 @@ import {
   OFFER_STATUSES,
   type OfferAction,
   type OfferRowStatus,
+  type ReviewedOfferAction,
   type OfferStatus,
 } from '@/lib/admin-catalogue/offer-status';
 import type {
@@ -77,21 +78,30 @@ export function patchAdminOffer(offerId: string, body: UpdateOfferRequest) {
   return callBackend((client) => adminUpdateOffer({ client, path: { offer_id: offerId }, body }));
 }
 
+/**
+ * A lifecycle call. Publish and verify say "a person reviewed this", so they carry the `review_token` of the
+ * offer the admin loaded; the backend answers 409 `offer_changed` when the offer or its links moved since. The
+ * steps that only take an offer off the public site carry nothing.
+ */
+export type OfferActionRequest =
+  | { action: ReviewedOfferAction; reviewToken: string }
+  | { action: Exclude<OfferAction, ReviewedOfferAction> };
+
 /** The lifecycle calls. (The API's optional verify note is not used by this UI.) */
-export function runAdminOfferAction(offerId: string, action: OfferAction) {
+export function runAdminOfferAction(offerId: string, request: OfferActionRequest) {
   const path = { offer_id: offerId };
   return callBackend((client) => {
-    switch (action) {
+    switch (request.action) {
       case 'publish':
-        return adminPublishOffer({ client, path });
+        return adminPublishOffer({ client, path, body: { review_token: request.reviewToken } });
+      case 'verify':
+        return adminVerifyOffer({ client, path, body: { review_token: request.reviewToken } });
       case 'unpublish':
         return adminUnpublishOffer({ client, path });
       case 'expire':
         return adminExpireOffer({ client, path });
       case 'archive':
         return adminArchiveOffer({ client, path });
-      case 'verify':
-        return adminVerifyOffer({ client, path, body: {} });
     }
   });
 }
@@ -135,6 +145,7 @@ export function toOfferRow(offer: OfferSummaryOut): OfferRowView {
     endAt: offer.end_at,
     lastVerifiedAt: offer.last_verified_at,
     updatedAt: offer.updated_at,
+    reviewToken: offer.review_token,
   };
 }
 
