@@ -27,6 +27,7 @@ from tests.fakes import (
     as_provider,
 )
 from tests.fakes_subscribers import (
+    HANG_GUARD_SECONDS,
     GatedEmailProvider,
     Harness,
     link_tokens,
@@ -218,8 +219,14 @@ async def test_the_response_is_complete_before_the_provider_is_called() -> None:
     # The provider is called by a background task once the response is out: wait for that
     # event, or for the app to end without calling it. No clock decides this.
     started = asyncio.create_task(provider.started.wait())
-    await asyncio.wait({started, finished}, return_when=asyncio.FIRST_COMPLETED)
-    assert started.done(), "the app finished without calling the provider"
+    await asyncio.wait(
+        {started, finished},
+        timeout=HANG_GUARD_SECONDS,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if not started.done():
+        started.cancel()
+        pytest.fail("the app ended or hung without calling the provider")
     assert provider.sent == []
     provider.release.set()
     await finished

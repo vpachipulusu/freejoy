@@ -595,6 +595,7 @@ async def test_non_member_write_does_not_wait_on_the_organisation_lock(
         finally:
             if not request.done():
                 request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
         response = request.result()
 
     assert response.status_code == 404
