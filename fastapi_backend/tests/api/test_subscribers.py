@@ -215,7 +215,11 @@ async def test_the_response_is_complete_before_the_provider_is_called() -> None:
 
     assert status == 202
     assert provider.sent == []
-    await asyncio.wait_for(provider.started.wait(), timeout=5)
+    # The provider is called by a background task once the response is out: wait for that
+    # event, or for the app to end without calling it. No clock decides this.
+    started = asyncio.create_task(provider.started.wait())
+    await asyncio.wait({started, finished}, return_when=asyncio.FIRST_COMPLETED)
+    assert started.done(), "the app finished without calling the provider"
     assert provider.sent == []
     provider.release.set()
     await finished

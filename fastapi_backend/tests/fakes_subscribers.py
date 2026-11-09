@@ -194,6 +194,11 @@ def link_tokens(text: str) -> dict[str, str]:
     return {kind: token for kind, token in LINK.findall(text)}
 
 
+# Only turns a hang into a failure (a route that awaited the provider would never answer while the
+# gate is closed). It is not a speed budget: a loaded machine finishes the request, just later.
+HANG_GUARD_SECONDS = 60
+
+
 async def post_json_returning_at_response(
     app: Callable[..., Awaitable[None]],
     path: str,
@@ -253,7 +258,9 @@ async def post_json_returning_at_response(
 
     task = asyncio.create_task(run())
     done = asyncio.create_task(response_complete.wait())
-    await asyncio.wait({task, done}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+    await asyncio.wait(
+        {task, done}, timeout=HANG_GUARD_SECONDS, return_when=asyncio.FIRST_COMPLETED
+    )
     done.cancel()
     if not response_complete.is_set():
         if task.done():

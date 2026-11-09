@@ -545,6 +545,28 @@ async def test_update_refreshes_updated_at(
     assert response.json()["data"]["updated_at"].startswith(stored.isoformat()[:19])
 
 
+# Only turns a hang into a failure. It is not a speed budget: the test decides by observing the
+# database (a statement waiting for the lock), so a slow machine cannot fail it.
+HANG_GUARD_SECONDS = 120
+LOCK_POLL_SECONDS = 0.05
+
+
+async def lock_waiters(engine: AsyncEngine) -> int:
+    """Backends of this database that are waiting for a lock right now."""
+    async with engine.connect() as connection:
+        return int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        )
+
+
 async def test_non_member_write_does_not_wait_on_the_organisation_lock(
     client: AsyncClient, engine: AsyncEngine
 ) -> None:
@@ -554,14 +576,25 @@ async def test_non_member_write_does_not_wait_on_the_organisation_lock(
         await holder.execute(
             text("SELECT id FROM organizations WHERE id = :o FOR UPDATE"), {"o": org_id}
         )
-
-        response = await asyncio.wait_for(
+        request = asyncio.create_task(
             client.patch(
                 f"/v1/organizations/{org_id}",
                 json={"name": "X"},
                 headers=as_user("eve"),
-            ),
-            timeout=5,
+            )
         )
+        try:
+            async with asyncio.timeout(HANG_GUARD_SECONDS):
+                # The request either finishes while the lock is still held, or it blocks on
+                # the lock and a waiting backend shows up. Neither depends on how fast it runs.
+                while not request.done():
+                    await asyncio.wait({request}, timeout=LOCK_POLL_SECONDS)
+                    assert request.done() or await lock_waiters(engine) == 0, (
+                        "a non-member write is waiting for the organisation row lock"
+                    )
+        finally:
+            if not request.done():
+                request.cancel()
+        response = request.result()
 
     assert response.status_code == 404
