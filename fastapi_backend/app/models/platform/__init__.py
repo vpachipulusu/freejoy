@@ -8,6 +8,7 @@ from app.models.platform.admin_user import AdminUser
 from app.models.platform.affiliate_link import AffiliateLink
 from app.models.platform.app_setting import AppSetting
 from app.models.platform.audit_log import AuditLog
+from app.models.platform.catalogue_import import MerchantImport, OfferImport
 from app.models.platform.category import Category
 from app.models.platform.click_event import ClickEvent, UserAgentClass
 from app.models.platform.email_subscriber import (
@@ -50,8 +51,10 @@ __all__ = [
     "Membership",
     "MembershipRole",
     "Merchant",
+    "MerchantImport",
     "Notification",
     "Offer",
+    "OfferImport",
     "OfferFreshness",
     "OfferStatus",
     "OfferType",
