@@ -60,8 +60,15 @@ opened it. Review it again."**, the page reloads (`router.refresh()` after every
 list and the offer page on that code) and **the form reloads too**: it follows the new data (`values` with
 `keepDirtyValues`), so it never shows the old content beside the new token, and a field the editor has typed in keeps
 what they typed. A lasting notice (`role="alert"`, beside the buttons) says "This offer changed since you opened it. This
-page now shows the latest version: review it again." until the editor's next successful action. It also appears when a
-reload brings a token other than the one the editor's own last save or step returned. The buttons wait while a save is
+page now shows the latest version: review it again." until the editor's next successful action. The page tracks one
+`seen` token, the last version the editor was shown (the token the page first loaded with). A save or a status step
+returns `reviewToken` (after it) and `previousReviewToken` (the state it replaced): when `previousReviewToken` is not
+`seen`, somebody else changed the offer first and the notice appears, then `seen` becomes `reviewToken`. A reload that
+brings a token other than `seen` (a refused step, a link edited elsewhere, a change while no write was in flight) raises it
+too. The editor's own save with nothing foreign in between raises nothing. Save is a full-form write, so a foreign
+offer-field edit made before the editor's Save is overwritten by it; the notice is how the editor learns it was there.
+After a save the form's saved values become its defaults with no field marked as typed in, so a later change to a field the
+editor saved earlier shows up in the form instead of the old text being kept. The buttons wait while a save is
 reloading into the page (they would hold the old token). The server action validates the token with Zod
 (`reviewTokenSchema`: plain characters, at most 128) and, without a usable one, sends nothing, logs a warning (the action
 name only, never the token) and shows the same message. Unpublish, Expire and Archive carry no token: taking an offer

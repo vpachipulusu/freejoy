@@ -134,7 +134,7 @@ that was read.
   deactivating or re-pointing one changes the token;
 - **the merchant**: name, website, logo URL and active flag (the website re-points `direct` links at click time, the
   name and logo are on the public page);
-- **the category**: name and enabled flag.
+- **the category**: name, short name (the public offer page shows both) and enabled flag.
 
 It does not cover slugs, `created_at`, `updated_at` or click counts. The editor's own and other admins' verifies (a new
 `last_verified_at`) and the expiry job (a new status) change it, which is intended: the editor reloads and sees the new
@@ -144,7 +144,10 @@ It is built in `app/services/offer_fingerprint.py` next to the Awin importer's `
 smaller value (offer fields and links without ids) that the importer stores as `applied_content_hash`. The two are
 separate functions so the importer's stored hashes never change when the token's coverage does:
 `tests/services/test_offer_fingerprint.py` pins the digest of a known offer. The token's own `REVIEW_TOKEN_VERSION` is
-bumped when its coverage changes (open tokens go stale and editors reload).
+bumped when its coverage changes (open tokens go stale and editors reload; it is 2 since the category short name joined).
+Both hashes refuse a naive datetime with a `TypeError` instead of reading it as local time. That refusal sits in the
+shared `_canonical`, so for that one input `fingerprint()` differs from what it did before; it is unreachable with stored
+data (every date column is `timestamptz`) and aware inputs hash as before.
 
 `verify` and `publish` require the token in the request body. In the service the order is: take the offer row lock
 (`SELECT ... FOR UPDATE`), read the links, read the category and then the merchant `FOR SHARE`, compute the token,
@@ -173,8 +176,19 @@ token), so they take no body. Edits (`PATCH`, links) are still last-write-wins.
 shows none of an offer's description, steps, links or source URL, so approving from it would approve content the editor
 never saw. The row menu's "Review" opens the offer's page, which does.
 
-A `verify` or `publish` response carries the new token, so a client that continues (verify, then publish) uses the one it
-just received. **Link writes (`POST` and `PATCH .../links`) return the link only**: re-read the offer for its new token.
+**Write responses carry two tokens.** `PATCH /v1/admin/offers/{id}`, `verify`, `publish`, `unpublish`, `expire` and
+`archive` return `review_token` (the state after the write) and `previous_review_token`: the token of the state the write
+replaced, computed under the same offer row lock (links, then category and merchant `FOR SHARE`) before anything is
+written. A client that loaded token `T` and gets a `previous_review_token` other than `T` knows somebody else changed the
+offer before its write, and that the response (and the page after it) already contains their change: the editor's own
+response token alone cannot show that, because it includes whatever the others did. For `verify` and `publish` the two
+are always equal to what the editor sent (a mismatch is the 409). The response token is also computed inside the
+transaction, before `commit()`, so a failure while computing it rolls the write back instead of following a commit
+(a test makes it fail and checks nothing was stored). A `verify` or `publish` response's `review_token` is the one a
+client that continues (verify, then publish) uses next. Reads, creates and link writes carry no `previous_review_token`. **Link writes (`POST` and `PATCH .../links`) return the link only**: re-read the offer for its new token. A `PATCH` of
+an offer is a **full-form** save from the admin UI: every field it sends is written, so an offer-field edit somebody else
+made after the editor loaded the page is overwritten by the editor's Save (links, merchant and category are not touched by
+it). The `previous_review_token` is how the UI tells the editor that a foreign change was there.
 
 ## Slugs
 
