@@ -70,6 +70,10 @@ written. `verify` never changes the status.
 | `EXPIRED` | `PUBLISHED` | - | - | `ARCHIVED` | stays `EXPIRED` |
 | `ARCHIVED` | - | - | - | - | - |
 
+The `expire` transition is also made, with no signed-in admin, by `commands.check_offer_health` for every `PUBLISHED`
+offer whose `end_at` has passed ([backend-offer-health.md](backend-offer-health.md)); it writes the same
+`admin.offers.expire` audit row with no `user_id` and `metadata.actor` set to the command.
+
 `ARCHIVED` is terminal: an archived offer cannot be edited, verified or given links (409). There is no unarchive
 route; restoring one is a database operation for now. The table is code (`TRANSITIONS` in
 `app/services/offer_lifecycle.py`) and is pinned by a test.

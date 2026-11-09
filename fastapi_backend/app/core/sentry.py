@@ -8,6 +8,7 @@ itself, so there is exactly one event per failure.
 """
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import sentry_sdk
@@ -137,6 +138,33 @@ def report_exception(exc: BaseException) -> None:
     """Report a handled-but-notable exception. A no-op when Sentry is off."""
     if sentry_sdk.is_initialized():
         sentry_sdk.capture_exception(exc)
+
+
+def report_message(
+    message: str,
+    *,
+    context_name: str,
+    context: Mapping[str, Any],
+    level: str = "warning",
+) -> bool:
+    """Send one event for something that is not an exception (a command's run summary).
+
+    ``context`` becomes ``contexts[context_name]`` and goes through ``scrub_event`` like every other
+    event. Keep the message constant so repeated runs group into one issue. Returns whether an event
+    was queued; a no-op (False) when Sentry is off.
+    """
+    if not sentry_sdk.is_initialized():
+        return False
+    with sentry_sdk.new_scope() as scope:
+        scope.set_context(context_name, dict(context))
+        sentry_sdk.capture_message(message, level=level, scope=scope)  # type: ignore[arg-type]
+    return True
+
+
+def flush_events(timeout: float = 5.0) -> None:
+    """Wait for queued events to be sent. A short-lived command calls this before it exits."""
+    if sentry_sdk.is_initialized():
+        sentry_sdk.flush(timeout=timeout)
 
 
 def init_sentry(

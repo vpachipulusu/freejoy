@@ -12,8 +12,10 @@ from app.core.config import Settings
 from app.core.logging import request_id_var
 from app.core.sentry import (
     FILTERED,
+    flush_events,
     init_sentry,
     report_exception,
+    report_message,
     scrub_breadcrumb,
     scrub_event,
     tag_request_id,
@@ -204,6 +206,39 @@ def test_scrub_adds_the_context_request_id_tag() -> None:
 def test_helpers_are_noops_when_sentry_is_off() -> None:
     tag_request_id("req-1")
     report_exception(RuntimeError("x"))  # must not raise
+
+
+def test_report_message_and_flush_do_nothing_when_sentry_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sentry_sdk, "is_initialized", lambda: False)
+
+    assert report_message("m", context_name="c", context={"a": 1}) is False
+    flush_events()  # must not raise
+
+
+def test_report_message_sends_one_scrubbed_event_with_the_context() -> None:
+    transport = RecordingTransport()
+    init_sentry(make_settings(SENTRY_DSN=DSN), transport=transport)
+
+    sent = report_message(
+        "Offer health check found problems",
+        context_name="offer_health",
+        context={
+            "unreachable": [{"offer_id": "o1", "reason": "dns_failure"}],
+            "api_token": "must-be-filtered",
+        },
+    )
+    flush_events()
+
+    assert sent is True
+    assert len(transport.events) == 1
+    event = transport.events[0]
+    assert event["message"] == "Offer health check found problems"
+    assert event["level"] == "warning"
+    context = event["contexts"]["offer_health"]
+    assert context["unreachable"] == [{"offer_id": "o1", "reason": "dns_failure"}]
+    assert context["api_token"] == FILTERED
 
 
 async def test_unhandled_exception_is_captured_once_with_context() -> None:
