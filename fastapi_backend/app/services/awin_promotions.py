@@ -59,7 +59,7 @@ _DATE = re.compile(
     r"(?:\.([0-9]{1,9}))?Z?",
     re.ASCII,
 )
-_NETWORK_HOSTS = frozenset().union(*PROVIDER_HOSTS.values())
+NETWORK_HOSTS = frozenset().union(*PROVIDER_HOSTS.values())
 MICROSECOND_DIGITS = 6
 
 
@@ -222,7 +222,7 @@ def _source_url(item: dict[str, Any]) -> str | None:
         url = validate_https_url(text)
     except InvalidUrl:
         raise _Reject(SkipReason.INVALID_URL) from None
-    if host_matches(urlsplit(url).hostname or "", _NETWORK_HOSTS):
+    if host_matches(urlsplit(url).hostname or "", NETWORK_HOSTS):
         raise _Reject(SkipReason.SOURCE_URL_ON_TRACKING_HOST)
     return url
 
