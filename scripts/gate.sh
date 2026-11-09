@@ -20,21 +20,38 @@ step() {  # step <name> <dir> <command...>
 }
 
 # The alembic cycle drops every table of the database it runs on, so GATE_TEST_DATABASE_URL must name a
-# local throwaway database: host localhost or 127.0.0.1 and a name ending in _test (any ?query is ignored).
-require_local_test_database() {  # require_local_test_database <url>
-  local url="${1%%\?*}" rest host name
-  rest="${url#*://}"; rest="${rest##*@}"
-  host="${rest%%/*}"; host="${host%%:*}"
-  name="${rest#*/}"; name="${name%%/*}"
-  case "$host" in localhost|127.0.0.1) ;; *)
-    echo "=== REFUSED: GATE_TEST_DATABASE_URL host '$host' is not localhost or 127.0.0.1; the gate rebuilds this database" | tee -a "$LOG"
-    exit 2 ;;
-  esac
-  case "$name" in ?*_test) ;; *)
-    echo "=== REFUSED: GATE_TEST_DATABASE_URL database '$name' does not end in _test; the gate rebuilds this database" | tee -a "$LOG"
-    exit 2 ;;
-  esac
+# local throwaway database: host localhost or 127.0.0.1 and a name ending in _test. Anything that two URL
+# parsers could read differently is refused rather than guessed at. Messages are fixed text: no part of the
+# URL (it holds a password) is ever printed. GATE_GUARD_ONLY=1 runs just this check (tests/test_gate_database_guard.py).
+refuse() {  # refuse <fixed reason>
+  local line="=== REFUSED: GATE_TEST_DATABASE_URL: $1; the gate rebuilds this database"
+  if [ "${GATE_GUARD_ONLY:-0}" = 1 ]; then echo "$line"; else echo "$line" | tee -a "$LOG"; fi
+  exit 2
 }
+
+require_local_test_database() {  # require_local_test_database <url>
+  local malformed="URL is not in a recognised form"
+  case "$1" in *://*) ;; *) refuse "$malformed" ;; esac            # a scheme is required
+  # A connection override in the query string would send the connection somewhere else.
+  local lower="${1,,}"
+  case "$lower" in *\?*host=*|*\?*hostaddr=*|*\?*database=*|*\?*dbname=*|*\?*port=*|*\?*user=*|*\?*password=*) refuse "$malformed" ;; esac
+  local url="${1%%\?*}" rest authority host name
+  rest="${url#*://}"
+  case "$rest" in */*) ;; *) rest="$rest/" ;; esac
+  authority="${rest%%/*}"; name="${rest#*/}"                       # the authority ends at the FIRST slash
+  case "$authority" in *@*@*) authority="" ;; esac                 # two '@': parsers disagree
+  case "$name" in *[@/#]*) name="" ;; esac                         # a plain database name only
+  host="${authority##*@}"
+  case "$host" in *:*:*) host="" ;; esac                           # IPv6 or a doubled port
+  host="${host%%:*}"
+  case "$host" in localhost|127.0.0.1) ;; *) refuse "host is not localhost or 127.0.0.1" ;; esac
+  case "$name" in ?*_test) ;; *) refuse "database name does not end in _test" ;; esac
+}
+
+if [ "${GATE_GUARD_ONLY:-0}" = 1 ]; then
+  require_local_test_database "$DB"
+  exit 0
+fi
 
 FE="$ROOT/nextjs-frontend"; BE="$ROOT/fastapi_backend"
 # The gate must give the same answer on every machine: the backend never reads a local
