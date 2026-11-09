@@ -42,6 +42,9 @@ def test_public_addresses_are_allowed(address: str) -> None:
         "239.255.255.255",
         "240.0.0.1",  # reserved
         "255.255.255.255",  # broadcast
+        "192.0.0.170",  # NAT64 discovery
+        "192.88.99.1",  # deprecated 6to4 relay anycast
+        "192.88.99.255",
     ],
 )
 def test_private_and_special_ipv4_addresses_are_refused(address: str) -> None:
@@ -70,6 +73,15 @@ def test_private_and_special_ipv4_addresses_are_refused(address: str) -> None:
         "::ffff:10.0.0.1",
         "::ffff:169.254.169.254",
         "::127.0.0.1",  # deprecated IPv4-compatible
+        "64:ff9b:1::1",  # local-use NAT64
+        "100::1",  # discard-only
+        "::ffff:0:127.0.0.1",  # IPv4-translated
+        "2001:10::1",  # deprecated ORCHID
+        "::ffff:100.64.0.1",  # mapped carrier-grade NAT
+        "::ffff:224.0.0.1",  # mapped multicast
+        "3fff::1",  # documentation (RFC 9637)
+        "3fff:fff:ffff::1",
+        "5f00::1",  # SRv6 SIDs
     ],
 )
 def test_private_and_special_ipv6_addresses_are_refused(address: str) -> None:

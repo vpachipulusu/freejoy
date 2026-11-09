@@ -23,11 +23,18 @@ _REFUSED_IPV6_NETWORKS = tuple(
         "2002::/16",  # 6to4
         "2001::/32",  # Teredo
         "fec0::/10",  # deprecated site-local
+        "3fff::/20",  # documentation (RFC 9637)
+        "5f00::/16",  # SRv6 segment identifiers
     )
 )
+_REFUSED_IPV4_NETWORKS = (
+    ipaddress.IPv4Network("192.88.99.0/24"),
+)  # deprecated 6to4 relay
 
 
 def _is_public_ipv4(address: ipaddress.IPv4Address) -> bool:
+    if any(address in network for network in _REFUSED_IPV4_NETWORKS):
+        return False
     return address.is_global and not (
         address.is_multicast or address.is_reserved or address.is_unspecified
     )
