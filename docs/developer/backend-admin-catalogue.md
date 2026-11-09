@@ -37,15 +37,15 @@ plus a stable `code` (below). Lists take `limit` (1 to 100) and `offset`.
 
 | Route | Permission | Notes |
 | --- | --- | --- |
-| `GET /v1/admin/offers` | `offers.read` | `search` (title, slug, summary; `%` and `_` are literal), `status`, `category_id`, newest update first |
+| `GET /v1/admin/offers` | `offers.read` | `search` (title, slug, summary; `%` and `_` are literal), `status`, `category_id`, newest update first. Each row carries its `review_token` |
 | `POST /v1/admin/offers` | `offers.write` | 201. Always creates a `DRAFT`. `slug` optional |
-| `GET /v1/admin/offers/{id}` | `offers.read` | Offer with its affiliate links (admin view: includes `destination_url` and `publisher_notes`) |
+| `GET /v1/admin/offers/{id}` | `offers.read` | Offer with its affiliate links (admin view: includes `destination_url` and `publisher_notes`) and its `review_token` |
 | `PATCH /v1/admin/offers/{id}` | `offers.write` | Partial. The slug and the status cannot be changed; nullable fields clear with `null` |
-| `POST /v1/admin/offers/{id}/publish` | `offers.publish` | See the publish rules |
-| `POST /v1/admin/offers/{id}/unpublish` | `offers.publish` | `PUBLISHED` to `DRAFT` |
-| `POST /v1/admin/offers/{id}/expire` | `offers.publish` | `PUBLISHED` to `EXPIRED` |
-| `POST /v1/admin/offers/{id}/archive` | `offers.publish` | Terminal |
-| `POST /v1/admin/offers/{id}/verify` | `offers.publish` | Sets `last_verified_at` to now. Optional body `{"note"}` (audit only) |
+| `POST /v1/admin/offers/{id}/publish` | `offers.publish` | Body `{"review_token"}` (required). See the publish rules and [the review token](#the-review-token) |
+| `POST /v1/admin/offers/{id}/unpublish` | `offers.publish` | `PUBLISHED` to `DRAFT`. No body |
+| `POST /v1/admin/offers/{id}/expire` | `offers.publish` | `PUBLISHED` to `EXPIRED`. No body |
+| `POST /v1/admin/offers/{id}/archive` | `offers.publish` | Terminal. No body |
+| `POST /v1/admin/offers/{id}/verify` | `offers.publish` | Sets `last_verified_at` to now. Body `{"review_token", "note"?}` (`review_token` required; the note is audit only) |
 | `POST /v1/admin/offers/{id}/links` | `offers.write` | 201. `provider`, `destination_url`, `tracking_id?`, `active?` |
 | `PATCH /v1/admin/offers/{id}/links/{link_id}` | `offers.write` | Links are deactivated, never deleted (click counts keep their link) |
 | `GET /v1/admin/categories`, `GET .../{id}` | `offers.read` | `search`, `enabled` |
@@ -115,6 +115,47 @@ That is a product and SEO decision made here; revisit it if search engines shoul
 **Concurrent edits.** `PATCH` is last-write-wins. Optimistic concurrency (an `updated_at` precondition) can be added
 with the admin UI story. Status changes are serialised by the offer row lock.
 
+## The review token
+
+**The problem.** An editor opens an offer, reads it, and presses Mark verified or Publish. In between, the Awin
+importer (see [backend-awin-import.md](backend-awin-import.md)) or another admin may have changed its text or the
+destination of a link, so the editor would approve something they never read. `verify` is a public claim ("Last
+checked") and `publish` makes the offer live, so both must apply to the version that was read.
+
+**The design.** Every admin offer read (`GET /v1/admin/offers/{id}`, each row of `GET /v1/admin/offers`, and the offer
+returned by every write) carries `review_token`: a SHA-256 hex digest of what a visitor sees and where a click goes.
+It is **derived, not stored**, so there is no column and no migration. It reuses the Awin importer's fingerprint
+(`app/services/offer_fingerprint.py`, `fingerprint`; the importer stores the same value as `applied_content_hash`), so
+there is one definition of "this offer changed". It covers every editable field (`EDITABLE_FIELDS`), the status and
+`last_verified_at`, and each affiliate link's provider, destination, tracking id and active flag. It does not cover
+ids, slugs, `created_at`, `updated_at` or click counts. Link order and the timezone a date is written in do not matter.
+A link added, deactivated or re-pointed changes it; so does another admin's verify (a new `last_verified_at`) or the
+expiry job (a new status), which is intended: the editor reloads and sees the new state.
+
+`verify` and `publish` require the token in the request body. In the service the order is: take the offer row lock
+(`SELECT ... FOR UPDATE`), read the links, compute the token, compare, then write and audit. Every writer of an offer or
+its links takes that row lock first (admin edits, link create and update, the Awin importer's refresh, the expiry job),
+so a concurrent write waits for the transition's commit, or the transition waits for it and then sees the change.
+Nothing can slip in between the check and the write. A mismatch raises before anything is written: **409
+`offer_changed`**, no state change and no audit row. A missing, empty or malformed body field is a 422 (`Invalid
+request`) and a well-formed token that does not match is the 409. The token is not a secret (it is a one-way hash of
+content the same response returns, so it leaks nothing the admin cannot already read), so it is compared with plain
+equality.
+
+**Which transitions need it.** Only the ones that make or keep content public as "reviewed": `publish` (this includes
+re-publishing an `EXPIRED` offer) and `verify`. There is no separate schedule or approve step. `unpublish`, `expire` and
+`archive` only take content off the public site or end an offer's life, claim nothing was reviewed, and must stay
+possible for an editor who is looking at an out-of-date page (taking down a bad offer must never be blocked by a stale
+token), so they take no body. Edits (`PATCH`, links) are still last-write-wins.
+
+**The list.** `verify` and `publish` can also be pressed from the list's row menu, so each list row carries a token
+(computed from one extra query for the links of the page's offers). A token from the list approves the offer as the
+list read it, which is less than a person read from the editor page; the guarantee is still "nothing changed since the
+screen you clicked on was loaded".
+
+After a `verify` or `publish` the response carries the new token, so a client that continues (verify, then publish)
+uses the one it just received. The admin UI reloads after every action and passes the new token to its buttons.
+
 ## Slugs
 
 `app/core/slugs.py`: `slugify` folds accents, turns every other run of characters into one hyphen and cuts at 80
@@ -144,8 +185,9 @@ suite.
 | 404 | `not_found` | Unknown offer, link, category or merchant |
 | 409 | `slug_taken` | The slug exists |
 | 409 | `illegal_transition` | The status table refuses the action, or the offer is archived and edited |
+| 409 | `offer_changed` | `verify` or `publish` carried a `review_token` that no longer matches the offer and its links: nothing was written |
 | 422 | `publish_blocked` | A publish rule is unmet |
-| 422 | `invalid_url`, `invalid_slug`, `invalid_postage`, `invalid_window`, `unknown_category`, `unknown_merchant` | A value the service rejects |
+| 422 | `invalid_url`, `invalid_slug`, `invalid_postage`, `invalid_window`, `unknown_category`, `unknown_merchant`, `review_token_required` | A value the service rejects |
 | 422 | none | Schema validation (`Invalid request`): unknown fields, wrong types, control characters, lengths |
 
 `postage_amount_minor` and `postage_currency` (3 upper-case letters) are present exactly when `postage_kind` is
@@ -175,6 +217,9 @@ writes nothing and stages no audit row. Denied requests write no row.
 - `tests/api/test_admin_catalogue_e2e.py`, `test_admin_categories_merchants_e2e.py`: real Postgres through the
   Alembic migrations (helpers in `tests/catalogue_e2e_support.py`); they run only with `TEST_DATABASE_URL`.
 - `tests/api/test_admin_catalogue_locks_e2e.py`: publish against a concurrent category disable or merchant
-  deactivate, two sessions.
+  deactivate, and against an uncommitted offer or link edit (publish waits, then fails with `offer_changed`), two sessions.
+- `tests/services/test_admin_offers_review_token.py` (the token: what it covers and ignores, stale, missing, taken under the
+  lock, list tokens), `tests/api/test_admin_offer_review_token_e2e.py` (the 409 against Postgres after an admin edit or a
+  link change, nothing written) and the importer path in `tests/commands/test_import_awin_offers_e2e.py`.
 - `tests/services/test_admin_catalogue_atomicity.py`: slug races (unique violation, with and without `__cause__`) and
   a failing audit write, deterministic and without a database.

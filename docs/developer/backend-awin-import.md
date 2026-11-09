@@ -191,6 +191,10 @@ On each item the importer compares hashes, in this order:
 | Source changed (or a marker is pending), anything else (edited, published, expired, archived, **or only the tracking URL moved, or the advertiser changed**) | **Content is never written.** `source_hash` is updated and `source_changed_at` is set (`source_changed`, audit `admin.offers.source_changed`), so a later review queue can list `WHERE source_changed_at IS NOT NULL`. If the source returns to what the offer reflects, the marker is cleared; if the editor reverts every edit, the next run
 refreshes the offer with the pending source. A change already recorded is not noted or audited again. |
 
+The fingerprint lives in `app/services/offer_fingerprint.py` (`fingerprint`, `FINGERPRINT_FIELDS`, `FINGERPRINT_VERSION`), shared with the
+admin API, which hands the same value out as an offer's `review_token`. Bumping `FINGERPRINT_VERSION` makes every stored
+fingerprint and every open token stop matching: nothing is refreshed and editors reload.
+
 **Why a fingerprint and not `updated_at`.** `updated_at` also moves for the importer's own writes and for housekeeping
 that is not an edit (expiry, `last_verified_at` bookkeeping), so comparing it would either miss edits or treat every
 refresh as an edit. The fingerprint changes exactly when a person changes what the offer says or where its links go.
@@ -311,11 +315,15 @@ Awin's page does not document these. Each is handled defensively; the **first dr
 
 ## Known limits
 
-- **The text of an untouched draft can still be refreshed during a review.** An editor who has read an imported draft
-  may find the importer rewrote its title, summary, description, terms or dates (it was still an untouched import)
-  before they clicked verify. A moved tracking link is never written, but text can be. So **do not run the importer while
-  imported drafts are being reviewed**. The complete fix is a review token on the admin verify and publish actions
-  ("verify the version I read"), which is a separate story, out of scope here.
+- **The text of an untouched draft can still be refreshed during a review, but it can no longer be approved unseen.**
+  An editor who has read an imported draft may find the importer rewrote its title, summary, description, terms or dates
+  (it was still an untouched import) before they clicked verify. A moved tracking link is never written, but text can
+  be. Since FREEJ-47 the admin verify and publish actions require the offer's `review_token` (the same fingerprint this
+  importer stores as `applied_content_hash`, see [backend-admin-catalogue.md](backend-admin-catalogue.md#the-review-token))
+  and answer 409 `offer_changed`, writing nothing, when the offer or its links changed since the editor loaded it. The
+  importer takes the offer row lock before it refreshes, as the transition does before it compares, so the two cannot
+  interleave. The editor reloads, reads the refreshed text and verifies again. It remains kinder to the editor not to run
+  the importer while drafts are being reviewed: each refresh costs them a reload.
 - **Growth.** Nothing bounds the number of drafts and merchants across runs, only within one: a run creates at most
   `--limit` new offers and merchants (the item cap). Repeated runs against a feed that keeps adding promotions keep adding
   drafts.
@@ -343,10 +351,10 @@ Awin's page does not document these. Each is handled defensively; the **first dr
 output, `repr`, exceptions and `__cause__`; every status, retry, `Retry-After`, redirect, size cap, malformed JSON, every
 envelope, deadlines, `trust_env`), `test_call_limiter.py` (never more than 20 in any 60 s, fake clock),
 `test_plain_text.py`; `tests/services/test_awin_promotions.py` (every rejection, look-alike hosts, dates, lengths),
-`test_awin_offer_mapping.py` (fingerprint per editable field), `test_awin_offer_import.py` (create, idempotency, refresh,
+`test_awin_offer_mapping.py` and `test_awin_offer_import.py` (the fingerprint per editable field and its pinned field list), `test_awin_offer_import.py` (create, idempotency, refresh,
 the protection cases, merchants, slugs, audit), `test_awin_import_run.py` (paging, limits, batching, failure accounting,
 dry run); `tests/commands/test_import_awin_offers.py` (flags, output, exit codes, settings, Sentry content and
 ordering); `tests/commands/test_import_awin_offers_e2e.py` against Postgres (migration and constraints, cascades,
-downgrade, upserts, audit rows, the real admin edit and publish paths, simultaneous runs, a failing batch, a held row
+downgrade, upserts, audit rows, the real admin edit and publish paths, an importer refresh making an editor's review token stale, simultaneous runs, a failing batch, a held row
 lock, and subprocess runs of the CLI with a fake client in a process whose non-loopback connections are blocked,
 `tests/commands/awin_cli_runner.py`). The e2e file runs only with `TEST_DATABASE_URL` set to a local `*_test` database.
