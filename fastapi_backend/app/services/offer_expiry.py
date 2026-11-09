@@ -63,7 +63,9 @@ async def _expire_batch(
 ) -> None:
     for offer in due:
         next_status(offer.status, OfferAction.EXPIRE)  # raises unless PUBLISHED
-    await store.mark_expired([offer.id for offer in due])
+    changed = await store.mark_expired([offer.id for offer in due])
+    if changed != len(due):
+        raise RuntimeError("expired row count mismatch")
     for offer in due:
         await auditor.record_system_action(
             SOURCE,

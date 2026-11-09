@@ -1,5 +1,6 @@
 """``expire_ended_offers``: which offers move to EXPIRED, how they are audited and batched."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -162,3 +163,21 @@ async def test_an_offer_that_is_not_published_is_refused_by_the_lifecycle_rules(
         await expire_ended_offers(WrongStore(), committer, FakeAuditor(), NOW)
 
     assert raised.value.expired == 0 and committer.commits == 0
+
+
+async def test_a_row_count_mismatch_rolls_the_batch_back() -> None:
+    class ShortStore(FakeHealthStore):
+        async def mark_expired(self, offer_ids: Sequence[str]) -> int:
+            await super().mark_expired(offer_ids)
+            return len(offer_ids) - 1
+
+    ended = NOW - timedelta(days=1)
+    store = ShortStore([offer(f"o{n}", P, ended) for n in range(3)])
+    auditor, committer = FakeAuditor(), FakeCommitter()
+
+    with pytest.raises(ExpiryFailed) as raised:
+        await expire_ended_offers(store, committer, auditor, NOW)
+
+    assert raised.value.expired == 0
+    assert committer.commits == 0 and auditor.calls == []
+    assert "mismatch" in str(raised.value.__cause__)
