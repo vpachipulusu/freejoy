@@ -1,5 +1,6 @@
 """``commands.check_offer_health``: flags, output, exit codes, Sentry summary. No socket, no database."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -15,7 +16,12 @@ from app.core.url_probe import ProbeReason, ProbeResult, ProbeStatus
 from app.models.platform.offer import OfferStatus
 from app.repositories.offer_health import DirectLinkTarget, DueOffer, SourceUrlTarget
 from commands import check_offer_health as command
-from commands.check_offer_health import Unit, build_user_agent, report_to_sentry
+from commands.check_offer_health import (
+    FAILURE_MESSAGE,
+    Unit,
+    build_user_agent,
+    report_to_sentry,
+)
 from tests.fakes_offer_health import (
     FakeAuditor,
     FakeCommitter,
@@ -74,11 +80,13 @@ def probe_with_problems() -> FakeUrlProbe:
 class Reporter:
     def __init__(self, raises: Exception | None = None) -> None:
         self.contexts: list[Mapping[str, Any]] = []
+        self.messages: list[str] = []
         self._raises = raises
 
-    def __call__(self, context: Mapping[str, Any]) -> None:
+    def __call__(self, message: str, context: Mapping[str, Any]) -> None:
         if self._raises is not None:
             raise self._raises
+        self.messages.append(message)
         self.contexts.append(context)
 
 
@@ -115,10 +123,12 @@ def test_a_run_expires_ended_offers_checks_urls_and_prints_counts(
 
 def test_unreachable_destinations_do_not_change_the_exit_code_or_any_offer() -> None:
     store = store_with(ended=0)
+    before = (dict(store.status), list(store.sources), list(store.links))
 
     code = run([], store, probe_with_problems())
 
     assert code == 0
+    assert (store.status, store.sources, store.links) == before
     assert store.expired_batches == []
 
 
@@ -163,6 +173,9 @@ def test_a_rerun_expires_nothing(capsys: pytest.CaptureFixture[str]) -> None:
         ["--batch-size", "0"],
         ["--concurrency", "0"],
         ["--concurrency", "21"],
+        ["--limit", "5001"],
+        ["--batch-size", "1001"],
+        ["--max-seconds", "0"],
     ],
 )
 def test_out_of_range_values_are_refused_with_exit_2(
@@ -317,7 +330,7 @@ def settings_with(dsn: str | None) -> Settings:
 
 
 def test_without_a_dsn_the_sentry_reporter_sends_nothing() -> None:
-    assert report_to_sentry({"expired": 1}, settings_with(None)) is False
+    assert report_to_sentry("m", {"expired": 1}, settings_with(None)) is False
 
 
 def test_with_a_dsn_the_sentry_reporter_sends_one_summary_event() -> None:
@@ -326,7 +339,9 @@ def test_with_a_dsn_the_sentry_reporter_sends_one_summary_event() -> None:
     transport = RecordingTransport()
     context = {"expired": 1, "findings": [{"offer_id": "o2", "reason": "dns_failure"}]}
     try:
-        sent = report_to_sentry(context, settings_with(DSN), transport=transport)
+        sent = report_to_sentry(
+            command.EVENT_MESSAGE, context, settings_with(DSN), transport=transport
+        )
     finally:  # leave Sentry off for every later test, whichever scope holds the client
         for scope in (
             sentry_sdk.get_global_scope(),
@@ -340,3 +355,204 @@ def test_with_a_dsn_the_sentry_reporter_sends_one_summary_event() -> None:
     event = transport.events[0]
     assert event["message"] == command.EVENT_MESSAGE
     assert event["contexts"]["offer_health"]["findings"][0]["offer_id"] == "o2"
+
+
+def failing_units(error: Exception) -> Any:
+    @asynccontextmanager
+    async def open_unit() -> AsyncIterator[Unit]:
+        raise error
+        yield  # pragma: no cover
+
+    return open_unit
+
+
+def test_an_unexpected_error_opening_the_database_exits_1_without_leaking_its_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = command.main(
+        [],
+        units=failing_units(ConnectionError("password=hunter2 host=db.internal")),
+        probe=FakeUrlProbe(),
+        reporter=Reporter(),
+        now=NOW,
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "ConnectionError" in err and "0 offer(s) were already expired" in err
+    assert "hunter2" not in err and "db.internal" not in err
+
+
+def test_a_failure_while_checking_urls_exits_1_and_keeps_the_expired_count(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(*_: Any, **__: Any) -> list[Any]:
+        raise OSError("socket path /private/x")
+
+    monkeypatch.setattr(command, "probe_targets", broken)
+
+    code = run([], store_with(ended=2))
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "2 offer(s) were already expired" in err and "while checking URLs" in err
+    assert "OSError" in err and "/private/x" not in err
+
+
+def test_a_failing_engine_close_cannot_turn_a_finished_run_into_a_failure() -> None:
+    class BadEngine:
+        async def dispose(self) -> None:
+            raise RuntimeError("close failed")
+
+    args = command._parse(["--skip-reachability"])
+
+    result = asyncio.run(
+        command._run(units_for(store_with(ended=1)), args, None, NOW, BadEngine())  # type: ignore[arg-type]
+    )
+
+    assert result.expired == 1
+
+
+def test_a_failed_run_sends_one_event_with_only_stage_cause_and_count() -> None:
+    reporter = Reporter()
+
+    code = command.main(
+        ["--batch-size", "2"],
+        units=units_for(store_with(ended=5), auditor=FakeAuditor(fail_on=3)),
+        probe=FakeUrlProbe(),
+        reporter=reporter,
+        now=NOW,
+    )
+
+    assert code == 1
+    assert reporter.messages == [FAILURE_MESSAGE]
+    assert reporter.contexts == [
+        {"stage": "while expiring offers", "cause": "RuntimeError", "expired": 2}
+    ]
+
+
+def test_a_successful_run_sends_no_failure_event() -> None:
+    reporter = Reporter()
+
+    run([], store_with(ended=1), FakeUrlProbe(), reporter)
+
+    assert FAILURE_MESSAGE not in reporter.messages
+
+
+def test_a_failing_reporter_does_not_change_the_failure_exit_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = command.main(
+        [],
+        units=failing_units(ConnectionError("x")),
+        probe=FakeUrlProbe(),
+        reporter=Reporter(raises=RuntimeError("dsn=https://k@s.example/1")),
+        now=NOW,
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1 and "could not send the Sentry event (RuntimeError)" in err
+    assert "s.example" not in err
+
+
+def test_sentry_is_not_initialised_while_requests_are_made() -> None:
+    import sentry_sdk
+
+    for scope in (
+        sentry_sdk.get_global_scope(),
+        sentry_sdk.get_isolation_scope(),
+        sentry_sdk.get_current_scope(),
+    ):
+        scope.client = None  # type: ignore[assignment]
+    seen: list[bool] = []
+
+    class Watching(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            seen.append(sentry_sdk.is_initialized())
+            return await super().check(url)
+
+    run([], store_with(), Watching())
+
+    assert seen and not any(seen)
+
+
+def test_the_summary_counts_tracking_hosts_that_were_never_requested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = FakeHealthStore(
+        sources=[
+            SourceUrlTarget("o1", "https://www.awin1.com/cread.php?x=1", NOW),
+            SourceUrlTarget("o2", "https://a.example/ok", NOW),
+        ]
+    )
+    probe = FakeUrlProbe()
+
+    code = run([], store, probe)
+
+    assert code == 0
+    assert probe.urls == ["https://a.example/ok"]
+    assert (
+        "1 URL(s) on a network tracking host were never requested"
+        in capsys.readouterr().out
+    )
+
+
+def test_max_seconds_stops_the_checks_and_reports_what_was_not_checked(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Sleepy(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            await asyncio.sleep(30)
+            return await super().check(url)
+
+    code = run(["--max-seconds", "1"], store_with(), Sleepy())
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "4 not checked: the --max-seconds limit was reached" in out
+
+
+def test_a_host_that_keeps_failing_is_reported_as_skipped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = FakeHealthStore(
+        sources=[
+            SourceUrlTarget(f"o{n}", f"https://dead.example/{n}", NOW) for n in range(6)
+        ]
+    )
+
+    class TimingOut(FakeUrlProbe):
+        async def check(self, url: str) -> ProbeResult:
+            await super().check(url)
+            return ProbeResult(ProbeStatus.UNREACHABLE, ProbeReason.TIMEOUT)
+
+    probe = TimingOut()
+
+    code = run([], store, probe)
+
+    assert code == 0 and len(probe.urls) == 3
+    assert "3 not requested after 3 failures in a row" in capsys.readouterr().out
+
+
+def test_a_failure_event_carries_only_stage_cause_and_count() -> None:
+    import sentry_sdk
+
+    transport = RecordingTransport()
+    context = {"stage": "while checking URLs", "cause": "OSError", "expired": 2}
+    try:
+        sent = report_to_sentry(
+            FAILURE_MESSAGE, context, settings_with(DSN), transport=transport
+        )
+    finally:
+        for scope in (
+            sentry_sdk.get_global_scope(),
+            sentry_sdk.get_isolation_scope(),
+            sentry_sdk.get_current_scope(),
+        ):
+            scope.client = None  # type: ignore[assignment]
+
+    assert sent is True
+    event = transport.events[0]
+    assert event["message"] == FAILURE_MESSAGE
+    assert event["contexts"]["offer_health"] == context
+    assert "https://" not in repr(event["contexts"])

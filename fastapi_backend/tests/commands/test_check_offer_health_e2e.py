@@ -369,6 +369,32 @@ async def test_a_direct_link_off_the_merchants_host_is_not_a_target(
     assert targets.items == () and targets.not_followable == 1
 
 
+async def test_a_url_on_a_network_tracking_host_is_never_a_target(
+    engine: AsyncEngine,
+) -> None:
+    refs = await add_references(engine, website="https://www.awin1.com")
+    tracked = await add_offer(
+        engine,
+        refs,
+        "PUBLISHED",
+        None,
+        source_url="https://www.awin1.com/cread.php?x=1",
+    )
+    await add_link(engine, tracked, "direct", "https://www.awin1.com/cread.php?x=2")
+    fine = await add_offer(
+        engine, refs, "PUBLISHED", None, source_url="https://a.example/x"
+    )
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with maker() as session:
+        targets = await collect_targets(OfferHealthRepository(session), NOW, limit=50)
+
+    assert [(t.kind, t.offer_id) for t in targets.items] == [
+        (TargetKind.SOURCE_URL, fine)
+    ]
+    assert targets.tracking_host_skipped == 2
+
+
 async def test_the_command_line_expires_and_exits_zero(
     engine: AsyncEngine, database_url: str
 ) -> None:

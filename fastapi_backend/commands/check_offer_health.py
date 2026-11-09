@@ -27,14 +27,14 @@ import asyncio
 import re
 import sys
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.core.url_probe import HttpxUrlProbe, ProbeStatus, UrlProbe
+from app.core.url_probe import HttpxUrlProbe, ProbeReason, ProbeStatus, UrlProbe
 from app.repositories.audit import AuditRepository
 from app.repositories.offer_health import OfferHealthRepository
 from app.services.audit import AuditService
@@ -49,6 +49,7 @@ from app.services.offer_expiry import (
 from app.services.offer_reachability import (
     DEFAULT_CONCURRENCY,
     DEFAULT_LIMIT,
+    MAX_HOST_FAILURES,
     CheckTarget,
     Finding,
     ReachabilityReport,
@@ -60,9 +61,13 @@ from app.services.offer_reachability import (
 
 PROG = "check-offer-health"
 EVENT_MESSAGE = "Offer health check found unreachable or refused URLs"
+FAILURE_MESSAGE = "Offer health check run failed"
 EVENT_CONTEXT = "offer_health"
 MIN_VALUE = 1
 MAX_CONCURRENCY = 20
+MAX_LIMIT = 5000
+MAX_BATCH_SIZE = 1000
+DEFAULT_MAX_SECONDS = 900
 USER_AGENT_VERSION = "1.0"
 
 
@@ -80,7 +85,7 @@ class Unit:
 
 
 UnitOpener = Callable[[], AbstractAsyncContextManager[Unit]]
-Reporter = Callable[[Mapping[str, Any]], object]
+Reporter = Callable[[str, Mapping[str, Any]], object]
 
 
 @dataclass(frozen=True)
@@ -120,14 +125,16 @@ def build_user_agent(app_name: str, site_url: str) -> str:
 
 
 def report_to_sentry(
+    message: str,
     context: Mapping[str, Any],
     settings: Any = None,
     transport: Any = None,
 ) -> bool:
-    """Send the summary as one Sentry event; nothing when ``SENTRY_DSN`` is not set.
+    """Send ``context`` as one Sentry event; nothing when ``SENTRY_DSN`` is not set.
 
     Sentry is started here, after every request has been made, so the HTTP client's breadcrumbs
-    (which hold URLs) can never be attached to the event.
+    (which hold URLs) can never be attached to the event. Used for the run summary and for a
+    failed run (whose context is only the stage, the error type name and the expired count).
     """
     from app.core.sentry import flush_events, init_sentry, report_message
 
@@ -137,7 +144,7 @@ def report_to_sentry(
         settings = app_settings
     if not init_sentry(settings, transport=transport):
         return False
-    sent = report_message(EVENT_MESSAGE, context_name=EVENT_CONTEXT, context=context)
+    sent = report_message(message, context_name=EVENT_CONTEXT, context=context)
     flush_events()
     return sent
 
@@ -155,20 +162,26 @@ async def _expire(units: UnitOpener, args: argparse.Namespace, now: datetime) ->
     except ExpiryFailed as failure:
         cause = type(failure.__cause__).__name__
         raise RunFailed(failure.expired, "while expiring offers", cause) from None
+    except Exception as error:  # noqa: BLE001  (nothing was expired yet; the type is reported)
+        stage = "before any offer was expired (check DATABASE_URL)"
+        raise RunFailed(0, stage, type(error).__name__) from None
 
 
 async def _probe(
-    probe: UrlProbe | None, targets: Sequence[CheckTarget], concurrency: int
+    probe: UrlProbe | None,
+    targets: Sequence[CheckTarget],
+    args: argparse.Namespace,
 ) -> list[Finding]:
+    limits = {"concurrency": args.concurrency, "max_seconds": args.max_seconds}
     if probe is not None:
-        return await probe_targets(probe, targets, concurrency=concurrency)
+        return await probe_targets(probe, targets, **limits)
     from app.core.config import settings
 
     real = HttpxUrlProbe(
         user_agent=build_user_agent(settings.APP_NAME, settings.PUBLIC_SITE_URL)
     )
     try:
-        return await probe_targets(real, targets, concurrency=concurrency)
+        return await probe_targets(real, targets, **limits)
     finally:
         await real.aclose()
 
@@ -187,8 +200,13 @@ async def _check(
     except Exception as error:  # noqa: BLE001  (the type is reported, never the message)
         stage = "while reading the URLs to check"
         raise RunFailed(expired, stage, type(error).__name__) from None
-    findings = await _probe(probe, targets.items, args.concurrency)
-    return ReachabilityReport(tuple(findings), targets.not_followable)
+    try:
+        findings = await _probe(probe, targets.items, args)
+    except Exception as error:  # noqa: BLE001  (the type is reported, never the message)
+        raise RunFailed(expired, "while checking URLs", type(error).__name__) from None
+    return ReachabilityReport(
+        tuple(findings), targets.not_followable, targets.tracking_host_skipped
+    )
 
 
 async def _run(
@@ -205,7 +223,10 @@ async def _run(
         return RunResult(expired, await _check(units, args, probe, now, expired))
     finally:
         if engine is not None:
-            await engine.dispose()
+            with suppress(
+                Exception
+            ):  # a failed close must not turn a finished run into exit 1
+                await engine.dispose()
 
 
 def _parse(argv: Sequence[str]) -> argparse.Namespace:
@@ -223,19 +244,28 @@ def _parse(argv: Sequence[str]) -> argparse.Namespace:
         "--limit",
         type=int,
         default=DEFAULT_LIMIT,
-        help=f"most URLs to check in one run (default {DEFAULT_LIMIT})",
+        help=f"most URLs to check in one run, at most {MAX_LIMIT} (default {DEFAULT_LIMIT})",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
-        help=f"offers per committed expiry batch (default {DEFAULT_BATCH_SIZE})",
+        help=f"offers per committed expiry batch, at most {MAX_BATCH_SIZE} (default {DEFAULT_BATCH_SIZE})",
     )
     parser.add_argument(
         "--concurrency",
         type=int,
         default=DEFAULT_CONCURRENCY,
         help=f"requests in flight at once, 1 to {MAX_CONCURRENCY} (default {DEFAULT_CONCURRENCY})",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=DEFAULT_MAX_SECONDS,
+        help=(
+            "time limit for the reachability step; targets not finished are reported as "
+            f"not_checked and the exit code stays 0 (default {DEFAULT_MAX_SECONDS})"
+        ),
     )
     return parser.parse_args(argv)
 
@@ -246,10 +276,19 @@ def _fail(message: str, code: int) -> int:
 
 
 def _invalid(args: argparse.Namespace) -> str | None:
-    if min(args.limit, args.batch_size, args.concurrency) < MIN_VALUE:
-        return f"--limit, --batch-size and --concurrency must be at least {MIN_VALUE}."
-    if args.concurrency > MAX_CONCURRENCY:
-        return f"--concurrency must be at most {MAX_CONCURRENCY}."
+    values = (args.limit, args.batch_size, args.concurrency, args.max_seconds)
+    if min(values) < MIN_VALUE:
+        return (
+            "--limit, --batch-size, --concurrency and --max-seconds "
+            f"must be at least {MIN_VALUE}."
+        )
+    for name, value, cap in (
+        ("--limit", args.limit, MAX_LIMIT),
+        ("--batch-size", args.batch_size, MAX_BATCH_SIZE),
+        ("--concurrency", args.concurrency, MAX_CONCURRENCY),
+    ):
+        if value > cap:
+            return f"{name} must be at most {cap}."
     return None
 
 
@@ -262,6 +301,14 @@ def _summary_lines(result: RunResult) -> list[str]:
     line = f"{PROG}: checked {report.checked} URL(s): {counts}."
     if report.not_followable:
         line += f" {report.not_followable} direct link(s) skipped (host not one /go/ follows)."
+    if report.tracking_host_skipped:
+        line += f" {report.tracking_host_skipped} URL(s) on a network tracking host were never requested."
+    skipped = report.count_reason(ProbeReason.HOST_SKIPPED)
+    if skipped:
+        line += f" {skipped} not requested after {MAX_HOST_FAILURES} failures in a row on their host."
+    unfinished = report.count_reason(ProbeReason.NOT_CHECKED)
+    if unfinished:
+        line += f" {unfinished} not checked: the --max-seconds limit was reached."
     lines.append(line)
     if report.problems:
         reasons = ", ".join(
@@ -273,13 +320,36 @@ def _summary_lines(result: RunResult) -> list[str]:
     return lines
 
 
+def _send(reporter: Reporter, message: str, context: Mapping[str, Any]) -> None:
+    try:
+        reporter(message, context)
+    except Exception as error:  # noqa: BLE001  (the run's outcome stands; say only what failed)
+        print(
+            f"{PROG}: could not send the Sentry event ({type(error).__name__}).",
+            file=sys.stderr,
+        )
+
+
 def _report(result: RunResult, reporter: Reporter) -> None:
     if result.report is None or not result.report.problems:
         return
-    try:
-        reporter(event_context(result.expired, result.report))
-    except Exception as error:  # noqa: BLE001  (the run completed; say only what failed)
-        _fail(f"could not send the Sentry summary ({type(error).__name__}).", 0)
+    _send(reporter, EVENT_MESSAGE, event_context(result.expired, result.report))
+
+
+def _fail_run(failure: RunFailed, reporter: Reporter) -> int:
+    """Print the failure, send the one failure event (stage, error type, count), exit 1."""
+    code = _fail(
+        f"failed ({failure.cause}) {failure.stage}. {failure.expired} offer(s) were "
+        "already expired before the failure; run it again to continue.",
+        1,
+    )
+    context = {
+        "stage": failure.stage,
+        "cause": failure.cause,
+        "expired": failure.expired,
+    }
+    _send(reporter, FAILURE_MESSAGE, context)
+    return code
 
 
 def main(
@@ -294,6 +364,7 @@ def main(
     args = _parse(sys.argv[1:] if argv is None else argv)
     if (problem := _invalid(args)) is not None:
         return _fail(problem, 2)
+    send_to = reporter or report_to_sentry
     engine: AsyncEngine | None = None
     try:
         if units is None:
@@ -302,15 +373,12 @@ def main(
             units = database_units(async_session_maker)
         result = asyncio.run(_run(units, args, probe, now or datetime.now(UTC), engine))
     except RunFailed as failure:
-        return _fail(
-            f"failed ({failure.cause}) {failure.stage}. {failure.expired} offer(s) were "
-            "already expired before the failure; run it again to continue.",
-            1,
-        )
+        return _fail_run(failure, send_to)
     except Exception as error:  # noqa: BLE001  (report the type only, never the message)
-        return _fail(f"failed ({type(error).__name__}). Check DATABASE_URL.", 1)
+        stage = "before the run started (check DATABASE_URL)"
+        return _fail_run(RunFailed(0, stage, type(error).__name__), send_to)
     print("\n".join(_summary_lines(result)))
-    _report(result, reporter or report_to_sentry)
+    _report(result, send_to)
     return 0
 
 

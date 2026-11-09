@@ -106,7 +106,9 @@ class FakeCommitter:
 
 
 class FakeHealthStore:
-    """In-memory offers and links with the selection rules of the real repository."""
+    """In-memory offers and links. Only the expiry selection (published, ended) is modelled; the
+    target lists are returned as given, so the real queries are covered by the repository SQL
+    tests and the e2e file."""
 
     def __init__(
         self,
