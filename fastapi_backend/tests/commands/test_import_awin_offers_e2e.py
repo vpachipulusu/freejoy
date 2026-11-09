@@ -595,6 +595,26 @@ async def test_a_second_run_waits_for_the_run_lock_only_as_long_as_the_timeout(
     assert await scalar(engine, "SELECT count(*) FROM offers") == 0
 
 
+async def test_the_holding_category_is_read_under_a_share_lock(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1)])
+    editor = await engine.connect()
+    try:
+        transaction = (
+            await editor.begin()
+        )  # an admin enabling the category, not yet committed
+        await editor.execute(text("UPDATE categories SET enabled = enabled"))
+
+        with pytest.raises(run_module.ImportFailed) as failed:
+            await run(engine, [raw_item(2)], lock_timeout_ms=300)
+        await transaction.rollback()
+    finally:
+        await editor.close()
+
+    assert failed.value.cause == "lock_timeout"
+
+
 # --- the command line ----------------------------------------------------------------------
 
 
