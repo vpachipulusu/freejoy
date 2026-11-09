@@ -38,7 +38,7 @@ Other pointers that do not rely on colour alone:
 
 - The page you are on in the header is highlighted and marked as the current page for screen readers.
 - The heart on a card is a real button that is **pressed** or **not pressed** for screen readers and is named after
-  the freebie ("Save Coffee discovery pack", then "Remove Coffee discovery pack from saved"). A saved heart is
+  the freebie ("Save Coffee discovery pack"; the name stays the same and only its pressed state changes). A saved heart is
   filled and an unsaved one is an outline, so the state is not shown by colour alone. It is at least 44 by 44 pixels
   and is reached with **Tab** and pressed with **Enter** or **Space**. Its small press animation is switched off when
   your device asks for reduced motion.

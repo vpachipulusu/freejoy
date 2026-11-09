@@ -100,7 +100,10 @@ else). Contract: [backend-catalogue.md](backend-catalogue.md).
   `CatalogueUnavailableError`. `unstable_cache` stores nothing for a thrown error, so the next request
   tries again, and a stale entry keeps being served while a background refresh fails. A 404 becomes
   `not_found` and a 410 becomes `gone` with the stub (title, category, end date); those are real answers
-  and may be cached.
+  and may be cached. A 404 counts as `not_found` only when its body is the backend's own envelope
+  (`success: false`); a 404 from anything else in the path (a proxy's HTML page) throws. A 429 throws
+  `CatalogueRateLimitedError`, a subclass of `CatalogueUnavailableError`, so callers that fan out reads (the Saved
+  action) can stop at once.
 - **Visitor IP.** The backend rate limit is 120 requests a minute per `X-Client-IP`. `readTrustedClientIp()`
   in `server.ts` reads Vercel's `x-vercel-forwarded-for` (only when `VERCEL=1`) and **one** header named by the
   server-only `TRUSTED_CLIENT_IP_HEADER` (no default; the name must match `/^[a-z0-9-]+$/i`), never
@@ -195,8 +198,8 @@ and the first client render agree and there is no hydration mismatch. Every hear
 store, and the `storage` event keeps other tabs in step. `useHydrated()` tells "not read yet" (skeleton) from
 "nothing saved" (empty state), so a saved list never flashes empty.
 
-**The heart** (`SaveButton`). A real `<button type="button">` with `aria-pressed` and the name "Save {title}" /
-"Remove {title} from saved" (the title is never stored). 44px target around a 32px disc (so it fits a narrow
+**The heart** (`SaveButton`). A real `<button type="button">` with `aria-pressed` and the constant name
+"Save {title}" (the title is never stored; `aria-pressed` carries the state). 44px target around a 32px disc (so it fits a narrow
 two-column card; the badge on the card shrinks on phones for the same reason). A heart that is outlined or
 filled (so state is not only a colour); no focus style of its own, the global outline shows. Motion is
 `motion-safe:` only. It sits **beside** the card's stretched link, never inside it, with `z-10` to stay
@@ -205,27 +208,66 @@ On the card the demo badge moved to the bottom-right to free the corner the desi
 
 **The Saved page** (`src/app/(public)/saved/page.tsx`). A static server shell (heading, the "Saved on this
 device" note, a `<noscript>` message) around the `SavedOffers` client island. The island reads the slugs and
-calls the server action `loadSavedOffersAction` (`src/app/actions/saved-actions.ts`) in chunks of 48
+calls the server action `loadSavedOffersAction` (`src/app/actions/saved-actions.ts`) in chunks of 24
 (`SAVED_OFFERS_REQUEST_LIMIT`), once per slug (a slug saved later, say in another tab, is the only one asked for
 next). It renders the **same `OfferGrid` and `OfferCard`** as the catalogue, newest saved first, with a polite
-live region for the count. When the focused card disappears (its heart was pressed) focus moves to that region.
+live region for the count and, when there is more, a "Show more" button (see below for focus). The island sits in a
+box with a minimum height so the footer does not jump.
 
-**The server action.** Input validated with Zod: 1 to 48 slugs, each `^[a-z0-9-]+$` and at most 100 characters,
+**The server action.** Input validated with Zod: 1 to 24 slugs, each `^[a-z0-9-]+$` and at most 100 characters,
 otherwise a curated failure and no catalogue read. Each slug goes through `lookupOffer` (the same facade and
-60-second Data Cache as the offer page), at most 6 at a time, and ends in exactly one list:
+60-second Data Cache as the offer page), at most 4 at a time, and ends in exactly one list:
 
 - `offers`: published and live today (`isLive`; an expired offer is not shown even though the facade still
-  looks it up as found). Public fields only; fixture offers get their merchant attached.
-- `missing`: unknown, draft, archived, expired or ended. The page **drops these from the list and from
+  looks it up as found). A card-shaped projection only; fixture offers get their merchant attached.
+- `missing`: a definitive no (the backend's 404 envelope, a 410, an answer for another slug, past its end date). The page **drops these from the list and from
   storage** and says "N saved freebie(s) no longer available and removed from your list". No error.
-- `unavailable`: the catalogue could not be read. **Never pruned**, so an outage cannot empty a list. The page
+- `unavailable`: the catalogue could not be read, was rate limited, returned a record this site cannot read, or the call stopped before reaching the slug. **Never pruned**, so an outage cannot empty a list. The page
   says they are still saved and offers "Try again"; a failed call shows a curated error and also waits for the
   visitor (no automatic retry loop).
 
-The action logs the error name only, never a slug. Cost to the backend: one cached read per saved offer per
-minute, so a visitor with 200 saved offers is 200 reads on a cold cache (the shared per-address limit is
-120 a minute, see [Catalogue API wrapper](#catalogue-api-wrapper-freej-21)). Server actions are not covered by the
-edge rate limiter (it covers `/api/` and `/go/`).
+The action logs the error name only, never a slug.
+
+**Cost to the backend and its limits.** The action is public and unauthenticated, and the backend allows 120
+reads a minute per address (one bucket for every visitor when no trusted client-IP header is configured, see
+[Catalogue API wrapper](#catalogue-api-wrapper-freej-21)). Server actions are not covered by the edge rate
+limiter (it covers `/api/` and `/go/`), so the action meters itself:
+
+- 24 slugs a call (`SAVED_OFFERS_REQUEST_LIMIT`), 4 reads at a time;
+- 6 calls a minute per visitor address (`rateLimit` scope `saved`, keyed on `readTrustedClientIp()`, else one
+  shared `unknown` bucket), refused before any read with the curated failure. **On a host with no trusted
+  address header that is 6 calls a minute for all visitors together**; set `TRUSTED_CLIENT_IP_HEADER` (or use
+  Vercel) so the limit is per visitor;
+- the first 429 from the backend (`CatalogueRateLimitedError`), a first full round of 4 reads that all failed, or
+  about 8 seconds overall, stop the call taking new slugs; every remaining slug comes back `unavailable` with no
+  backend call. So a dead backend costs at most about 8 reads, not 24.
+
+The browser loads **one chunk on demand**: the newest 24 saved slugs, then 24 more each time "Show more" is pressed
+(focus moves to the first new card). 200 saved offers are one call until then. A chunk that comes back with no
+offer and nothing missing marks every slug not yet asked about unavailable and stops (no drain). An answer that
+leaves a slug out is treated as unavailable, never as an endless wait. A cold cache therefore costs at most 24
+reads per page view, and a pruning sweep of a long stale list is at most one call per 24 slugs.
+
+**What may prune.** Only a definitive answer: `lookupOffer` says `not_found` (the backend's own 404 envelope) or
+`ended` (410), the answer is for another slug, or the offer is past its end date. `lookupOffer` also has an
+`unreadable` kind (the API has the record but the mapper cannot read it, for example a freshness value this site
+does not know yet): that is `unavailable`, and the offer page treats it like a 404. A 404 whose body is not the
+backend envelope (an HTML page from a proxy) throws `CatalogueUnavailableError` in `lib/api/catalogue.ts`.
+
+**What leaves the server.** A card-shaped projection (`CardOffer` in `lib/catalogue/types.ts`: id, slug, title,
+offer type, image, postage, freshness, demo, source, merchant), not the whole offer; `OfferCard` and `OfferGrid` take
+that type.
+
+**Accessibility notes.** The heart's name is the constant "Save {title}" and `aria-pressed` carries the state (a
+label must not flip with it). Focus after a removal: a heart pressed in the list moves focus to the next card's
+heart (the previous one if it was last, the "Nothing saved yet" heading if none are left); a change from another tab
+never moves focus; "Try again" moves focus to the count region, which then says "Loading your saved freebies". The
+list has a visually hidden `h2` so the headings run 1, 2, 3. The count says "{shown} of {total} saved freebies shown"
+whenever something is hidden or unavailable.
+
+**Monitoring.** The heart's name is an offer title, so `instrumentation-client.ts` registers `scrubBreadcrumb`
+(a click breadcrumb on `aria-label="Save ..."` loses its message) and `scrub-event.ts` turns
+`/v1/catalogue/offers/<slug>` in span URLs into `/v1/catalogue/offers/[slug]`. Unit-tested on constructed events only.
 
 **Navigation.** `SITE_TAB_ITEMS` is Home, Browse, **Saved**, Alerts, as in the design (screens 05 to 07): Saved
 took the third slot, so Categories left the phone tab bar (it stays in the menu sheet, on the home page and on
@@ -272,7 +314,8 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
   throwing storage, the `storage` event, the server snapshot), `unit/components/save-button.test.tsx` (heart,
   hydration), `saved-offers.test.tsx` (list, empty, pruning, outage, chunking), `saved-navigation.test.tsx` (tab bar
   and header), `unit/actions/saved-actions.test.ts` (validation, bounds, only published offers) and
-  `unit/app/saved-page.test.tsx` (page, noindex, sitemap, robots).
+  `unit/app/saved-page.test.tsx` (page, noindex, sitemap, robots), `unit/lib/saved/load-saved-chunks.test.ts`
+  (the chunk loop) and the Sentry scrub tests for the heart and offer slugs.
 - Unit (Vitest): `src/__tests__/unit/app/*` render each page and check metadata, 404s, error states and
   the no-external-link rule; `unit/api/catalogue*.test.ts` cover the wrapper (cache wiring, status
   mapping, timeout, outage error, headers on the wire); `unit/lib/catalogue/*` cover the mapper, the
@@ -287,8 +330,11 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
   [local-e2e.md](local-e2e.md#real-catalogue-data). `saved.spec.ts` (FREEJ-28: save, open `/saved`, remove, reload,
   corrupt storage, a vanished offer, per-browser isolation; desktop and 390px) runs on the fixture catalogue, like
   `freebies.spec.ts`. Run it with `npm run test:e2e:saved` (`playwright.saved.config.ts`: no login, no backend, no
-  `webServer`) against a production build you serve yourself with `CATALOGUE_SOURCE=fixture` and `E2E_BASE_URL`.
-  All 11 tests passed that way when FREEJ-28 was built; it has **not** been run through `test:e2e:local` or in CI
+  `webServer`) against a production build you serve yourself with `CATALOGUE_SOURCE=fixture`,
+  `TRUSTED_CLIENT_IP_HEADER=x-e2e-client-ip` (each test sends its own address, or the 6-a-minute shared bucket
+  refuses later `/saved` loads) and `E2E_BASE_URL`. It also checks the header at 1024, 1280 and 1366px, the card
+  badge at 320 to 375px, hover isolation and scroll position. All 20 tests passed that way three times in a row
+  when the FREEJ-28 review fixes were made; it has **not** been run through `test:e2e:local` or in CI
   (E2E is not in the gate).
 
 ## Known deviations
