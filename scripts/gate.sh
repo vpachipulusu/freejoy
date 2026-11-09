@@ -19,6 +19,9 @@ step() {  # step <name> <dir> <command...>
 }
 
 FE="$ROOT/nextjs-frontend"; BE="$ROOT/fastapi_backend"
+# The gate must give the same answer on every machine: the backend never reads a local
+# fastapi_backend/.env (settings, Alembic and the schema commands honour this switch).
+export IGNORE_ENV_FILE=1
 : >"$LOG"
 step "frontend lint" "$FE" npm run lint
 step "frontend typecheck" "$FE" npm run typecheck
@@ -31,7 +34,8 @@ step "backend format" "$BE" uv run ruff format --check .
 step "backend mypy" "$BE" uv run mypy
 step "backend openapi fresh" "$BE" uv run python -m commands.check_openapi_schema
 if [ -n "$DB" ]; then
-  export TEST_DATABASE_URL="$DB" DATABASE_URL="$DB" ENVIRONMENT=test
+  # DATABASE_URL_DIRECT wins over DATABASE_URL in Alembic, so pin it to the test database too.
+  export TEST_DATABASE_URL="$DB" DATABASE_URL="$DB" DATABASE_URL_DIRECT="$DB" ENVIRONMENT=test
   step "backend pytest+cov (with e2e)" "$BE" uv run pytest -n auto --dist loadfile --cov --cov-report=term-missing:skip-covered
   step "alembic upgrade head" "$BE" uv run alembic upgrade head
   step "alembic check" "$BE" uv run alembic check

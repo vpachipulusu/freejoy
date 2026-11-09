@@ -3,11 +3,16 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from app.core.env_file import IGNORE_ENV_FILE
+
+# The schema is committed (ADR-008), so it must not depend on one developer's machine: a
+# local .env or an exported APP_NAME/APP_VERSION would change info.title and info.version.
+# This runs before app.main builds the settings and the app.
+os.environ[IGNORE_ENV_FILE] = "1"
+for _brand_setting in ("APP_NAME", "APP_VERSION"):
+    os.environ.pop(_brand_setting, None)
 
 from app.main import app
-
-load_dotenv()
 
 # Defaults to the frontend schema that the generated TypeScript client is built from
 # (ADR-008); set OPENAPI_OUTPUT_FILE to write elsewhere.
