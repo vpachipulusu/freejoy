@@ -209,7 +209,11 @@ async def _run(
 
 
 def _parse(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog=PROG, description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog=PROG,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--skip-reachability",
         action="store_true",
