@@ -232,3 +232,7 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
 - `click_events.referrer_host` comes from the visitor's browser and is untrusted
   (see [platform-models.md](platform-models.md)).
 - Nothing schedules `prune_click_events` yet.
+- A destination that no longer answers is not detected on the click path (the visitor gets the provider's error page).
+  `commands.check_offer_health` reports dead offer source URLs and `direct` links, but it never requests a network
+  provider's tracking link (that would record a click), so a dead `awin`, `cj` or other network link is only visible in
+  the network's own reports. See [backend-offer-health.md](backend-offer-health.md). Nothing schedules it yet either.

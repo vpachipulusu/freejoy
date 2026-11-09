@@ -33,6 +33,7 @@ Start here, then follow the links. Root-level overview: [`../../README.md`](../.
 | [backend-public-settings.md](backend-public-settings.md) | Public settings read by the frontend |
 | [backend-catalogue.md](backend-catalogue.md) | Public catalogue API: offers, offer detail, categories |
 | [freejoy-affiliate.md](freejoy-affiliate.md) | The `/go/[offerId]` affiliate redirect: flow, validation, what a click stores, provider host allowlist |
+| [backend-offer-health.md](backend-offer-health.md) | The `check_offer_health` command: expires ended offers, reports dead offer and `direct` link destinations, never requests tracking links, SSRF controls, flags, exit codes, scheduling |
 | [backend-subscribers.md](backend-subscribers.md) | Alerts sign-up: double opt-in, confirm, one-click unsubscribe, email provider, retention command, privacy rules |
 | [backend-frontend-seams.md](backend-frontend-seams.md) | Endpoints that keep `stripe` and `firebase-admin` out of the frontend |
 | [backend-audit-logs.md](backend-audit-logs.md) | Audit log model and admin API |
