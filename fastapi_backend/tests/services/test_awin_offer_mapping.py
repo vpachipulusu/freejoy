@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 
 from app.core.slugs import validate_catalogue_slug
-from app.models.platform.offer import Offer, OfferStatus, OfferType, PostageKind
+from app.models.platform.offer import (
+    CommercialBasis,
+    Offer,
+    OfferStatus,
+    OfferType,
+    PostageKind,
+)
 from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.services.awin_offer_mapping import (
     IMPORT_CATEGORY_SLUG,
@@ -90,6 +96,14 @@ def test_both_kinds_map_to_the_voucher_type_and_never_to_a_free_sample(
 
     assert values["offer_type"] is OfferType.VOUCHER
     assert values["offer_type"] is not OfferType.FREE_SAMPLE
+
+
+def test_a_new_import_is_affiliate_and_a_refresh_never_touches_the_basis() -> None:
+    created = offer_values(make_promotion(), "c", "m", "s")
+    refreshed = refresh_values(make_promotion(title="New title"))
+
+    assert created["commercial_basis"] is CommercialBasis.AFFILIATE
+    assert "commercial_basis" not in refreshed
 
 
 def test_nothing_is_claimed_about_postage_or_cards() -> None:

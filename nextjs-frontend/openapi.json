@@ -13765,6 +13765,16 @@
         ],
         "title": "ClickResponse"
       },
+      "CommercialBasis": {
+        "type": "string",
+        "enum": [
+          "EDITORIAL",
+          "AFFILIATE",
+          "SPONSORED"
+        ],
+        "title": "CommercialBasis",
+        "description": "The commercial relationship behind a listing, stated honestly to the editor.\n\n``SPONSORED`` is the only value visitors are told about (a \"Sponsored\" label); the three-way\nvalue itself is never public."
+      },
       "ConfirmResponse": {
         "properties": {
           "success": {
@@ -14028,6 +14038,9 @@
           "offer_type": {
             "$ref": "#/components/schemas/OfferType"
           },
+          "commercial_basis": {
+            "$ref": "#/components/schemas/CommercialBasis"
+          },
           "featured": {
             "type": "boolean",
             "title": "Featured",
@@ -14193,6 +14206,7 @@
           "category_id",
           "merchant_id",
           "offer_type",
+          "commercial_basis",
           "image_tint",
           "image_label",
           "image_alt",
@@ -15747,6 +15761,10 @@
             ],
             "title": "Offer Type"
           },
+          "sponsored": {
+            "type": "boolean",
+            "title": "Sponsored"
+          },
           "featured": {
             "type": "boolean",
             "title": "Featured"
@@ -15845,6 +15863,7 @@
           "category",
           "merchant",
           "offer_type",
+          "sponsored",
           "featured",
           "image",
           "postage",
@@ -15945,6 +15964,9 @@
           },
           "offer_type": {
             "$ref": "#/components/schemas/OfferType"
+          },
+          "commercial_basis": {
+            "$ref": "#/components/schemas/CommercialBasis"
           },
           "status": {
             "$ref": "#/components/schemas/OfferStatus"
@@ -16163,6 +16185,7 @@
           "category_id",
           "merchant_id",
           "offer_type",
+          "commercial_basis",
           "status",
           "featured",
           "end_at",
@@ -16267,6 +16290,9 @@
           "offer_type": {
             "$ref": "#/components/schemas/OfferType"
           },
+          "commercial_basis": {
+            "$ref": "#/components/schemas/CommercialBasis"
+          },
           "status": {
             "$ref": "#/components/schemas/OfferStatus"
           },
@@ -16335,6 +16361,7 @@
           "category_id",
           "merchant_id",
           "offer_type",
+          "commercial_basis",
           "status",
           "featured",
           "end_at",
@@ -16380,6 +16407,9 @@
           },
           "offer_type": {
             "$ref": "#/components/schemas/OfferType"
+          },
+          "commercial_basis": {
+            "$ref": "#/components/schemas/CommercialBasis"
           },
           "status": {
             "$ref": "#/components/schemas/OfferStatus"
@@ -16602,6 +16632,7 @@
           "category_id",
           "merchant_id",
           "offer_type",
+          "commercial_basis",
           "status",
           "featured",
           "end_at",
@@ -17427,6 +17458,16 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Review Token"
+          },
+          "commercial_basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommercialBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -17435,7 +17476,7 @@
           "review_token"
         ],
         "title": "PublishRequest",
-        "description": "Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."
+        "description": "Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).\n\n``commercial_basis`` is the basis the editor confirms. It is required (422 ``publish_blocked``, reason\n``commercial_basis_required``) when the offer's only active links are ``direct``; whenever it is sent it must be\nthe stored one (409 ``offer_changed``)."
       },
       "ReadyResponse": {
         "properties": {
@@ -18767,6 +18808,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/OfferType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commercial_basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommercialBasis"
               },
               {
                 "type": "null"

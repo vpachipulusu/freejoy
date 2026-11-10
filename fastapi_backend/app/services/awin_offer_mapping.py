@@ -2,7 +2,8 @@
 
 What an import writes, and what it deliberately does not:
 
-* The offer is always a ``DRAFT``, never featured, never verified (``last_verified_at`` stays null, so
+* The offer is always a ``DRAFT``, ``AFFILIATE`` by commercial basis (an editor may change it), never
+  featured, never verified (``last_verified_at`` stays null, so
   ``publish_blockers`` reports ``not_verified``), with no freshness label.
 * ``voucher`` and ``promotion`` both map to ``VOUCHER``, the closest existing type. Nothing is ever
   ``FREE_SAMPLE``. An editor changes the type if the offer is something else.
@@ -25,7 +26,12 @@ from typing import Any
 
 from app.core.plain_text import fit_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
-from app.models.platform.offer import OfferStatus, OfferType, PostageKind
+from app.models.platform.offer import (
+    CommercialBasis,
+    OfferStatus,
+    OfferType,
+    PostageKind,
+)
 from app.repositories.awin_import import IMPORT_CATEGORY_SLUG
 from app.services.awin_promotions import PROVIDER, Promotion
 
@@ -81,6 +87,9 @@ def offer_values(
         "category_id": category_id,
         "merchant_id": merchant_id,
         "status": OfferStatus.DRAFT,
+        # Commission through the network; an editor changes it if the merchant also pays for the listing.
+        # Written once, at creation: a refresh never rewrites it (see ``refresh_values``).
+        "commercial_basis": CommercialBasis.AFFILIATE,
         "featured": False,
         "image_tint": IMAGE_TINT,
         "image_label": fit_line(promotion.advertiser_name, IMAGE_LABEL_LENGTH),
