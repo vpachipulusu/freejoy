@@ -17,6 +17,7 @@ import {
   refreshPublicCatalogue,
   resourceIdSchema,
   reviewTokenSchema,
+  sourceChangedAtSchema,
   type CatalogueActionResult,
 } from '@/lib/api/admin-catalogue-action';
 import {
@@ -128,27 +129,30 @@ function toActionRequest(action: OfferAction, reviewToken: unknown): OfferAction
 
 /**
  * Dismisses the "source changed" marker of an imported offer: the admin has seen that the source moved on and
- * keeps the offer as it is. It needs the `reviewToken` of the offer the admin loaded (409 `offer_changed` when it
- * moved since, handled like verify and publish). A dismissal changes nothing a visitor sees, so only the admin
+ * keeps the offer as it is. It needs the `reviewToken` of the offer the admin loaded and the `sourceChangedAt` the
+ * page showed (the token does not cover the marker): 409 `offer_changed` when either moved since, handled like
+ * verify and publish. A dismissal changes nothing a visitor sees, so only the admin
  * pages refresh. When the API sees no marker any more (somebody dismissed it first) the page is refreshed so it
  * catches up and the admin is told so.
  */
 export async function dismissSourceChangeAction(
   offerId: string,
-  reviewToken?: string
+  reviewToken?: string,
+  sourceChangedAt?: string
 ): Promise<CatalogueActionResult<OfferActionData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     const token = reviewTokenSchema.safeParse(reviewToken);
-    if (!token.success) {
-      // Only the action name: never the token value.
-      logger.warn('Admin offer action: review token missing or malformed', {
+    const marker = sourceChangedAtSchema.safeParse(sourceChangedAt);
+    if (!token.success || !marker.success) {
+      // Only the action name: never the token or the marker value.
+      logger.warn('Admin offer action: review token or source marker missing or malformed', {
         action: 'dismiss_source_change',
       });
       return { success: false, error: OFFER_CHANGED_MESSAGE };
     }
 
-    const result = await dismissAdminOfferSourceChange(offerId, token.data);
+    const result = await dismissAdminOfferSourceChange(offerId, token.data, marker.data);
     if (!result.success) {
       const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin dismiss source change failed');
       if (result.code === 'offer_changed') {

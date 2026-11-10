@@ -73,6 +73,8 @@ const PROVENANCE = {
   source_changed_at: '2026-02-05T00:00:00Z',
 };
 
+const MARKER = '2026-02-05T09:00:00.123456Z';
+
 const OFFER_OUT = {
   ...OFFER_SUMMARY,
   provenance: null,
@@ -197,12 +199,12 @@ describe('admin catalogue wrappers', () => {
     it('posts the dismissal to its own route with the review token the admin loaded', async () => {
       fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
 
-      const result = await dismissAdminOfferSourceChange('o1', 'tok-1');
+      const result = await dismissAdminOfferSourceChange('o1', 'tok-1', MARKER);
 
       const sent = fetchMock.mock.calls[0][0];
       expect(sent.method).toBe('POST');
       expect(new URL(sent.url).pathname).toBe('/v1/admin/offers/o1/dismiss-source-change');
-      expect(await sent.json()).toEqual({ review_token: 'tok-1' });
+      expect(await sent.json()).toEqual({ review_token: 'tok-1', source_changed_at: MARKER });
       expect(sent.headers.get('X-Session-Token')).toBe('firebase-session-cookie');
       expect(result.success).toBe(true);
     });
@@ -211,7 +213,7 @@ describe('admin catalogue wrappers', () => {
       'hands the 409 %s code back from a dismissal',
       async (code) => {
         fetchMock.mockResolvedValue(jsonResponse({ success: false, error: 'words', code }, 409));
-        const result = await dismissAdminOfferSourceChange('o1', 'old');
+        const result = await dismissAdminOfferSourceChange('o1', 'old', MARKER);
         expect(result).toMatchObject({ success: false, status: 409, code });
       }
     );

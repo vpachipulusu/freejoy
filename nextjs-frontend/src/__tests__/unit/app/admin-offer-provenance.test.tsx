@@ -1,8 +1,10 @@
 /**
  * The offer page's Provenance panel and its "Dismiss source change" button: what the panel shows, when the
- * button exists, the confirmation, and how an outcome is announced (the same wiring as Mark verified: a toast,
- * the review state, then router.refresh()).
+ * button exists, the confirmation (keyboard, focus, double presses), how an outcome is announced (the same wiring
+ * as Mark verified: a toast, the review state, then router.refresh()) and where focus goes when the button is
+ * replaced after a dismissal.
  */
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -29,18 +31,28 @@ import {
 } from '@/app/(admin)/admin/offers/_components/offer-review-context';
 import {
   DirtyFormProvider,
+  useReportFormBusy,
   useReportFormDirty,
 } from '@/app/(admin)/admin/_components/dirty-form-context';
 import type { OfferProvenanceView } from '@/lib/admin-catalogue/offer-view';
 
+const MARKER = '2026-02-05T09:00:00.123456Z';
 const IMPORTED: OfferProvenanceView = {
   provider: 'awin',
   externalId: '1001',
   appliedAt: '2026-02-01T09:00:00Z',
   sourceChangedAt: null,
 };
-const MOVED: OfferProvenanceView = { ...IMPORTED, sourceChangedAt: '2026-02-05T09:00:00Z' };
+const MOVED: OfferProvenanceView = { ...IMPORTED, sourceChangedAt: MARKER };
 const CHANGED_NOTICE = 'This offer changed since you opened it.';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 function Probe() {
   const { changed } = useOfferReview();
@@ -53,15 +65,24 @@ function Dirty() {
   return null;
 }
 
-function renderPanel(
+function Reloading() {
+  useReportFormBusy(true);
+  return null;
+}
+
+type Extras = { dirty?: boolean; reloading?: boolean };
+type PanelProps = Partial<React.ComponentProps<typeof OfferProvenancePanel>>;
+
+function tree(
   provenance: OfferProvenanceView,
-  props: Partial<React.ComponentProps<typeof OfferProvenancePanel>> = {},
-  { dirty = false }: { dirty?: boolean } = {}
-) {
-  return render(
+  props: PanelProps = {},
+  extras: Extras = {}
+): ReactNode {
+  return (
     <DirtyFormProvider>
       <OfferReviewProvider>
-        {dirty ? <Dirty /> : null}
+        {extras.dirty ? <Dirty /> : null}
+        {extras.reloading ? <Reloading /> : null}
         <Probe />
         <OfferProvenancePanel
           provenance={provenance}
@@ -76,7 +97,20 @@ function renderPanel(
   );
 }
 
-const dismissButton = () => screen.queryByRole('button', { name: 'Dismiss source change' });
+const renderPanel = (
+  provenance: OfferProvenanceView,
+  props: PanelProps = {},
+  extras: Extras = {}
+) => render(tree(provenance, props, extras));
+
+const trigger = () => screen.queryByRole('button', { name: 'Dismiss source change' });
+const confirmButton = (dialog: HTMLElement) =>
+  within(dialog).getByRole('button', { name: 'Dismiss change' });
+
+async function confirmDismissal(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(trigger()!);
+  await user.click(confirmButton(await screen.findByRole('dialog')));
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -107,7 +141,8 @@ describe('OfferProvenancePanel', () => {
     renderPanel(IMPORTED);
 
     expect(screen.getByText('Source changed').nextElementSibling).toHaveTextContent('No');
-    expect(dismissButton()).not.toBeInTheDocument();
+    expect(screen.getByText('Source changed: No')).toBeInTheDocument();
+    expect(trigger()).not.toBeInTheDocument();
   });
 
   it('shows a network it does not know by its own name as plain text', () => {
@@ -128,16 +163,17 @@ describe('OfferProvenancePanel', () => {
     'offers the button for a %s offer whose source changed',
     (status) => {
       renderPanel(MOVED, { status });
-      expect(dismissButton()).toBeInTheDocument();
+      expect(trigger()).toBeInTheDocument();
     }
   );
 
   it.each(['ARCHIVED', 'UNKNOWN'] as const)(
-    'shows no button for a %s offer: nothing can be done to it',
+    'shows no button for a %s offer, and says why',
     (status) => {
       renderPanel(MOVED, { status });
-      expect(dismissButton()).not.toBeInTheDocument();
+      expect(trigger()).not.toBeInTheDocument();
       expect(screen.getByRole('region', { name: 'Provenance' })).toBeInTheDocument();
+      expect(screen.getByText(/cannot be dismissed/)).toBeInTheDocument();
     }
   );
 });
@@ -147,7 +183,7 @@ describe('Dismiss source change', () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
+    await user.click(trigger()!);
 
     const dialog = await screen.findByRole('dialog', { name: 'Dismiss this source change?' });
     expect(within(dialog).getByText(/Free coffee/)).toBeInTheDocument();
@@ -158,16 +194,65 @@ describe('Dismiss source change', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('dismisses with the review token the page loaded, announces it and refreshes', async () => {
+  it('names the trigger and the confirmation differently', async () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
+    await user.click(trigger()!);
+
     const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Dismiss source change' }));
+    expect(within(dialog).getByRole('button', { name: 'Dismiss change' })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: 'Dismiss source change' })
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(['{Enter}', ' '])('opens with the %j key from the keyboard', async (key) => {
+    const user = userEvent.setup();
+    renderPanel(MOVED);
+
+    trigger()!.focus();
+    await user.keyboard(key);
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Dismiss this source change?' })
+    ).toBeVisible();
+  });
+
+  it('closes on Escape and returns focus to the trigger, calling nothing', async () => {
+    const user = userEvent.setup();
+    renderPanel(MOVED);
+
+    await user.click(trigger()!);
+    await screen.findByRole('dialog');
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger()).toHaveFocus());
+    expect(mocks.dismissSourceChangeAction).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to the trigger after Cancel', async () => {
+    const user = userEvent.setup();
+    renderPanel(MOVED);
+
+    await user.click(trigger()!);
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' })
+    );
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger()).toHaveFocus());
+  });
+
+  it('dismisses with the review token and the marker the page loaded, announces it and refreshes', async () => {
+    const user = userEvent.setup();
+    renderPanel(MOVED);
+
+    await confirmDismissal(user);
 
     await waitFor(() =>
-      expect(mocks.dismissSourceChangeAction).toHaveBeenCalledWith('o1', 'tok-loaded')
+      expect(mocks.dismissSourceChangeAction).toHaveBeenCalledWith('o1', 'tok-loaded', MARKER)
     );
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith({
@@ -177,6 +262,29 @@ describe('Dismiss source change', () => {
     );
     expect(mocks.refresh).toHaveBeenCalled();
     expect(screen.getByTestId('probe')).toHaveTextContent('unchanged');
+  });
+
+  it('runs once, keeps focus on the trigger and says what it is doing while it is pending', async () => {
+    const pending = deferred<{ success: true; data: { id: string } }>();
+    mocks.dismissSourceChangeAction.mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    renderPanel(MOVED);
+
+    await confirmDismissal(user);
+    await waitFor(() => expect(trigger()).toHaveFocus());
+    expect(trigger()).toHaveAttribute('aria-disabled', 'true');
+    expect(trigger()).not.toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Updating Free coffee');
+
+    await user.dblClick(trigger()!);
+    await user.click(trigger()!);
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(mocks.dismissSourceChangeAction).toHaveBeenCalledTimes(1);
+    expect(trigger()).toHaveFocus();
+
+    pending.resolve({ success: true, data: { id: 'o1' } });
+    await waitFor(() => expect(screen.getByRole('status')).toBeEmptyDOMElement());
   });
 
   it('raises the lasting notice when somebody else changed the offer before the dismissal', async () => {
@@ -193,17 +301,12 @@ describe('Dismiss source change', () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
-    await user.click(
-      within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Dismiss source change',
-      })
-    );
+    await confirmDismissal(user);
 
     await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('changed'));
   });
 
-  it('shows a stale token as the existing review-again message and raises the lasting notice', async () => {
+  it('shows a stale token or marker as the existing review-again message and raises the lasting notice', async () => {
     mocks.dismissSourceChangeAction.mockResolvedValue({
       success: false,
       error: `${CHANGED_NOTICE} Review it again.`,
@@ -212,12 +315,7 @@ describe('Dismiss source change', () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
-    await user.click(
-      within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Dismiss source change',
-      })
-    );
+    await confirmDismissal(user);
 
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith({
@@ -228,6 +326,8 @@ describe('Dismiss source change', () => {
     );
     expect(screen.getByTestId('probe')).toHaveTextContent('changed');
     expect(mocks.refresh).toHaveBeenCalled();
+    // The button is still there (the marker is still set), and so is the focus.
+    await waitFor(() => expect(trigger()).toHaveFocus());
   });
 
   it('shows another refusal as a destructive toast without the lasting notice', async () => {
@@ -238,12 +338,7 @@ describe('Dismiss source change', () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
-    await user.click(
-      within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Dismiss source change',
-      })
-    );
+    await confirmDismissal(user);
 
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith({
@@ -260,12 +355,7 @@ describe('Dismiss source change', () => {
     const user = userEvent.setup();
     renderPanel(MOVED);
 
-    await user.click(dismissButton()!);
-    await user.click(
-      within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Dismiss source change',
-      })
-    );
+    await confirmDismissal(user);
 
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith(
@@ -277,17 +367,83 @@ describe('Dismiss source change', () => {
     );
     expect(JSON.stringify(mocks.toast.mock.calls)).not.toContain('SECRET');
   });
+});
 
-  it('waits while the form beside it holds unsaved edits, and says why', async () => {
+describe('Dismiss source change waits like the other status buttons', () => {
+  it('waits while the form beside it holds unsaved edits, opening nothing and calling nothing', async () => {
     const user = userEvent.setup();
     renderPanel(MOVED, {}, { dirty: true });
 
-    const button = dismissButton()!;
-    expect(button).toHaveAttribute('aria-disabled', 'true');
-    await user.click(button);
+    expect(trigger()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(trigger()!);
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(mocks.dismissSourceChangeAction).not.toHaveBeenCalled();
-    expect(screen.getByRole('status')).toHaveTextContent('Save or discard your changes first');
+  });
+
+  it('waits while a save is reloading into the page, opening nothing and calling nothing', async () => {
+    const user = userEvent.setup();
+    renderPanel(MOVED, {}, { reloading: true });
+
+    expect(trigger()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(trigger()!);
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(mocks.dismissSourceChangeAction).not.toHaveBeenCalled();
+  });
+
+  it('leaves the reason to the lifecycle group: its own live region says nothing about it', () => {
+    renderPanel(MOVED, {}, { dirty: true, reloading: true });
+
+    // One live region per component: the reason ("Save or discard your changes first") is announced once, by
+    // the lifecycle buttons, not repeated here.
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.queryByText(/Save or discard/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading the saved version/)).not.toBeInTheDocument();
+  });
+});
+
+describe('focus after the button goes away', () => {
+  it('moves to the replacement text once the dismissal lands and the marker is gone', async () => {
+    const user = userEvent.setup();
+    const view = renderPanel(MOVED);
+
+    await confirmDismissal(user);
+    await waitFor(() => expect(mocks.dismissSourceChangeAction).toHaveBeenCalledTimes(1));
+    // router.refresh() brings the offer back without a marker (and the same token: the offer did not change).
+    view.rerender(tree(IMPORTED));
+
+    const replacement = await screen.findByText('Source change dismissed.');
+    await waitFor(() => expect(replacement).toHaveFocus());
+    expect(trigger()).not.toBeInTheDocument();
+  });
+
+  it('does not pull focus anywhere when the admin was elsewhere on the page', async () => {
+    const user = userEvent.setup();
+    const page = (provenance: OfferProvenanceView) => (
+      <div>
+        <button type="button">Elsewhere</button>
+        {tree(provenance)}
+      </div>
+    );
+    const view = render(page(MOVED));
+
+    await confirmDismissal(user);
+    await waitFor(() => expect(mocks.dismissSourceChangeAction).toHaveBeenCalledTimes(1));
+    screen.getByRole('button', { name: 'Elsewhere' }).focus();
+    view.rerender(page(IMPORTED));
+
+    await screen.findByText('Source change dismissed.');
+    expect(screen.getByRole('button', { name: 'Elsewhere' })).toHaveFocus();
+  });
+
+  it('does nothing for a re-render that changes nothing', () => {
+    const view = renderPanel(MOVED);
+    trigger()!.focus();
+
+    view.rerender(tree(MOVED));
+
+    expect(trigger()).toHaveFocus();
   });
 });

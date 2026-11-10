@@ -302,6 +302,24 @@ describe('admin offers page shell', () => {
     );
   });
 
+  it('keeps the category filter on the review chip and on a status chip', async () => {
+    await renderPage({ review: 'needed', category: 'c1' });
+
+    const nav = screen.getByRole('navigation', { name: 'Filter by status' });
+    expect(within(nav).getByRole('link', { name: 'Needs review' })).toHaveAttribute(
+      'href',
+      '/admin/offers?category=c1&review=needed'
+    );
+    expect(within(nav).getByRole('link', { name: 'Draft' })).toHaveAttribute(
+      'href',
+      '/admin/offers?status=draft&category=c1'
+    );
+    expect(within(nav).getByRole('link', { name: 'All' })).toHaveAttribute(
+      'href',
+      '/admin/offers?category=c1'
+    );
+  });
+
   it('keeps the review queue across a search with a hidden input, and only then', async () => {
     const { unmount } = await renderPage({ review: 'needed' });
     expect(

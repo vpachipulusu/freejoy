@@ -114,15 +114,20 @@ export function runAdminOfferAction(offerId: string, request: OfferActionRequest
 
 /**
  * Dismiss the "source changed" marker of an imported offer. It says "a person has seen the change" and sends the
- * `review_token` of the offer the admin loaded; the backend answers 409 `offer_changed` when it moved since, and
- * 409 `illegal_transition` when there is nothing to dismiss.
+ * `review_token` of the offer the admin loaded and the `source_changed_at` the page showed (the token does not
+ * cover the marker); the backend answers 409 `offer_changed` when either moved since, and 409 `illegal_transition`
+ * when there is nothing to dismiss.
  */
-export function dismissAdminOfferSourceChange(offerId: string, reviewToken: string) {
+export function dismissAdminOfferSourceChange(
+  offerId: string,
+  reviewToken: string,
+  sourceChangedAt: string
+) {
   return callBackend((client) =>
     adminDismissOfferSourceChange({
       client,
       path: { offer_id: offerId },
-      body: { review_token: reviewToken },
+      body: { review_token: reviewToken, source_changed_at: sourceChangedAt },
     })
   );
 }

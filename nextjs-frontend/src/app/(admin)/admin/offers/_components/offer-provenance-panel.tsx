@@ -17,7 +17,8 @@ type OfferProvenancePanelProps = {
  * Where an imported offer came from, read only: the network, its id for the promotion, when the importer last
  * applied the source and, if the source has moved on since, when it was noticed. When it has, and the offer can
  * still be acted on (an archived offer or a status this page does not know cannot), the panel offers "Dismiss
- * source change". The API checks the admin's own permission; the page only knows what the status allows.
+ * source change". The API checks the admin's own permission; the page only knows what the status allows. The
+ * button component is always rendered, so it can keep focus when its button goes away after a dismissal.
  */
 export function OfferProvenancePanel({
   provenance,
@@ -29,7 +30,6 @@ export function OfferProvenancePanel({
   const imported = formatAdminDate(provenance.appliedAt);
   const changed = provenance.sourceChangedAt ? formatAdminDate(provenance.sourceChangedAt) : '';
   const moved = provenance.sourceChangedAt !== null;
-  const canDismiss = moved && availableOfferActions(status).length > 0;
 
   return (
     <section aria-labelledby="offer-provenance-heading" className="space-y-2">
@@ -61,13 +61,13 @@ export function OfferProvenancePanel({
           the change once you have.
         </p>
       ) : null}
-      {canDismiss ? (
-        <DismissSourceChangeButton
-          offerId={offerId}
-          offerTitle={offerTitle}
-          reviewToken={reviewToken}
-        />
-      ) : null}
+      <DismissSourceChangeButton
+        offerId={offerId}
+        offerTitle={offerTitle}
+        reviewToken={reviewToken}
+        sourceChangedAt={provenance.sourceChangedAt}
+        actionable={availableOfferActions(status).length > 0}
+      />
     </section>
   );
 }
