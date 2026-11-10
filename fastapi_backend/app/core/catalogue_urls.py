@@ -73,3 +73,8 @@ def validate_https_url(raw: object) -> str:
         raise InvalidUrl
     netloc = host if port is None else f"{host}:{port}"
     return urlunsplit(("https", netloc, parts.path, parts.query, parts.fragment))
+
+
+def is_valid_host(host: str) -> bool:
+    """The host grammar ``validate_https_url`` applies, for callers that only describe a URL."""
+    return _is_valid_host(host)

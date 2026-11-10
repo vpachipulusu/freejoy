@@ -155,3 +155,8 @@ def tracking_problem(
     if len(deep_links) > 1:
         return SHAPE
     return _deep_link_problem(deep_links[0], source_url) if deep_links else None
+
+
+def query_is_strict(query: str) -> bool:
+    """Whether ``tracking_problem`` can parse this query at all (no ``;``, no malformed pair)."""
+    return _pairs(query) is not None
