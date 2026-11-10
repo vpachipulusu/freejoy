@@ -102,6 +102,12 @@ claim, an approved commission or proof the visitor qualified. Bots, double click
 provider page all count as clicks, and nothing here deduplicates them. The provider's network reports are the only
 source for conversions and commission. Do not present click counts as "claimed" or "redeemed" numbers anywhere.
 
+**Revenue comes from the network's reports, never from clicks.** `commands/import_awin_reports.py` reads Awin's own
+transaction report and stores each transaction (status, commission and sale amounts, the click reference Awin reports)
+in `network_report_rows`, matching it to an offer and affiliate link only through that reference. `/go/` emits no
+click reference today, so most rows match through the reference stored in the Awin link itself (or stay unmatched);
+nothing infers a sale from a click. See [backend-network-reports.md](backend-network-reports.md).
+
 ## Provider host allowlist
 
 `app/core/affiliate_hosts.py` decides which hosts a link may point to, from the link's `provider` text (the admin

@@ -181,20 +181,31 @@ def _advertiser(item: dict[str, Any]) -> tuple[int, str]:
     return advertiser_id, name
 
 
-def _date(value: object) -> datetime | None:
-    if value is None or value == "":
-        return None
+def parse_utc_timestamp(value: object) -> datetime | None:
+    """``YYYY-MM-DDTHH:MM:SS[.fraction][Z]`` read as UTC (years 2000 to 2100), else ``None``.
+
+    Shared by every Awin parser (promotions and transactions) so one rule decides what a timestamp is.
+    """
     match = _DATE.fullmatch(value) if isinstance(value, str) else None
     if match is None:
-        raise _Reject(SkipReason.INVALID_DATE)
+        return None
     year, month, day, hour, minute, second = (int(match[n]) for n in range(1, 7))
     micro = int((match[7] or "0").ljust(MICROSECOND_DIGITS, "0")[:MICROSECOND_DIGITS])
     if not MIN_YEAR <= year <= MAX_YEAR:
-        raise _Reject(SkipReason.INVALID_DATE)
+        return None
     try:
         return datetime(year, month, day, hour, minute, second, micro, tzinfo=UTC)
     except ValueError:
-        raise _Reject(SkipReason.INVALID_DATE) from None
+        return None
+
+
+def _date(value: object) -> datetime | None:
+    if value is None or value == "":
+        return None
+    parsed = parse_utc_timestamp(value)
+    if parsed is None:
+        raise _Reject(SkipReason.INVALID_DATE)
+    return parsed
 
 
 def _window(

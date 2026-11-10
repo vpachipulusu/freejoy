@@ -1,7 +1,8 @@
-"""A small client for the Awin Publisher API's promotions endpoint (offers importer, FREEJ-46).
+"""A small client for the Awin Publisher API: promotions (offers importer, FREEJ-46) and transactions
+(network report ingest, FREEJ-51).
 
-``AwinClient`` is the seam: the importer asks it for one page of promotions and gets a
-``PromotionsPage`` or an ``AwinError`` that carries a reason code and nothing else. ``HttpxAwinClient``
+``AwinClient`` is the seam: an importer asks it for one page of promotions or transactions and gets a
+``PromotionsPage``/``TransactionsPage`` or an ``AwinError`` that carries a reason code and nothing else. ``HttpxAwinClient``
 is the real implementation. Everything it does is chosen to keep three things true:
 
 * **The token only ever travels in an ``Authorization`` header.** Awin also accepts an
@@ -22,6 +23,12 @@ bodies) is handled defensively: ``parse_promotions`` accepts a bare list or an o
 under ``data`` and anything else fails closed as ``unrecognised_response``. Error bodies are never
 read. See ``docs/developer/backend-awin-import.md`` for the list of unverified assumptions.
 
+Transactions are a ``GET`` on ``/publishers/{id}/transactions/`` with ``startDate``, ``endDate``, ``dateType``
+and ``timezone`` (all in Awin's public documentation, which also caps the range at 31 days) plus ``page`` and
+``pageSize``, which the documentation does not mention: they are an assumption that
+``docs/developer/backend-network-reports.md`` lists. Same host, same ``Authorization`` header, same limiter,
+retries and reason codes as promotions.
+
 Do not use it in a process where Sentry is initialised: the SDK's httpx integration would record each
 request as a breadcrumb. The import command starts Sentry only after the last request.
 """
@@ -34,7 +41,7 @@ import re
 import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, Protocol, get_args
 
 import httpx
@@ -45,6 +52,10 @@ from app.core.call_limiter import SlidingWindowLimiter
 BASE_URL = "https://api.awin.com"
 USER_AGENT = "Freejoy-AwinImport/1.0"
 REGION_CODES = ("GB",)
+TRANSACTIONS_MAX_RANGE = timedelta(
+    days=31
+)  # Awin's documented maximum between startDate and endDate
+TRANSACTIONS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
 
 MIN_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 200
@@ -148,11 +159,25 @@ class PromotionsPage:
     total_pages_present: bool = False  # pagination.totalPages was there (usable or not)
 
 
+@dataclass(frozen=True)
+class TransactionsPage:
+    """One page of raw transactions (untrusted) and, when the response said so, how many pages exist."""
+
+    items: tuple[Any, ...]
+    total_pages: int | None = None
+
+
 class AwinClient(Protocol):
     async def fetch_promotions(
         self, filters: PromotionFilters, *, page: int, page_size: int
     ) -> PromotionsPage:
         """One page of promotions; raises ``AwinError`` (reason code only) on any failure."""
+
+    async def fetch_transactions(
+        self, start: datetime, end: datetime, *, page: int, page_size: int
+    ) -> TransactionsPage:
+        """One page of the transactions dated from ``start`` to ``end`` (aware, at most 31 days apart);
+        raises ``AwinError`` (reason code only) on any failure."""
 
     async def aclose(self) -> None: ...
 
@@ -161,30 +186,58 @@ class CallLimiter(Protocol):
     async def acquire(self) -> None: ...
 
 
-def parse_promotions(payload: object) -> PromotionsPage | None:
-    """A page from a decoded body, or ``None`` when the envelope is not one of the known shapes.
+def _envelope(payload: object) -> tuple[tuple[Any, ...], int | None] | None:
+    """The items and the page total of a decoded body, or ``None`` for an unknown envelope.
 
     Known: a bare list, or an object whose ``data`` is a list (with an optional ``pagination`` object
     whose ``totalPages`` is a non-negative integer). The total is only a hint to stop early.
     """
     if isinstance(payload, list):
-        return PromotionsPage(tuple(payload))
+        return tuple(payload), None
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
         return None
     pagination = payload.get("pagination")
     total = pagination.get("totalPages") if isinstance(pagination, dict) else None
     valid = isinstance(total, int) and not isinstance(total, bool) and total >= 0
+    return tuple(payload["data"]), total if valid else None
+
+
+def parse_promotions(payload: object) -> PromotionsPage | None:
+    """A promotions page from a decoded body, or ``None`` when the envelope is unknown."""
+    found = _envelope(payload)
+    if not found:
+        return None
+    pagination = payload.get("pagination") if isinstance(payload, dict) else None
     present = isinstance(pagination, dict) and "totalPages" in pagination
-    return PromotionsPage(
-        tuple(payload["data"]), total if valid else None, "object", present
-    )
+    kind: Literal["list", "object"] = "list" if isinstance(payload, list) else "object"
+    return PromotionsPage(*found, kind, present)
+
+
+def parse_transactions(payload: object) -> TransactionsPage | None:
+    """A transactions page from a decoded body, or ``None`` when the envelope is unknown."""
+    found = _envelope(payload)
+    return TransactionsPage(*found) if found else None
 
 
 @dataclass(frozen=True)
-class _Outcome:
-    page: PromotionsPage | None = None
+class _Request[T]:
+    method: str
+    url: str
+    parse: Callable[[object], T | None]
+    json: dict[str, Any] | None = None
+    params: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class _Outcome[T]:
+    page: T | None = None
     failure: AwinReason | None = None
     retry_after: float | None = None
+
+
+def _check_page(page: int, page_size: int) -> None:
+    if page < 1 or not MIN_PAGE_SIZE <= page_size <= MAX_PAGE_SIZE:
+        raise ValueError("page must be at least 1 and page_size between 10 and 200")
 
 
 def _retry_after(value: str | None) -> float | None:
@@ -245,6 +298,7 @@ class HttpxAwinClient:
             raise ValueError("the token must be printable ASCII without whitespace")
         _quiet_http_loggers()
         self._url = f"{BASE_URL}/publisher/{publisher_id}/promotions"
+        self._transactions_url = f"{BASE_URL}/publishers/{publisher_id}/transactions/"
         self._publisher_id = publisher_id
         self._token = token
         self._limiter: CallLimiter = limiter or SlidingWindowLimiter(
@@ -278,16 +332,41 @@ class HttpxAwinClient:
     async def fetch_promotions(
         self, filters: PromotionFilters, *, page: int, page_size: int
     ) -> PromotionsPage:
-        if page < 1 or not MIN_PAGE_SIZE <= page_size <= MAX_PAGE_SIZE:
-            raise ValueError("page must be at least 1 and page_size between 10 and 200")
+        _check_page(page, page_size)
         body = {
             "filters": filters.to_json(),
             "pagination": {"page": page, "pageSize": page_size},
         }
-        outcome = _Outcome(failure=AwinReason.CONNECTION_ERROR)
+        return await self._send(
+            _Request("POST", self._url, parse_promotions, json=body)
+        )
+
+    async def fetch_transactions(
+        self, start: datetime, end: datetime, *, page: int, page_size: int
+    ) -> TransactionsPage:
+        _check_page(page, page_size)
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("start and end must be timezone-aware")
+        first, last = start.astimezone(UTC), end.astimezone(UTC)
+        if last < first or last - first > TRANSACTIONS_MAX_RANGE:
+            raise ValueError("end must not precede start or be over 31 days after it")
+        params = {
+            "startDate": first.strftime(TRANSACTIONS_DATE_FORMAT),
+            "endDate": last.strftime(TRANSACTIONS_DATE_FORMAT),
+            "dateType": "transaction",
+            "timezone": "UTC",
+            "page": str(page),
+            "pageSize": str(page_size),
+        }
+        return await self._send(
+            _Request("GET", self._transactions_url, parse_transactions, params=params)
+        )
+
+    async def _send[T](self, request: _Request[T]) -> T:
+        outcome: _Outcome[T] = _Outcome(failure=AwinReason.CONNECTION_ERROR)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             await self._limiter.acquire()
-            outcome = await self._attempt(body)
+            outcome = await self._attempt(request)
             if outcome.page is not None:
                 return outcome.page
             if outcome.failure not in _RETRYABLE or attempt == MAX_ATTEMPTS:
@@ -302,10 +381,10 @@ class HttpxAwinClient:
         )
         return max(backoff, retry_after or 0.0)
 
-    async def _attempt(self, body: dict[str, Any]) -> _Outcome:
+    async def _attempt[T](self, request: _Request[T]) -> _Outcome[T]:
         try:
             async with asyncio.timeout(ATTEMPT_DEADLINE_SECONDS):
-                return await self._exchange(body)
+                return await self._exchange(request)
         except (TimeoutError, httpx.TimeoutException):
             return _Outcome(failure=AwinReason.TIMEOUT)
         except httpx.HTTPError as error:
@@ -314,7 +393,7 @@ class HttpxAwinClient:
                 failure=AwinReason.TLS_ERROR if tls else AwinReason.CONNECTION_ERROR
             )
 
-    async def _exchange(self, body: dict[str, Any]) -> _Outcome:
+    async def _exchange[T](self, request: _Request[T]) -> _Outcome[T]:
         headers = {
             "Authorization": f"Bearer {self._token.get_secret_value()}",
             "Accept": "application/json",
@@ -322,7 +401,11 @@ class HttpxAwinClient:
             "User-Agent": USER_AGENT,
         }
         async with self._http.stream(
-            "POST", self._url, json=body, headers=headers
+            request.method,
+            request.url,
+            json=request.json,
+            params=request.params,
+            headers=headers,
         ) as response:
             failure = _status_failure(response.status_code)
             if failure is not None:  # the error body is never read
@@ -331,10 +414,12 @@ class HttpxAwinClient:
             encoding = response.headers.get("content-encoding", "identity")
             if encoding.strip().lower() not in ("", "identity"):
                 return _Outcome(failure=AwinReason.UNSUPPORTED_ENCODING)
-            return await self._decode(response)
+            return await self._decode(response, request.parse)
 
     @staticmethod
-    async def _decode(response: httpx.Response) -> _Outcome:
+    async def _decode[T](
+        response: httpx.Response, parse: Callable[[object], T | None]
+    ) -> _Outcome[T]:
         declared = response.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
             return _Outcome(failure=AwinReason.RESPONSE_TOO_LARGE)
@@ -349,7 +434,7 @@ class HttpxAwinClient:
             payload = json.loads(b"".join(chunks))
         except (ValueError, RecursionError):
             return _Outcome(failure=AwinReason.INVALID_JSON)
-        page = parse_promotions(payload)
+        page = parse(payload)
         if page is None:
             return _Outcome(failure=AwinReason.UNRECOGNISED_RESPONSE)
         return _Outcome(page=page)

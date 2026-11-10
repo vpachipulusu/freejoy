@@ -263,7 +263,7 @@ async def _progress(
             return
 
 
-def _cause(error: Exception) -> str:
+def failure_cause(error: Exception) -> str:
     """``lock_timeout`` for a database lock wait that ran out, else the exception type name."""
     wrapped = getattr(error, "orig", None)
     for candidate in (wrapped, getattr(wrapped, "__cause__", None)):
@@ -293,6 +293,6 @@ async def run_import(
     except ImportAborted as error:
         raise ImportFailed(progress.report, progress.stage, error.reason) from None
     except Exception as error:  # noqa: BLE001  (the type is reported, never the message)
-        cause = RUN_DEADLINE if deadline.expired() else _cause(error)
+        cause = RUN_DEADLINE if deadline.expired() else failure_cause(error)
         raise ImportFailed(progress.report, progress.stage, cause) from None
     return progress.report

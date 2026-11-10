@@ -6,7 +6,14 @@ is in ``app.services.awin_shape_report``; this module only formats it, and a fai
 reported as its exception type only, never as text, so the probe cannot break or leak into the run.
 """
 
-from app.core.awin_client import AwinClient, PromotionFilters, PromotionsPage
+from datetime import datetime
+
+from app.core.awin_client import (
+    AwinClient,
+    PromotionFilters,
+    PromotionsPage,
+    TransactionsPage,
+)
 from app.services.awin_shape_report import NameList, ShapeCollector, ShapeReport
 
 PROG = "import-awin-offers"
@@ -34,6 +41,14 @@ class PageRecorder:
             except Exception as error:  # noqa: BLE001  (the run goes on; only the type is kept)
                 self.failure = type(error).__name__
         return fetched
+
+    async def fetch_transactions(
+        self, start: datetime, end: datetime, *, page: int, page_size: int
+    ) -> TransactionsPage:
+        """Not used by the importer; passed on so the wrapper is a whole ``AwinClient``."""
+        return await self._inner.fetch_transactions(
+            start, end, page=page, page_size=page_size
+        )
 
     async def aclose(self) -> None:
         await self._inner.aclose()

@@ -42,6 +42,8 @@ EXPECTED_TABLES = {
     # Awin importer provenance
     "offer_imports",
     "merchant_imports",
+    # network report ingest
+    "network_report_rows",
 }
 
 BILLING_COLUMNS = {
