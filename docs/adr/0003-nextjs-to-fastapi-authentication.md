@@ -52,10 +52,18 @@ for now. This overrides the default above (no schema or docs UI in production) f
 - The opt-in setting `API_DOCS_ENABLED` (default `false`) serves `/docs`, `/redoc` and the OpenAPI schema in a
   non-relaxed environment. It relaxes no other production check. The backend logs one warning at startup while it
   is on in such an environment.
-- The docs UI has no Authorize button: the `X-Internal-Key` header is not in the schema, so "Try it out" on
-  protected routes answers 401. The schema is the same document as `nextjs-frontend/openapi.json`.
+- The docs UI has no Authorize button (no security scheme). `X-Internal-Key` and `X-Session-Token` appear as
+  optional header parameters on protected routes, so "Try it out" answers 401 unless the caller types a valid key;
+  anyone holding the key can drive production from the browser, which is one more reason to remove the flag at
+  go-live.
+- The served schema is the document `commands.generate_openapi_schema` writes to
+  `nextjs-frontend/openapi.json`, before the tag prefix is stripped from operationIds and with the runtime title
+  and version; it contains no servers block, URLs, examples or security schemes.
+- `/openapi.json` (about 490 KB), `/docs` and `/redoc` sit outside the rate-limited router, another reason to
+  remove the flag at go-live.
 - **Go-live step:** delete `API_DOCS_ENABLED` from the Vercel backend project's environment variables and redeploy
-  the backend. Production then returns 404 for `/docs`, `/redoc` and `/openapi.json` again.
+  the backend. Production then returns 404 for `/docs`, `/redoc` and `/openapi.json` again. Delete the variable
+  rather than blanking it: `API_DOCS_ENABLED=` (empty) fails settings validation and the backend does not start.
 
 ## Alternatives considered
 

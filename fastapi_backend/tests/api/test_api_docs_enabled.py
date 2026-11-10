@@ -88,16 +88,19 @@ async def test_production_serves_the_docs_ui_when_the_setting_is_true(
     assert "<html" in text.lower()
 
 
+@pytest.mark.parametrize("openapi_url", ["/openapi.json", "/custom-schema.json"])
 async def test_production_serves_the_schema_at_the_openapi_url_when_the_setting_is_true(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, openapi_url: str
 ) -> None:
     _configure(monkeypatch, environment="production", docs_enabled=True)
-    monkeypatch.setattr(settings, "OPENAPI_URL", "/custom-schema.json")
+    monkeypatch.setattr(settings, "OPENAPI_URL", openapi_url)
 
-    status, body, _ = await _get("/custom-schema.json")
+    status, body, _ = await _get(openapi_url)
 
     assert status == 200
     assert body is not None
+    assert "openapi" in body
+    assert "paths" in body
     assert body["info"]["title"] == settings.APP_NAME  # type: ignore[index]
 
 
