@@ -16,7 +16,8 @@ assumptions about Awin's response is what the first ``--dry-run`` confirms or br
 
 Needs ``AWIN_PUBLISHER_ID`` and ``AWIN_OAUTH_API_TOKEN`` (the token goes only in an Authorization header) and
 ``DATABASE_URL`` (the app settings require it; a ``--dry-run`` opens no connection to it). Not scheduled:
-the housekeeping workflow deliberately excludes the Awin commands until the owner has run this once.
+nothing runs it automatically (the housekeeping workflow does not include it); adding it is the owner's decision
+after a first ``--dry-run``.
 
 Output is counts by outcome and by reason code. No URL, token, amount, click reference or transaction id is
 ever printed or logged. A failed run sends ONE Sentry event (stage, cause, counts, reason codes) after the
