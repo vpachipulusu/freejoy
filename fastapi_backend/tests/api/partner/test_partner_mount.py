@@ -16,6 +16,7 @@ from app.partner.app import create_partner_app, install_partner_surface
 from app.partner.mount import PartnerMount
 from app.partner.surface import PARTNER_PREFIX
 from tests.api.partner.support import SURFACE_HEADERS, build_scope, call_raw
+from tests.partner_world import PartnerWorld
 
 
 @pytest.fixture(params=[False, True], ids=["disabled", "enabled"])
@@ -129,6 +130,37 @@ async def test_a_root_path_of_the_prefix_cannot_move_a_request_into_a_main_app_r
     """A runtime that serves the app under ``root_path=/partner/v1`` strips it before routing, so
     ``/partner/v1/health`` looks like ``/health``. The mount also compares the full path."""
     response = await call_raw(app, "GET", path, root_path=PARTNER_PREFIX)
+
+    # Off: the 404. On: the 401 of a caller with no key. Never a main-app answer (no key, no 401 from there).
+    assert response.status == (401 if switch else 404)
+    assert response.header("x-freejoy-surface") == "partner"
+    assert response.json() == (
+        {"success": False, "error": "Unauthorized"}
+        if switch
+        else {"success": False, "error": "Not Found"}
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/partner/v1/health",
+        "/partner/v1/v1/me",
+        "/partner/v1/docs",
+        "/partner/v1/openapi.json",
+        "/partner/v1/me",
+    ],
+)
+async def test_a_root_path_of_the_prefix_fails_closed_even_with_a_valid_key(
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """With ``root_path=/partner/v1`` the sub-app sees the path below the prefix twice stripped, so its routes
+    do not match and answer 404 (never a main-app route, and not the endpoint either)."""
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
+
+    response = await call_raw(
+        app, "GET", path, root_path=PARTNER_PREFIX, headers=world.headers()
+    )
 
     assert _is_partner_404(response.headers, response.status)
     assert response.json() == {"success": False, "error": "Not Found"}

@@ -4,5 +4,147 @@
     "title": "Freejoy Partner API",
     "version": "1.0.0"
   },
-  "paths": {}
+  "paths": {
+    "/partner/v1/me": {
+      "get": {
+        "summary": "Who this key belongs to",
+        "description": "The merchant the key was issued to and the key's label. It changes nothing; it proves the whole path.",
+        "operationId": "partner-me",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rate limiter unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false,
+            "title": "Success",
+            "default": false
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "description": "Body of every error response (documents the runtime envelope in OpenAPI)."
+      },
+      "MeData": {
+        "properties": {
+          "merchant_name": {
+            "type": "string",
+            "title": "Merchant Name"
+          },
+          "key_label": {
+            "type": "string",
+            "title": "Key Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merchant_name",
+          "key_label"
+        ],
+        "title": "MeData"
+      },
+      "MeResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/MeData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "MeResponse"
+      }
+    },
+    "securitySchemes": {
+      "PartnerKey": {
+        "type": "http",
+        "description": "Your partner API key: fj_<env>_<key_id>_<secret>. Sent only as a bearer token.",
+        "scheme": "bearer"
+      }
+    }
+  }
 }

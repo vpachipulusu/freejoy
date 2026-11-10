@@ -8,7 +8,11 @@ response the sub-app can produce, including 404s and 500s, and the ones it write
 For every partner response it:
 
 * answers 404 for any request while the surface is switched off (``PARTNER_API_ENABLED``), whatever
-  the headers say, with the same body as an unknown path while it is on;
+  the headers say;
+* while it is on, authenticates the caller BEFORE routing and before the body is looked at
+  (``app.partner.auth``): without a valid partner key every path and method, unknown ones included,
+  gets the same 401, so nothing about which routes exist is learned and an invalid body with no key is
+  a 401, not a 422 or a 404. The sub-app's own ``require_partner_key`` then hands its routes the context;
 * owns the 413 for an over-long body: refused by the declared ``Content-Length``, and again by
   counting the bytes actually received (a missing or false length is never trusted, and the body is
   never buffered by the surface). Application code cannot turn it into something else, see
@@ -25,11 +29,13 @@ import logging
 from collections.abc import Callable
 
 from starlette.datastructures import Headers
+from starlette.responses import Response
 from starlette.routing import BaseRoute
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from app.core.errors import error_response
+from app.partner.auth import CONTEXT_SCOPE_KEY, Authenticator
 
 logger = logging.getLogger("yourapp.partner")
 
@@ -39,9 +45,7 @@ SURFACE_NAME = "partner"
 CACHE_CONTROL = "no-store, private"
 # Partner submissions are small JSON drafts; raise this deliberately when a real endpoint needs more.
 MAX_BODY_BYTES = 262_144
-NOT_FOUND_MESSAGE = (
-    "Not Found"  # Starlette's own text for an unknown path, so both 404s match.
-)
+NOT_FOUND_MESSAGE = "Not Found"  # Starlette's own text for an unknown path (an authenticated caller's 404).
 PAYLOAD_TOO_LARGE_MESSAGE = "Payload too large"
 
 EnabledCheck = Callable[[], bool]
@@ -157,10 +161,12 @@ class PartnerSurface:
         app: ASGIApp,
         *,
         enabled: EnabledCheck,
+        authenticator: Authenticator,
         max_body_bytes: int = MAX_BODY_BYTES,
     ) -> None:
         self.app = app
         self._enabled = enabled
+        self._authenticator = authenticator
         self._max_body_bytes = max_body_bytes
 
     @property
@@ -177,6 +183,12 @@ class PartnerSurface:
         if not self._enabled():
             await error_response(404, NOT_FOUND_MESSAGE)(scope, receive, send)
             return
+        outcome = await self._authenticator(scope)
+        if isinstance(outcome, Response):
+            await outcome(scope, receive, send)
+            return
+        # A copy, so nothing a caller sent can pre-set the context and nothing leaks to the server's scope.
+        scope = {**scope, CONTEXT_SCOPE_KEY: outcome}
         if _declares_too_much(scope, self._max_body_bytes):
             response = error_response(413, PAYLOAD_TOO_LARGE_MESSAGE)
             await response(scope, receive, send)

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # same 404 as an unknown path. Nothing is served there yet; this is the switch for later stories.
     # Blank means off; any other non-boolean value stops startup.
     PARTNER_API_ENABLED: bool = False
+    # The restricted database role the partner surface connects as (ADR-013, ``commands/sql/partner_role.sql``).
+    # Required when PARTNER_API_ENABLED is true, and it must not be the owner's DATABASE_URL; unused otherwise.
+    PARTNER_DATABASE_URL: SecretStr | None = None
 
     # Database
     DATABASE_URL: str
@@ -146,6 +149,30 @@ class Settings(BaseSettings):
         surface in a state nobody chose.
         """
         return False if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("PARTNER_DATABASE_URL", mode="before")
+    @classmethod
+    def clean_partner_database_url(cls, value: object) -> object:
+        """Blank (or only spaces) means unset; a stray space or newline around a pasted URL is dropped."""
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def validate_partner_database(self) -> "Settings":
+        """The partner surface needs its own, restricted database role before it can be switched on."""
+        if not self.PARTNER_API_ENABLED:
+            return self
+        url = self.PARTNER_DATABASE_URL
+        if url is None:
+            raise ValueError(
+                "PARTNER_DATABASE_URL must be set when PARTNER_API_ENABLED is true"
+            )
+        if url.get_secret_value() == self.DATABASE_URL:
+            raise ValueError(
+                "PARTNER_DATABASE_URL must be the restricted partner role, not DATABASE_URL"
+            )
+        return self
 
     @field_validator("AWIN_PUBLISHER_ID", mode="before")
     @classmethod

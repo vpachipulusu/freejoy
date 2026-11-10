@@ -105,3 +105,36 @@ def test_engine_and_target_reprs_never_contain_the_password() -> None:
     assert "s3cret-pw" not in repr(built)
     assert "s3cret-pw" not in str(built.url)
     assert "s3cret-pw" not in repr(to_async_target(raw))
+
+
+async def test_partner_provider_builds_its_engine_on_first_use_from_its_own_url() -> (
+    None
+):
+    from app.core.database import PartnerSessionProvider
+
+    url = "postgresql+asyncpg://freejoy_partner:placeholder@localhost:1/partner"
+    provider = PartnerSessionProvider(url)
+    assert provider._maker is None  # nothing is built at construction
+
+    async with provider.session() as session:
+        assert isinstance(session, AsyncSession)
+        assert session.bind is not engine
+        assert (
+            session.bind is not None and session.bind.url.username == "freejoy_partner"
+        )  # type: ignore[attr-defined]
+    maker = provider._maker
+    async with provider.session():
+        pass
+    assert provider._maker is maker  # built once
+
+
+async def test_partner_provider_without_a_url_fails_when_a_session_is_asked_for() -> (
+    None
+):
+    from app.core.database import PartnerDatabaseUnavailable, PartnerSessionProvider
+
+    provider = PartnerSessionProvider(None)
+
+    with pytest.raises(PartnerDatabaseUnavailable):
+        async with provider.session():
+            pass

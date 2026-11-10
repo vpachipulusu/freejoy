@@ -17,7 +17,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.partner.app import create_partner_api
 from app.partner.surface import PartnerSurface
-from tests.api.partner.support import SURFACE_HEADERS, call_raw, error_logs
+from tests.api.partner.support import (
+    SURFACE_HEADERS,
+    allow_all,
+    call_raw,
+    error_logs,
+)
 
 LIMIT = 10
 TOO_LARGE = {"success": False, "error": "Payload too large"}
@@ -50,7 +55,9 @@ class DrainBody:
 
 
 def _surface(api) -> PartnerSurface:  # type: ignore[no-untyped-def]
-    return PartnerSurface(api, enabled=lambda: True, max_body_bytes=LIMIT)
+    return PartnerSurface(
+        api, enabled=lambda: True, authenticator=allow_all, max_body_bytes=LIMIT
+    )
 
 
 async def test_a_handler_that_swallows_every_exception_still_gets_a_413() -> None:
@@ -160,7 +167,10 @@ async def test_an_app_that_swallows_the_overflow_and_sends_nothing_still_gets_a_
     with error_logs() as records:
         response = await call_raw(
             PartnerSurface(
-                ReadsThenSwallows(), enabled=lambda: True, max_body_bytes=LIMIT
+                ReadsThenSwallows(),
+                enabled=lambda: True,
+                authenticator=allow_all,
+                max_body_bytes=LIMIT,
             ),
             "POST",
             "/x",
@@ -190,7 +200,9 @@ async def test_after_the_response_has_started_receive_reports_a_disconnect() -> 
     inner = StartsThenReads()
 
     response = await call_raw(
-        PartnerSurface(inner, enabled=lambda: True, max_body_bytes=LIMIT),
+        PartnerSurface(
+            inner, enabled=lambda: True, authenticator=allow_all, max_body_bytes=LIMIT
+        ),
         "POST",
         "/x",
         chunks=OVER,
@@ -223,7 +235,10 @@ async def test_an_error_after_the_413_was_sent_is_a_warning_not_a_second_answer(
     with caplog.at_level(logging.WARNING, logger="yourapp.partner"):
         response = await call_raw(
             PartnerSurface(
-                RaisesAfterReplacement(), enabled=lambda: True, max_body_bytes=LIMIT
+                RaisesAfterReplacement(),
+                enabled=lambda: True,
+                authenticator=allow_all,
+                max_body_bytes=LIMIT,
             ),
             "POST",
             "/x",
@@ -243,7 +258,7 @@ async def test_cancellation_is_never_swallowed() -> None:
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
             raise asyncio.CancelledError
 
-    surface = PartnerSurface(Cancelled(), enabled=lambda: True)
+    surface = PartnerSurface(Cancelled(), enabled=lambda: True, authenticator=allow_all)
 
     with pytest.raises(asyncio.CancelledError):
         await surface(
@@ -260,7 +275,11 @@ async def test_an_error_after_a_started_response_is_not_hidden() -> None:
             raise ValueError("mid-stream")
 
     response = await call_raw(
-        PartnerSurface(StartsThenFails(), enabled=lambda: True), "GET", "/x"
+        PartnerSurface(
+            StartsThenFails(), enabled=lambda: True, authenticator=allow_all
+        ),
+        "GET",
+        "/x",
     )
 
     assert isinstance(response.error, ValueError)
@@ -286,7 +305,12 @@ async def test_reading_again_after_the_overflow_reports_a_disconnect() -> None:
                 seen.append((await receive())["type"])
 
     response = await call_raw(
-        PartnerSurface(ReadsAgain(), enabled=lambda: True, max_body_bytes=LIMIT),
+        PartnerSurface(
+            ReadsAgain(),
+            enabled=lambda: True,
+            authenticator=allow_all,
+            max_body_bytes=LIMIT,
+        ),
         "POST",
         "/x",
         chunks=OVER,

@@ -1,10 +1,18 @@
 """The partner sub-app and the wrapper that is mounted at ``/partner/v1`` (ADR-013)."""
 
-from fastapi import FastAPI
+from typing import Any
+
+from fastapi import Depends, FastAPI
 
 from app.core.config import settings
-from app.core.errors import ERROR_RESPONSES, register_error_handlers
+from app.core.errors import ERROR_RESPONSES, ErrorResponse, register_error_handlers
+from app.core.partner_keys import running_environment
+from app.core.rate_limiter_provider import get_rate_limiter
+from app.partner import deps
+from app.partner.auth import PartnerAuthenticator, require_partner_key
+from app.partner.limits import PARTNER_LIMIT_RESPONSES, limit_partner_requests
 from app.partner.mount import PartnerMount
+from app.partner.routes import router
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
 
 PARTNER_API_TITLE = "Freejoy Partner API"
@@ -12,8 +20,23 @@ PARTNER_API_TITLE = "Freejoy Partner API"
 PARTNER_API_VERSION = "1.0.0"
 
 
+# Answers every partner route can give besides its own. 401 is decided before routing (the surface) and again by
+# ``require_partner_key``; 429 and 503 come from the rate limits.
+PARTNER_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **ERROR_RESPONSES,
+    401: {
+        "model": ErrorResponse,
+        "description": "Missing, unknown, revoked or malformed key",
+    },
+    **PARTNER_LIMIT_RESPONSES,
+}
+
+
 def create_partner_api() -> FastAPI:
-    """The sub-app itself: no docs, no schema route, no slash redirects, the shared error envelope."""
+    """The sub-app itself: no docs, no schema route, no slash redirects, the shared error envelope.
+
+    Authentication and the rate limit are attached here, to the app, so no route can be added without them.
+    """
     api = FastAPI(
         title=PARTNER_API_TITLE,
         version=PARTNER_API_VERSION,
@@ -21,16 +44,33 @@ def create_partner_api() -> FastAPI:
         redoc_url=None,
         openapi_url=None,
         redirect_slashes=False,
-        responses=ERROR_RESPONSES,
+        responses=PARTNER_RESPONSES,
+        dependencies=[Depends(require_partner_key), Depends(limit_partner_requests)],
     )
     register_error_handlers(api)
+    api.include_router(router)
     return api
+
+
+def create_partner_authenticator() -> PartnerAuthenticator:
+    """The authenticator the surface runs. Everything it needs is looked up per request (never captured at
+    import or in a lifespan hook), so a mounted sub-app needs no startup and tests can replace each piece."""
+    return PartnerAuthenticator(
+        sessions=lambda: deps.get_partner_session_provider(),
+        stores=lambda session: deps.build_key_store(session),
+        limiter=lambda: get_rate_limiter(),
+        environment=lambda: running_environment(
+            settings.VERCEL_ENV, settings.ENVIRONMENT
+        ),
+    )
 
 
 def create_partner_app() -> PartnerSurface:
     """What ``app.main`` mounts: the sub-app inside its surface wrapper."""
     return PartnerSurface(
-        create_partner_api(), enabled=lambda: settings.PARTNER_API_ENABLED
+        create_partner_api(),
+        enabled=lambda: settings.PARTNER_API_ENABLED,
+        authenticator=create_partner_authenticator(),
     )
 
 

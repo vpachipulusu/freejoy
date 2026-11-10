@@ -63,3 +63,40 @@ class DefaultSessionProvider:
     async def session(self) -> AsyncIterator[AsyncSession]:
         async with self._maker() as session:
             yield session
+
+
+class PartnerDatabaseUnavailable(RuntimeError):
+    """The partner surface has no restricted database role to connect as."""
+
+
+class PartnerSessionProvider:
+    """Sessions for the partner surface, on the restricted database role (ADR-013, FREEJ-57).
+
+    Bound to ``PARTNER_DATABASE_URL`` (the role ``freejoy_partner``, created from
+    ``commands/sql/partner_role.sql``), never to ``DATABASE_URL``: every partner route and the
+    partner authentication use this provider and nothing else, so a bug in partner code cannot
+    reach the tables the role cannot see.
+
+    The engine is built on first use, not at import and not in a lifespan hook: a mounted sub-app's
+    lifespan never runs, and an engine built at import would need the URL on every deployment that
+    leaves the surface off. Fixed to one URL; a missing one fails at the first ``session()``.
+    """
+
+    def __init__(self, database_url: str | None) -> None:
+        self._database_url = database_url
+        self._maker: async_sessionmaker[AsyncSession] | None = None
+
+    def _session_maker(self) -> async_sessionmaker[AsyncSession]:
+        if self._maker is None:
+            if not self._database_url:
+                raise PartnerDatabaseUnavailable("PARTNER_DATABASE_URL is not set")
+            self._maker = async_sessionmaker(
+                build_engine(self._database_url),
+                expire_on_commit=settings.EXPIRE_ON_COMMIT,
+            )
+        return self._maker
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        async with self._session_maker()() as session:
+            yield session

@@ -3,6 +3,8 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 
+PARTNER_URL = "postgresql+asyncpg://freejoy_partner:placeholder@localhost:5432/yourapp"
+
 
 def test_production_requires_auth_configuration(
     monkeypatch: pytest.MonkeyPatch,
@@ -189,6 +191,9 @@ def test_the_partner_switch_reads_booleans(
     monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool
 ) -> None:
     monkeypatch.setenv("PARTNER_API_ENABLED", raw)
+    monkeypatch.setenv(
+        "PARTNER_DATABASE_URL", PARTNER_URL
+    )  # required once the switch is on
 
     assert Settings(_env_file=None).PARTNER_API_ENABLED is expected  # type: ignore[call-arg]
 
@@ -207,3 +212,57 @@ def test_the_partner_switch_is_off_when_unset(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("PARTNER_API_ENABLED", raising=False)
 
     assert Settings(_env_file=None).PARTNER_API_ENABLED is False  # type: ignore[call-arg]
+
+
+def test_the_partner_switch_on_without_a_partner_database_url_stops_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.delenv("PARTNER_DATABASE_URL", raising=False)
+
+    with pytest.raises(ValidationError, match="PARTNER_DATABASE_URL must be set"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_partner_database_url_counts_as_missing(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("PARTNER_DATABASE_URL", blank)
+
+    with pytest.raises(ValidationError, match="PARTNER_DATABASE_URL"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_the_partner_database_url_is_not_needed_while_the_switch_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "false")
+    monkeypatch.delenv("PARTNER_DATABASE_URL", raising=False)
+
+    assert Settings(_env_file=None).PARTNER_DATABASE_URL is None  # type: ignore[call-arg]
+
+
+def test_the_partner_database_url_may_not_be_the_owner_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", PARTNER_URL)
+    monkeypatch.setenv("PARTNER_DATABASE_URL", PARTNER_URL)
+
+    with pytest.raises(ValidationError, match="not DATABASE_URL"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_the_partner_database_url_is_a_secret_and_stays_out_of_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("PARTNER_DATABASE_URL", PARTNER_URL)
+
+    loaded = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert "placeholder" not in repr(loaded)
+    assert loaded.PARTNER_DATABASE_URL is not None
+    assert loaded.PARTNER_DATABASE_URL.get_secret_value() == PARTNER_URL
