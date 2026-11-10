@@ -241,3 +241,79 @@ def test_the_module_function_returns_none_without_url_and_without_deep_link() ->
         )
         == "tracking_destination_mismatch"
     )
+
+
+# --- passive_values (the network report ingest matches a reported click reference against these) ---
+
+
+def test_passive_values_lists_every_clickref_value_in_the_query() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = (
+        "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242"
+        "&clickref=a1&clickref2=b2&clickref6=f6&clickref3="
+    )
+
+    assert passive_values(url) == {"a1", "b2", "f6"}
+
+
+def test_passive_values_ignores_ids_deep_links_and_unknown_names() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&ued=x&other=y"
+
+    assert passive_values(url) == frozenset()
+
+
+def test_passive_values_of_a_malformed_query_is_empty() -> None:
+    from app.services.awin_tracking import passive_values
+
+    assert passive_values("https://www.awin1.com/cread.php?clickref=a;clickref2=b") == (
+        frozenset()
+    )
+    assert passive_values("https://www.awin1.com/cread.php?clickref") == frozenset()
+
+
+def test_passive_values_can_be_limited_to_named_slots() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = (
+        "https://www.awin1.com/cread.php?awinmid=77&awinaffid=1&clickref=a&clickref2=b"
+    )
+
+    assert passive_values(url, frozenset({"clickref"})) == {"a"}
+    assert passive_values(url, frozenset({"clickref2"})) == {"b"}
+    assert passive_values(url, frozenset()) == frozenset()
+
+
+def test_link_advertiser_id_reads_the_advertiser_of_either_click_shape() -> None:
+    from app.services.awin_tracking import link_advertiser_id
+
+    cread = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref=a"
+    awclick = "https://www.awin1.com/awclick.php?mid=88&id=424242"
+
+    assert link_advertiser_id(cread) == 77
+    assert link_advertiser_id(awclick) == 88
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.awin1.com/other.php?awinmid=77",
+        "https://www.awin1.com/cread.php?awinaffid=424242",
+        "https://www.awin1.com/cread.php?awinmid=77&awinmid=78",
+        "https://www.awin1.com/cread.php?awinmid=abc",
+        "https://www.awin1.com/cread.php?awinmid=",
+        "https://www.awin1.com/cread.php?awinmid=-5",
+        "https://www.awin1.com/cread.php?awinmid=7;awinaffid=1",
+        "https://www.awin1.com/awclick.php?awinmid=77",
+        "https://x.example/landing",
+        "not a url",
+    ],
+)
+def test_link_advertiser_id_is_none_for_anything_not_a_recognised_click_link(
+    url: str,
+) -> None:
+    from app.services.awin_tracking import link_advertiser_id
+
+    assert link_advertiser_id(url) is None

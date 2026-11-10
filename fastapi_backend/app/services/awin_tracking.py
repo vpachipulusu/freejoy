@@ -74,6 +74,39 @@ def _pairs(query: str) -> dict[str, list[str]] | None:
     return found
 
 
+def passive_values(url: str, names: frozenset[str] = PASSIVE_NAMES) -> frozenset[str]:
+    """Every non-empty value of the passive parameters ``names`` (default: ``clickref`` and ``clickref2``
+    to ``clickref6``) in the URL's query.
+
+    The network report ingest matches a reported click reference against these. A query that is not
+    strictly well formed (see ``_pairs``) has none: this never guesses at a malformed link.
+    """
+    params = _pairs(urlsplit(url).query)
+    if params is None:
+        return frozenset()
+    return frozenset(
+        value for name in names & params.keys() for value in params[name] if value
+    )
+
+
+def link_advertiser_id(url: str) -> int | None:
+    """The advertiser id (``awinmid`` on ``/cread.php``, ``mid`` on ``/awclick.php``) of an Awin click link.
+
+    ``None`` unless the path is one of the two known shapes, the query is strictly well formed and the
+    advertiser parameter appears exactly once as plain digits. The report ingest only matches a transaction
+    to a link of the advertiser the transaction was reported for.
+    """
+    parts = urlsplit(url)
+    shape = SHAPES.get(parts.path)
+    params = _pairs(parts.query)
+    if shape is None or params is None:
+        return None
+    values = params.get(shape.advertiser, [])
+    if len(values) != 1 or not re.fullmatch(r"[0-9]{1,18}", values[0], re.ASCII):
+        return None
+    return int(values[0])
+
+
 def _names_and_passives_ok(params: dict[str, list[str]], shape: _Shape) -> bool:
     allowed = {shape.advertiser, shape.publisher} | DEEP_LINK_NAMES | PASSIVE_NAMES
     if not params.keys() <= allowed:

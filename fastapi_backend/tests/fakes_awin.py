@@ -5,9 +5,15 @@ Nothing here opens a socket. ``FakeAwinClient`` is what the importer and the com
 """
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any
 
-from app.core.awin_client import AwinError, PromotionFilters, PromotionsPage
+from app.core.awin_client import (
+    AwinError,
+    PromotionFilters,
+    PromotionsPage,
+    TransactionsPage,
+)
 
 
 class FakeAwinClient:
@@ -19,8 +25,11 @@ class FakeAwinClient:
         *,
         total_pages: int | None = None,
         on_fetch: Callable[[], None] | None = None,
+        transaction_pages: Sequence[Sequence[Any] | AwinError] = (),
     ) -> None:
         self.pages = list(pages)
+        self.transaction_pages = list(transaction_pages)
+        self.transaction_requests: list[tuple[datetime, datetime, int, int]] = []
         self.total_pages = total_pages
         self.on_fetch = on_fetch
         self.requests: list[tuple[PromotionFilters, int, int]] = []
@@ -37,6 +46,21 @@ class FakeAwinClient:
         if isinstance(served, AwinError):
             raise served
         return PromotionsPage(tuple(served), self.total_pages)
+
+    async def fetch_transactions(
+        self, start: datetime, end: datetime, *, page: int, page_size: int
+    ) -> TransactionsPage:
+        """Serves ``transaction_pages`` in order (one list per request, whatever the window)."""
+        self.transaction_requests.append((start, end, page, page_size))
+        if self.on_fetch is not None:
+            self.on_fetch()
+        index = len(self.transaction_requests) - 1
+        served = (
+            self.transaction_pages[index] if index < len(self.transaction_pages) else []
+        )
+        if isinstance(served, AwinError):
+            raise served
+        return TransactionsPage(tuple(served), self.total_pages)
 
     async def aclose(self) -> None:
         self.closed = True

@@ -21,6 +21,7 @@ from app.models.platform.feature_flag import FeatureFlag
 from app.models.platform.invitation import Invitation, InvitationStatus
 from app.models.platform.membership import Membership, MembershipRole
 from app.models.platform.merchant import Merchant
+from app.models.platform.network_report import CommissionStatus, NetworkReportRow
 from app.models.platform.offer import (
     Offer,
     OfferFreshness,
@@ -42,6 +43,7 @@ __all__ = [
     "AuditLog",
     "Category",
     "ClickEvent",
+    "CommissionStatus",
     "EmailSubscriber",
     "EmailTemplate",
     "FeatureFlag",
@@ -52,6 +54,7 @@ __all__ = [
     "MembershipRole",
     "Merchant",
     "MerchantImport",
+    "NetworkReportRow",
     "Notification",
     "Offer",
     "OfferFreshness",
