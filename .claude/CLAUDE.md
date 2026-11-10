@@ -82,7 +82,7 @@ secret in a `NEXT_PUBLIC_*` variable. The brand name is `NEXT_PUBLIC_APP_NAME` (
 
 - Coverage thresholds are ratchets, not the 80% project minimum. Frontend (`vitest.config.ts`): statements 90,
   branches 88, functions 88, lines 91. Backend (`pyproject.toml`): `fail_under = 90.0`. Each sits about 1 to 2
-  points under the measured figure (frontend 91.5 / 90.3 / 89.7 / 92.3; backend 91.3 without the database, 96.2
+  points under the measured figure (frontend 91.5 / 90.3 / 89.7 / 92.3; backend 91.5 without the database, 96.3
   with it). Raise a threshold when measured coverage rises; never lower one.
 - The backend floor is set against the database-less run, the lower of the two. CI and `scripts/gate.sh` run the
   suite with a Postgres (`*_e2e.py` included) and `gate.sh` without `GATE_TEST_DATABASE_URL` runs it

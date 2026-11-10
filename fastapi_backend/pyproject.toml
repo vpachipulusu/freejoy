@@ -46,8 +46,8 @@ src = ["."]
 
 # Coverage ratchet. `uv run pytest --cov` fails when line coverage of app/ and
 # commands/ is below fail_under. fail_under is set about 1 point under the
-# coverage measured without the Postgres-backed *_e2e tests (91.34%; with them
-# 96.21%): raise it as tests are added, never lower it.
+# coverage measured without the Postgres-backed *_e2e tests (91.55%; with them
+# 96.27%): raise it as tests are added, never lower it.
 [tool.coverage.run]
 source = ["app", "commands"]
 
