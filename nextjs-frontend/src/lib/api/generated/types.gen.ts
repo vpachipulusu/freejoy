@@ -928,6 +928,18 @@ export type DisableRequest = {
 };
 
 /**
+ * DismissSourceChangeRequest
+ *
+ * Needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+ */
+export type DismissSourceChangeRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
+};
+
+/**
  * DriftData
  */
 export type DriftData = {
@@ -1892,9 +1904,18 @@ export type OfferOut = {
      */
     updated_at: string;
     /**
+     * Import Provider
+     */
+    import_provider: string | null;
+    /**
+     * Source Changed At
+     */
+    source_changed_at: string | null;
+    /**
      * Review Token
      */
     review_token: string;
+    provenance: OfferProvenanceOut | null;
     /**
      * Summary
      */
@@ -1970,6 +1991,33 @@ export type OfferOut = {
 };
 
 /**
+ * OfferProvenanceOut
+ *
+ * Where an imported offer came from.
+ *
+ * ``source_changed_at`` is set while the source has moved on and nobody has reviewed it: the
+ * importer sets it and "dismiss source change" clears it.
+ */
+export type OfferProvenanceOut = {
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * External Id
+     */
+    external_id: string;
+    /**
+     * Applied At
+     */
+    applied_at: string;
+    /**
+     * Source Changed At
+     */
+    source_changed_at: string | null;
+};
+
+/**
  * OfferStatus
  */
 export type OfferStatus = 'DRAFT' | 'PUBLISHED' | 'EXPIRED' | 'ARCHIVED';
@@ -2016,6 +2064,14 @@ export type OfferSummaryOut = {
      * Updated At
      */
     updated_at: string;
+    /**
+     * Import Provider
+     */
+    import_provider: string | null;
+    /**
+     * Source Changed At
+     */
+    source_changed_at: string | null;
 };
 
 /**
@@ -2071,9 +2127,18 @@ export type OfferWriteOut = {
      */
     updated_at: string;
     /**
+     * Import Provider
+     */
+    import_provider: string | null;
+    /**
+     * Source Changed At
+     */
+    source_changed_at: string | null;
+    /**
      * Review Token
      */
     review_token: string;
+    provenance: OfferProvenanceOut | null;
     /**
      * Summary
      */
@@ -6611,6 +6676,10 @@ export type AdminListOffersData = {
          * Category Id
          */
         category_id?: string | null;
+        /**
+         * Needs Review
+         */
+        needs_review?: boolean | null;
     };
     url: '/v1/admin/offers';
 };
@@ -7127,6 +7196,66 @@ export type AdminVerifyOfferResponses = {
 };
 
 export type AdminVerifyOfferResponse = AdminVerifyOfferResponses[keyof AdminVerifyOfferResponses];
+
+export type AdminDismissOfferSourceChangeData = {
+    body: DismissSourceChangeRequest;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Offer Id
+         */
+        offer_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/offers/{offer_id}/dismiss-source-change';
+};
+
+export type AdminDismissOfferSourceChangeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type AdminDismissOfferSourceChangeError = AdminDismissOfferSourceChangeErrors[keyof AdminDismissOfferSourceChangeErrors];
+
+export type AdminDismissOfferSourceChangeResponses = {
+    /**
+     * Successful Response
+     */
+    200: OfferWriteResponse;
+};
+
+export type AdminDismissOfferSourceChangeResponse = AdminDismissOfferSourceChangeResponses[keyof AdminDismissOfferSourceChangeResponses];
 
 export type AdminCreateOfferLinkData = {
     body: CreateLinkRequest;

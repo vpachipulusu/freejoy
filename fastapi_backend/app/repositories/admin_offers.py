@@ -1,12 +1,15 @@
 """Queries behind the admin offers API. No business rules live here."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
 
 from app.models.platform.affiliate_link import AffiliateLink
+from app.models.platform.catalogue_import import OfferImport
 from app.models.platform.category import Category
 from app.models.platform.merchant import Merchant
 from app.models.platform.offer import (
@@ -79,16 +82,31 @@ class ReviewRefs:
 
 
 @dataclass(frozen=True)
+class OfferProvenance:
+    """Where an imported offer came from and whether its source moved on (``offer_imports``)."""
+
+    provider: str
+    external_id: str
+    applied_at: datetime
+    source_changed_at: datetime | None
+
+
+@dataclass(frozen=True)
 class OfferFilters:
+    """``needs_review`` True keeps the review queue, False keeps everything else (None: no filter)."""
+
     search: str | None = None
     status: OfferStatus | None = None
     category_id: str | None = None
+    needs_review: bool | None = None
 
 
 @dataclass(frozen=True)
 class OfferPage:
     offers: list[OfferRecord]
     total_count: int
+    # By offer id, for the imported offers on this page only (a hand-made offer has no entry).
+    provenance: Mapping[str, OfferProvenance] = dataclass_field(default_factory=dict)
 
 
 _OFFER_FIELDS = tuple(OfferRecord.__dataclass_fields__)
@@ -101,6 +119,22 @@ def _offer(row: Offer) -> OfferRecord:
 
 def _link(row: AffiliateLink) -> AffiliateLinkRecord:
     return AffiliateLinkRecord(**{name: getattr(row, name) for name in _LINK_FIELDS})
+
+
+def needs_review() -> ColumnElement[bool]:
+    """The review queue rule, defined once: an imported offer that is a draft or whose source moved on.
+
+    Needs the LEFT JOIN on ``offer_imports``. Never NULL: ``IS NOT NULL`` is a definite false for an
+    offer with no import row, so ``NOT`` of it is true for hand-made offers. Archived offers are out.
+    """
+    return and_(
+        OfferImport.id.is_not(None),
+        Offer.status != OfferStatus.ARCHIVED,
+        or_(
+            Offer.status == OfferStatus.DRAFT,
+            OfferImport.source_changed_at.is_not(None),
+        ),
+    )
 
 
 def _conditions(filters: OfferFilters) -> list[Any]:
@@ -116,6 +150,9 @@ def _conditions(filters: OfferFilters) -> list[Any]:
         conditions.append(Offer.status == filters.status)
     if filters.category_id is not None:
         conditions.append(Offer.category_id == filters.category_id)
+    if filters.needs_review is not None:
+        wanted = needs_review()
+        conditions.append(wanted if filters.needs_review else not_(wanted))
     return conditions
 
 
@@ -123,18 +160,65 @@ class AdminOfferRepository(BaseRepository):
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
     ) -> OfferPage:
+        """One page of offers with their provenance in the same query (LEFT JOIN, no per-row lookups)."""
         conditions = _conditions(filters)
-        rows = await self._session.scalars(
-            select(Offer)
+        result = await self._session.execute(
+            select(
+                Offer,
+                OfferImport.provider,
+                OfferImport.external_id,
+                OfferImport.applied_at,
+                OfferImport.source_changed_at,
+            )
+            .outerjoin(OfferImport, OfferImport.offer_id == Offer.id)
             .where(*conditions)
             .order_by(Offer.updated_at.desc(), Offer.id)
             .limit(limit)
             .offset(offset)
         )
+        rows = result.all()
         total = await self._session.scalar(
-            select(func.count()).select_from(Offer).where(*conditions)
+            select(func.count())
+            .select_from(Offer)
+            .outerjoin(OfferImport, OfferImport.offer_id == Offer.id)
+            .where(*conditions)
         )
-        return OfferPage([_offer(row) for row in rows], total or 0)
+        provenance = {
+            row.Offer.id: OfferProvenance(
+                row.provider, row.external_id, row.applied_at, row.source_changed_at
+            )
+            for row in rows
+            if row.provider is not None
+        }
+        return OfferPage([_offer(row.Offer) for row in rows], total or 0, provenance)
+
+    async def get_provenance(
+        self, offer_id: str, *, lock: bool = False
+    ) -> OfferProvenance | None:
+        """The offer's import row (None for a hand-made offer), row-locked when ``lock``.
+
+        Columns, not the entity, so a read after ``clear_source_change`` never sees a cached row.
+        """
+        statement = select(
+            OfferImport.provider,
+            OfferImport.external_id,
+            OfferImport.applied_at,
+            OfferImport.source_changed_at,
+        ).where(OfferImport.offer_id == offer_id)
+        row = (
+            await self._session.execute(
+                statement.with_for_update() if lock else statement
+            )
+        ).first()
+        return OfferProvenance(*row) if row else None
+
+    async def clear_source_change(self, offer_id: str) -> None:
+        """Clear the marker only: the importer's hashes are left exactly as they are."""
+        await self._session.execute(
+            update(OfferImport)
+            .where(OfferImport.offer_id == offer_id)
+            .values(source_changed_at=None)
+        )
 
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None:
         row = await self._session.get(

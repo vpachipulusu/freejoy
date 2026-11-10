@@ -6582,6 +6582,22 @@
             }
           },
           {
+            "name": "needs_review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Review"
+            }
+          },
+          {
             "name": "X-Internal-Key",
             "in": "header",
             "required": false,
@@ -7650,6 +7666,143 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/v1/admin/offers/{offer_id}/dismiss-source-change": {
+      "post": {
+        "tags": [
+          "admin-offers"
+        ],
+        "summary": "Admin Dismiss Offer Source Change",
+        "operationId": "admin_dismiss_offer_source_change",
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Offer Id"
+            }
+          },
+          {
+            "name": "X-Internal-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissSourceChangeRequest"
               }
             }
           }
@@ -14161,6 +14314,24 @@
         ],
         "title": "DisableRequest"
       },
+      "DismissSourceChangeRequest": {
+        "properties": {
+          "review_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Review Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "review_token"
+        ],
+        "title": "DismissSourceChangeRequest",
+        "description": "Needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."
+      },
       "DriftData": {
         "properties": {
           "kind": {
@@ -15805,9 +15976,42 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "import_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Provider"
+          },
+          "source_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Changed At"
+          },
           "review_token": {
             "type": "string",
             "title": "Review Token"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferProvenanceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "summary": {
             "type": "string",
@@ -15958,7 +16162,10 @@
           "end_at",
           "last_verified_at",
           "updated_at",
+          "import_provider",
+          "source_changed_at",
           "review_token",
+          "provenance",
           "summary",
           "description",
           "image_tint",
@@ -15980,6 +16187,44 @@
           "links"
         ],
         "title": "OfferOut"
+      },
+      "OfferProvenanceOut": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          },
+          "source_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Changed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "external_id",
+          "applied_at",
+          "source_changed_at"
+        ],
+        "title": "OfferProvenanceOut",
+        "description": "Where an imported offer came from.\n\n``source_changed_at`` is set while the source has moved on and nobody has reviewed it: the\nimporter sets it and \"dismiss source change\" clears it."
       },
       "OfferStatus": {
         "type": "string",
@@ -16051,6 +16296,29 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "import_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Provider"
+          },
+          "source_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Changed At"
           }
         },
         "type": "object",
@@ -16065,7 +16333,9 @@
           "featured",
           "end_at",
           "last_verified_at",
-          "updated_at"
+          "updated_at",
+          "import_provider",
+          "source_changed_at"
         ],
         "title": "OfferSummaryOut"
       },
@@ -16141,9 +16411,42 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "import_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Provider"
+          },
+          "source_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Changed At"
+          },
           "review_token": {
             "type": "string",
             "title": "Review Token"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferProvenanceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "summary": {
             "type": "string",
@@ -16298,7 +16601,10 @@
           "end_at",
           "last_verified_at",
           "updated_at",
+          "import_provider",
+          "source_changed_at",
           "review_token",
+          "provenance",
           "summary",
           "description",
           "image_tint",
