@@ -187,7 +187,7 @@ the total. If a batch fails it prints the error type and **how many rows were al
 stated on the privacy page ("If you use an offer button"): change both together.
 
 **Schedule.** `.github/workflows/scheduled-housekeeping.yml` runs it daily at 03:17 UTC (with the default `--days`;
-after the offer health check, as its own step), using the repository secret `HOUSEKEEPING_DATABASE_URL`. A day with
+after the offer health check, as its own step), using the `HOUSEKEEPING_DATABASE_URL` secret of the `housekeeping` GitHub Environment. A day with
 nothing older than the period prints `deleted 0 click events`. It needs `SELECT` and `DELETE` on `click_events`
 only. Setup, running it by hand and what a failure looks like:
 [backend-offer-health.md](backend-offer-health.md#scheduling) and
@@ -238,7 +238,7 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
 - `click_events.referrer_host` comes from the visitor's browser and is untrusted
   (see [platform-models.md](platform-models.md)).
 - `prune_click_events` is scheduled daily by the housekeeping workflow (see Retention above); a skipped or disabled
-  schedule (GitHub pauses cron on a repository inactive for 60 days) only delays deletion.
+  schedule (on a public repository GitHub pauses cron after 60 days without activity) only delays deletion.
 - A destination that no longer answers is not detected on the click path (the visitor gets the provider's error page).
   `commands.check_offer_health` reports dead offer source URLs and `direct` links, but it never requests a network
   provider's tracking link (that would record a click), so a dead `awin`, `cj` or other network link is only visible in

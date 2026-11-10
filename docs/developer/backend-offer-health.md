@@ -170,13 +170,22 @@ expired certificate is `tls_error`.
 steps, in that order; each runs even when an earlier one failed). It is outside the `CI gate`: it does not run on
 pull requests and nothing requires it.
 
-- **Secrets** (repository secrets; setup in [workflow.md](workflow.md#owner-setup-scheduled-housekeeping)):
-  `HOUSEKEEPING_DATABASE_URL` is required and becomes `DATABASE_URL` for the three steps; `SENTRY_DSN` is optional (an
-  unset secret means no Sentry event, as everywhere else). The workflow introduces no environment variable in the
+- **Secrets and variable** (**environment** secrets and an environment variable of a GitHub Environment named
+  `housekeeping` whose deployment-branch policy allows only `main`; setup in
+  [workflow.md](workflow.md#owner-setup-scheduled-housekeeping)): `HOUSEKEEPING_DATABASE_URL` is required and becomes
+  `DATABASE_URL` for the three steps (end it with `?sslmode=verify-full`: `require` encrypts but verifies neither the
+  certificate nor the host name, which is not enough on a public-internet connection from a hosted runner);
+  `SENTRY_DSN` is optional (an unset secret means no Sentry event, as everywhere else); `PUBLIC_SITE_URL` is a required
+  non-secret variable, the site's https origin, because this command builds its User-Agent from it (see item 9 under
+  SSRF controls: `<Brand>-LinkCheck/1.0 (+<PUBLIC_SITE_URL>)`). The workflow introduces no environment variable in the
   apps. The settings object also insists on production values the commands never read (Upstash, Firebase Admin,
   the internal key, the email HMAC key, the subscriber token secret), so the job sets obvious placeholders for them,
-  commented in the workflow. If the secret is empty the run fails at a guard step with a clear message.
-- **Run it by hand:** Actions tab, "Scheduled housekeeping", "Run workflow". Two optional inputs apply to this command
+  commented in the workflow. The first step, a guard, fails with a clear message when the secret is empty or
+  `PUBLIC_SITE_URL` is empty or not an `https://` origin, before anything is installed.
+- **Run it by hand:** Actions tab, "Scheduled housekeeping", "Run workflow" on `main`. **A dispatch from any other
+  branch fails by design**: the environment's branch rule refuses the job, so a modified copy of the workflow on a
+  feature branch cannot receive the production database URL (a copy that somehow started would stop at the guard on
+  the missing secret). Two optional inputs apply to this command
   only: `skip_reachability` (expire only: no request, no Sentry summary) and `limit` (a whole number, passed as
   `--limit`; blank keeps the default of 500, the command refuses 0 or more than 5000). A manual run also runs the other
   two commands. Runs never overlap (`concurrency: scheduled-housekeeping`, a second one waits) and the job stops after
@@ -189,10 +198,11 @@ pull requests and nothing requires it.
   for expiry, how many offers were already committed; 2: bad arguments). Unreachable destinations are **not** a
   failure: the run stays green and the report is in the log and in the Sentry event. Re-running the workflow is safe.
   No step is retried automatically.
-- **Limits.** GitHub skips scheduled runs on a repository with no activity for 60 days (the schedule is disabled until
-  the workflow is re-enabled on the Actions tab), and it may start a scheduled run some minutes late at busy times. The
-  database must accept TLS connections from GitHub-hosted runners (the URL carries `?sslmode=require`, which the
-  backend honours; see `app/core/db_url.py`). A run cannot be proven from this repository: the first real run is the
+- **Limits.** On a public repository GitHub skips scheduled runs once the repository has had no activity for 60 days
+  (the schedule is disabled until the workflow is re-enabled on the Actions tab), and it may start a scheduled run some
+  minutes late at busy times. The database must accept TLS connections from GitHub-hosted runners (the URL carries
+  `?sslmode=verify-full`, which the backend forwards to asyncpg unchanged; see `app/core/db_url.py`; a hosted Postgres
+  with a public-CA certificate needs no root certificate file). A run cannot be proven from this repository: the first real run is the
   owner's check.
 
 `commands.import_awin_offers` is deliberately not scheduled: it has not been verified against the live Awin API.
