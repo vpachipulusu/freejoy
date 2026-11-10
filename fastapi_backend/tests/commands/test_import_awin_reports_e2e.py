@@ -589,6 +589,38 @@ async def test_updated_at_advances_on_a_real_update_but_last_seen_at_never_moves
     assert second.last_seen_at == LATER  # GREATEST: not rewound to NOW
 
 
+async def test_a_response_longer_than_a_page_is_written_in_chunks_and_not_asked_for_again(
+    engine: AsyncEngine,
+) -> None:
+    from app.services.network_report_run import PAGE_SIZE
+
+    client = FakeAwinClient(transaction_pages=[raw_rows(1, PAGE_SIZE + 50)])
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    report = await run_report_import(
+        client, database_units(maker), RunOptions(start=DAY, end=DAY), NOW
+    )
+
+    assert len(client.transaction_requests) == 1
+    assert report.tally.inserted == PAGE_SIZE + 50
+    assert (
+        await scalar(engine, "SELECT count(*) FROM network_report_rows")
+        == PAGE_SIZE + 50
+    )
+
+
+async def test_a_real_run_that_stops_at_max_pages_fails_and_leaves_an_incomplete_audit_row(
+    engine: AsyncEngine,
+) -> None:
+    with pytest.raises(ReportRunFailed) as stopped:
+        await run(engine, [raw_rows(1, 200), raw_rows(1000, 200)], max_pages=1)
+
+    assert stopped.value.cause == "max_pages_reached"
+    assert await scalar(engine, "SELECT count(*) FROM network_report_rows") == 200
+    details = await scalar(engine, "SELECT metadata->'details' FROM audit_logs")
+    assert details["status"] == "incomplete" and details["resume_from"] == "2026-11-03"
+
+
 # --- locks ---------------------------------------------------------------------------------
 
 

@@ -200,21 +200,18 @@ def parse_transactions(payload: object) -> TransactionsPage | None:
     return TransactionsPage(*found) if found else None
 
 
-Parser = Callable[[object], Any]
-
-
 @dataclass(frozen=True)
-class _Request:
+class _Request[T]:
     method: str
     url: str
-    parse: Parser
+    parse: Callable[[object], T | None]
     json: dict[str, Any] | None = None
     params: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
-class _Outcome:
-    page: Any = None
+class _Outcome[T]:
+    page: T | None = None
     failure: AwinReason | None = None
     retry_after: float | None = None
 
@@ -321,10 +318,9 @@ class HttpxAwinClient:
             "filters": filters.to_json(),
             "pagination": {"page": page, "pageSize": page_size},
         }
-        found: PromotionsPage = await self._send(
+        return await self._send(
             _Request("POST", self._url, parse_promotions, json=body)
         )
-        return found
 
     async def fetch_transactions(
         self, start: datetime, end: datetime, *, page: int, page_size: int
@@ -343,13 +339,12 @@ class HttpxAwinClient:
             "page": str(page),
             "pageSize": str(page_size),
         }
-        found: TransactionsPage = await self._send(
+        return await self._send(
             _Request("GET", self._transactions_url, parse_transactions, params=params)
         )
-        return found
 
-    async def _send(self, request: _Request) -> Any:
-        outcome = _Outcome(failure=AwinReason.CONNECTION_ERROR)
+    async def _send[T](self, request: _Request[T]) -> T:
+        outcome: _Outcome[T] = _Outcome(failure=AwinReason.CONNECTION_ERROR)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             await self._limiter.acquire()
             outcome = await self._attempt(request)
@@ -367,7 +362,7 @@ class HttpxAwinClient:
         )
         return max(backoff, retry_after or 0.0)
 
-    async def _attempt(self, request: _Request) -> _Outcome:
+    async def _attempt[T](self, request: _Request[T]) -> _Outcome[T]:
         try:
             async with asyncio.timeout(ATTEMPT_DEADLINE_SECONDS):
                 return await self._exchange(request)
@@ -379,7 +374,7 @@ class HttpxAwinClient:
                 failure=AwinReason.TLS_ERROR if tls else AwinReason.CONNECTION_ERROR
             )
 
-    async def _exchange(self, request: _Request) -> _Outcome:
+    async def _exchange[T](self, request: _Request[T]) -> _Outcome[T]:
         headers = {
             "Authorization": f"Bearer {self._token.get_secret_value()}",
             "Accept": "application/json",
@@ -403,7 +398,9 @@ class HttpxAwinClient:
             return await self._decode(response, request.parse)
 
     @staticmethod
-    async def _decode(response: httpx.Response, parse: Parser) -> _Outcome:
+    async def _decode[T](
+        response: httpx.Response, parse: Callable[[object], T | None]
+    ) -> _Outcome[T]:
         declared = response.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
             return _Outcome(failure=AwinReason.RESPONSE_TOO_LARGE)
