@@ -364,3 +364,26 @@ def source_hash(promotion: Promotion) -> str:
     }
     payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def tracking_outcome(item: object, publisher_id: int) -> str:
+    """What the importer's tracking-link check says about this item's link, as if the programme were joined.
+
+    ``accepted``, or the skip reason code (``SkipReason`` value) of the first check that refuses it: the
+    advertiser id and the item's own ``url`` are read the way ``parse_promotion`` reads them, then
+    ``_tracking_url`` runs. Used by the dry-run shape report, which counts these; it never returns text from
+    the item.
+    """
+    if not isinstance(item, dict):
+        return SkipReason.INVALID_ITEM.value
+    advertiser = item.get("advertiser")
+    try:
+        advertiser_id = _positive_id(
+            advertiser.get("id") if isinstance(advertiser, dict) else None,
+            SkipReason.INVALID_ADVERTISER,
+        )
+        source_url = _source_url(item)
+        _tracking_url(item, publisher_id, advertiser_id, source_url)
+    except _Reject as rejection:
+        return rejection.reason.value
+    return "accepted"
