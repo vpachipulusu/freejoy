@@ -41,7 +41,7 @@ plus a stable `code` (below). Lists take `limit` (1 to 100) and `offset`.
 | `POST /v1/admin/offers` | `offers.write` | 201. Always creates a `DRAFT`. `slug` optional |
 | `GET /v1/admin/offers/{id}` | `offers.read` | Offer with its affiliate links (admin view: includes `destination_url` and `publisher_notes`), its `review_token` and its `provenance` (null for an offer made by hand) |
 | `PATCH /v1/admin/offers/{id}` | `offers.write` | Partial. The slug and the status cannot be changed; nullable fields clear with `null` |
-| `POST /v1/admin/offers/{id}/publish` | `offers.publish` | Body `{"review_token"}` (required). See the publish rules and [the review token](#the-review-token) |
+| `POST /v1/admin/offers/{id}/publish` | `offers.publish` | Body `{"review_token"}` (required) and `{"commercial_basis"}` (optional; required when the offer's only active links are `direct`, see [commercial basis](#commercial-basis)). See the publish rules and [the review token](#the-review-token) |
 | `POST /v1/admin/offers/{id}/unpublish` | `offers.publish` | `PUBLISHED` to `DRAFT`. No body |
 | `POST /v1/admin/offers/{id}/expire` | `offers.publish` | `PUBLISHED` to `EXPIRED`. No body |
 | `POST /v1/admin/offers/{id}/archive` | `offers.publish` | Terminal. No body |
@@ -88,6 +88,7 @@ Publishing (and re-publishing an `EXPIRED` offer) needs all of:
 3. at least one active affiliate link, or a `source_url`,
 4. `end_at` is null or in the future,
 5. `last_verified_at` is set.
+6. When the offer's only active links are `direct`: the editor confirmed its commercial basis in the request (reason `commercial_basis_required`, shown as "its commercial basis has not been confirmed"). See [commercial basis](#commercial-basis).
 
 If any fails the answer is **422 `publish_blocked`** and the message lists every unmet rule in fixed words.
 
@@ -116,6 +117,32 @@ That is a product and SEO decision made here; revisit it if search engines shoul
 **Concurrent edits.** `PATCH` is last-write-wins. Optimistic concurrency (an `updated_at` precondition) can be added
 with the admin UI story. Status changes are serialised by the offer row lock.
 
+## Commercial basis
+
+`offers.commercial_basis` is `EDITORIAL` (no payment or benefit), `AFFILIATE` (commission through a network) or
+`SPONSORED` (the merchant pays or gives a benefit for the listing or its placement). It is **not null with no default**
+anywhere (model, migration or code): `POST /v1/admin/offers` requires it (422 without it), `PATCH` may change it (never
+null), and both read models (`OfferSummaryOut`, `OfferOut`) return it. It is audited like the other enum fields: the
+`create` row's `after` carries it and an `update` row has it in `before`/`after` and in `details.fields`.
+
+- **Publishing a direct-only offer needs an explicit basis.** When the offer has at least one active link and every active
+  link is `direct` (no network is involved, so nothing implies how it is paid for), `publish` (and a re-publish of an
+  `EXPIRED` offer) needs `{"commercial_basis": ...}` in the request: without it 422 `publish_blocked`
+  (`commercial_basis_required`); with a value that is not the stored basis 409 `offer_changed` (what the editor saw is not
+  what is stored: reload). A basis sent for any other offer is checked against the stored one the same way. The rule is in
+  `AdminOfferService.transition`, not only the router. "Explicit" means the editor's request says it on this publish; the
+  stored value alone (always present, and backfilled for old rows) does not count.
+- **Links changing under a published offer** do not revisit that confirmation: if the last network link of a published
+  offer is deactivated and only `direct` links remain, the offer stays published with its stored basis (which the editor
+  sees and can change, and which is covered by the token). The confirmation is asked again at the next publish.
+- `SPONSORED` can be `featured`. Nothing hides it: the public offer models say `sponsored: true` for it, and for no other
+  basis. The three-way value is never public ([backend-catalogue.md](backend-catalogue.md)).
+- **Awin imports** are written as `AFFILIATE` when the draft is created and a refresh never rewrites the basis. The
+  importer's `fingerprint` deliberately excludes the basis (it would change the digest of every stored import), so an
+  editor changing it does not make an import count as edited.
+- **Migration `0006`** backfills: `AFFILIATE` for an offer with at least one active link on a network (a list frozen in the
+  migration), `EDITORIAL` for everything else, never `SPONSORED`.
+
 ## The review token
 
 **The problem.** An editor opens an offer, reads it, and presses Mark verified or Publish. In between, the Awin
@@ -130,6 +157,8 @@ that was read.
 
 - **the offer**: every editable field (`EDITABLE_FIELDS`), the status and `last_verified_at` (the digest of
   `fingerprint(offer)`, see below), plus the offer id;
+- **the commercial basis**, on its own line of the hash (`REVIEW_TOKEN_VERSION` 3): a change to how a listing is paid
+  for is a change the editor must see. It is outside `fingerprint`, which stays as it was (see below);
 - **its affiliate links in click order**, `(created_at, id)`, each as id, provider, destination, tracking id and active
   flag. The first usable link decides where a click goes, so swapping two destinations, re-ordering links or adding,
   deactivating or re-pointing one changes the token;
@@ -263,8 +292,8 @@ suite.
 | 404 | `not_found` | Unknown offer, link, category or merchant |
 | 409 | `slug_taken` | The slug exists |
 | 409 | `illegal_transition` | The status table refuses the action, or the offer is archived and edited, or `dismiss-source-change` finds nothing to dismiss (the offer was never imported, its marker is already clear, or it is archived) |
-| 409 | `offer_changed` | `verify`, `publish` or `dismiss-source-change` carried a `review_token` that no longer matches the offer, its links, its merchant or its category: nothing was written |
-| 422 | `publish_blocked` | A publish rule is unmet |
+| 409 | `offer_changed` | `verify`, `publish` or `dismiss-source-change` carried a `review_token` that no longer matches the offer, its links, its merchant, its category or its commercial basis, or a publish confirmed a basis other than the stored one: nothing was written |
+| 422 | `publish_blocked` | A publish rule is unmet (including `commercial_basis_required`) |
 | 422 | `invalid_url`, `invalid_slug`, `invalid_postage`, `invalid_window`, `unknown_category`, `unknown_merchant` | A value the service rejects |
 | 422 | none | Schema validation (`Invalid request`): unknown fields, wrong types, control characters, lengths, and a missing or malformed `review_token` |
 

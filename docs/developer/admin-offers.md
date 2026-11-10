@@ -53,13 +53,29 @@ of them.
   a stale menu gets a 409 from the API and a toast. **Archive asks for confirmation** because there is no way back
   in the admin.
 
+## Commercial basis
+
+The form has a required **Commercial basis** choice in its own section, with nothing selected on a new offer and one line
+of help under each option: **Editorial** (no payment or benefit), **Affiliate** (a commission through a network) and
+**Sponsored** (the merchant pays Freejoy, or gives it a benefit, for the listing or where it appears; visitors see a
+"Sponsored" label). The card preview shows the Sponsored label as soon as Sponsored is chosen. The server action
+validates with the same Zod schema (`commercialBasis`, "Choose the commercial basis."); API refusals map to curated
+messages by code (an unconfirmed basis reads "its commercial basis has not been confirmed (open the offer and confirm it
+before publishing)"). Changing it is a change like any other: it is audited and moves the review token, so a stale page
+cannot publish over it. Rules and the migration: [backend-admin-catalogue.md](backend-admin-catalogue.md#commercial-basis).
+Public side: a "Sponsored" badge (text, role `note`, named "Sponsored listing") on the card and the detail page, plus a
+sentence beside the button; `/affiliate-disclosure` has a "Sponsored listings" section. Tests:
+`admin-offer-commercial-basis.test.tsx`, `commercial-basis.test.ts`, `sponsored-label.test.tsx`.
+
 ## The publish workflow
 
 1. **Add freebie** creates a `DRAFT` (the API never creates anything else).
 2. **Mark verified** sets "last checked" to now (`offers.publish`). Publishing does not do this for you
    (see [backend-admin-catalogue.md](backend-admin-catalogue.md#publish-rules)).
 3. **Publish** needs: the category enabled, the merchant active, a source URL or an active affiliate link, no past
-   end date, and a verification. If a rule fails the toast lists the unmet rules in fixed wording
+   end date, and a verification. When the offer's only active links go straight to the merchant (`direct`), it also
+   needs you to tick "I confirm this listing's commercial basis is ..." beside the buttons (Publish waits until you
+   do; the page sends the saved basis with the request, and the API refuses without it). If a rule fails the toast lists the unmet rules in fixed wording
    (`admin-catalogue-errors.ts`), for example "This offer cannot be published yet: it has not been verified."
 4. **Unpublish** returns it to draft; **Expire** marks a published offer ended; **Archive** is terminal.
 
