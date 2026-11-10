@@ -7,55 +7,78 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableRowHeader,
 } from '@/components/ui/table';
 import type { MerchantClicksData } from '@/lib/api/admin-analytics';
 import { formatCount } from '../_components/format-money';
 import { formatAdminDate } from '../_components/format-admin-date';
 
+/** The most days listed for one offer on the page; the CSV file always has every day. */
+export const MAX_DAYS_SHOWN = 31;
+
 type Offer = MerchantClicksData['offers'][number];
 
+function DaysNotShown({ hidden }: { hidden: number }) {
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      Showing the {MAX_DAYS_SHOWN} most recent days with clicks. {formatCount(hidden)} earlier{' '}
+      {hidden === 1 ? 'day is' : 'days are'} not shown; the CSV file has every day.
+    </p>
+  );
+}
+
+function DaysTable({ offer, shown }: { offer: Offer; shown: Offer['days'] }) {
+  return (
+    <div
+      role="region"
+      aria-label={`Daily clicks for ${offer.title}`}
+      tabIndex={0}
+      className="mt-2 max-h-64 overflow-auto rounded-md border border-border"
+    >
+      <table className="w-full text-sm">
+        <caption className="sr-only">Daily clicks for {offer.title}, in UTC days</caption>
+        <thead>
+          <tr className="border-b border-border text-left">
+            <th scope="col" className="px-3 py-2 font-medium">
+              Date (UTC)
+            </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium">
+              Clicks
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((day) => (
+            <tr key={day.date} className="border-b border-border last:border-0">
+              <td className="px-3 py-1.5">
+                <time dateTime={day.date}>{formatAdminDate(day.date)}</time>
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{formatCount(day.clicks)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /**
- * The days of one offer, behind a disclosure so a 366-day range stays readable: closed it is one line, open it is
- * a short two-column table in a scrollable region (focusable, so the keyboard can scroll it).
+ * The days of one offer, behind a disclosure so a 366-day range stays readable and the page stays light: closed it
+ * is one line, open it is a short two-column table in a scrollable region (focusable, so the keyboard can scroll
+ * it) with the most recent `MAX_DAYS_SHOWN` days that had clicks.
  */
 function DailyBreakdown({ offer }: { offer: Offer }) {
   if (offer.days.length === 0) return <span className="text-muted-foreground">No clicks</span>;
   const count = offer.days.length;
+  const shown = offer.days.slice(-MAX_DAYS_SHOWN);
   return (
     <details className="w-full">
-      <summary className="cursor-pointer text-sm">
+      <summary className="flex min-h-11 cursor-pointer items-center py-2 text-sm">
         {formatCount(count)} {count === 1 ? 'day' : 'days'} with clicks
+        <span className="sr-only">, {offer.title}</span>
       </summary>
-      <div
-        role="region"
-        aria-label={`Daily clicks for ${offer.title}`}
-        tabIndex={0}
-        className="mt-2 max-h-64 overflow-auto rounded-md border border-border"
-      >
-        <table className="w-full text-sm">
-          <caption className="sr-only">Daily clicks for {offer.title}, in UTC days</caption>
-          <thead>
-            <tr className="border-b border-border text-left">
-              <th scope="col" className="px-3 py-2 font-medium">
-                Date (UTC)
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Clicks
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {offer.days.map((day) => (
-              <tr key={day.date} className="border-b border-border last:border-0">
-                <td className="px-3 py-1.5">
-                  <time dateTime={day.date}>{formatAdminDate(day.date)}</time>
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatCount(day.clicks)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DaysTable offer={offer} shown={shown} />
+      {count > shown.length ? <DaysNotShown hidden={count - shown.length} /> : null}
     </details>
   );
 }
@@ -80,9 +103,7 @@ export function MerchantClicksTable({ report }: { report: MerchantClicksData }) 
       <TableBody>
         {report.offers.map((offer) => (
           <TableRow key={offer.offer_id}>
-            <TableCell label="Offer" className="font-medium">
-              {offer.title}
-            </TableCell>
+            <TableRowHeader label="Offer">{offer.title}</TableRowHeader>
             <TableCell label="Total clicks" numeric className="tabular-nums">
               {formatCount(offer.total_clicks)}
             </TableCell>
@@ -94,13 +115,12 @@ export function MerchantClicksTable({ report }: { report: MerchantClicksData }) 
       </TableBody>
       <TableFooter>
         <TableRow>
-          <TableCell label="Offer" className="font-semibold">
+          <TableRowHeader label="Offer" className="font-semibold">
             {report.offers_truncated ? 'All offers of this merchant' : 'All offers'}
-          </TableCell>
-          <TableCell label="Total clicks" numeric className="font-semibold tabular-nums">
+          </TableRowHeader>
+          <TableCell label="Total clicks" colSpan={2} className="font-semibold tabular-nums">
             {formatCount(report.total_clicks)}
           </TableCell>
-          <TableCell aria-hidden="true" className="max-sm:hidden" />
         </TableRow>
       </TableFooter>
     </Table>

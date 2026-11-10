@@ -11,6 +11,8 @@ export const MAX_CLICK_RANGE_DAYS = 366;
 /** The range the form starts with: the last 30 days, today included. */
 export const DEFAULT_CLICK_RANGE_DAYS = 30;
 
+/** The first day the API accepts. */
+const EARLIEST_DAY = '2000-01-01';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const MS_PER_DAY = 86_400_000;
@@ -82,6 +84,11 @@ export type ClicksQuery = { merchant: string | undefined; from: string; to: stri
 
 export type ClicksParseResult = {
   query: ClicksQuery;
+  /**
+   * True when a date in the link was rejected or the range was refused: no report runs for a range nobody asked
+   * for, and the form shows the default range.
+   */
+  rangeRefused: boolean;
   /** Fixed notices for values that were dropped. Never contains the rejected value. */
   notices: string[];
   invalid: Set<ClicksField>;
@@ -90,10 +97,10 @@ export type ClicksParseResult = {
 type RawParams = Record<string, string | string[] | undefined>;
 
 const NOTICES: Record<ClicksField | 'range', string> = {
-  merchant: 'The merchant in the link was ignored. Choose one from the list.',
-  from: 'The start date was ignored. Pick a valid date.',
-  to: 'The end date was ignored. Pick a valid date.',
-  range: 'Both dates were ignored. The start must be on or before the end, at most 366 days apart.',
+  merchant: 'The merchant in the link is not valid and was ignored. Choose one from the list.',
+  from: 'The start date in the link is not a valid date, so no report was run. Pick a date.',
+  to: 'The end date in the link is not a valid date, so no report was run. Pick a date.',
+  range: `The dates in the link are not a valid range, so no report was run. The start must be on or before the end, at most ${MAX_CLICK_RANGE_DAYS} days apart.`,
 };
 
 /** The id of the notice that explains a rejected field, for `aria-describedby`. */
@@ -142,7 +149,10 @@ function completeRange(from: string | undefined, to: string | undefined, now: Da
     const end = earlier(today(now), addDays(from, MAX_CLICK_RANGE_DAYS - 1));
     return { from, to: end < from ? from : end };
   }
-  if (to) return { from: addDays(to, -(DEFAULT_CLICK_RANGE_DAYS - 1)), to };
+  if (to) {
+    const start = addDays(to, -(DEFAULT_CLICK_RANGE_DAYS - 1));
+    return { from: start < EARLIEST_DAY ? EARLIEST_DAY : start, to };
+  }
   return defaultClickRange(now);
 }
 
@@ -162,7 +172,8 @@ export function parseClicksQuery(raw: RawParams, now: Date): ClicksParseResult {
     invalid.add('from').add('to');
     range = defaultClickRange(now);
   }
-  return { query: { merchant, ...range }, notices, invalid };
+  const rangeRefused = invalid.has('from') || invalid.has('to');
+  return { query: { merchant, ...range }, rangeRefused, notices, invalid };
 }
 
 export const ANALYTICS_PATH = '/admin/analytics';

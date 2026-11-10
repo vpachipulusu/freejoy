@@ -48,7 +48,7 @@ describe('DownloadClicksButton', () => {
     expect(mocks.exportMerchantClicksAction).toHaveBeenCalledWith(PROPS);
     expect(mocks.saveCsvFile).toHaveBeenCalledWith(FILE.filename, FILE.csv);
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent(`Downloaded ${FILE.filename}.`)
+      expect(screen.getByRole('status')).toHaveTextContent(`Download started: ${FILE.filename}.`)
     );
     expect(screen.getByRole('alert')).toHaveTextContent('');
   });
@@ -63,17 +63,36 @@ describe('DownloadClicksButton', () => {
     await waitFor(() => expect(mocks.saveCsvFile).toHaveBeenCalledTimes(1));
   });
 
-  it('is disabled and says it is preparing while the file is built', async () => {
+  it('stays focusable and says it is preparing while the file is built', async () => {
     let finish: (value: unknown) => void = () => undefined;
     mocks.exportMerchantClicksAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     render(<DownloadClicksButton {...PROPS} />);
+    const button = screen.getByRole('button', { name: 'Download CSV' });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
+    await userEvent.click(button);
 
-    expect(screen.getByRole('button', { name: 'Download CSV' })).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveFocus();
     expect(screen.getByRole('status')).toHaveTextContent('Preparing the file…');
     finish({ success: true, data: FILE });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Download CSV' })).toBeEnabled());
+    await waitFor(() => expect(button).not.toHaveAttribute('aria-disabled'));
+  });
+
+  it('starts one download however often Enter is pressed while it works, and keeps focus', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    mocks.exportMerchantClicksAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    render(<DownloadClicksButton {...PROPS} />);
+    const button = screen.getByRole('button', { name: 'Download CSV' });
+
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{Enter}');
+
+    expect(mocks.exportMerchantClicksAction).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(button);
+    finish({ success: true, data: FILE });
+    await waitFor(() => expect(mocks.saveCsvFile).toHaveBeenCalledTimes(1));
   });
 
   it('says that the file lists only the offers shown when the report was cut', async () => {

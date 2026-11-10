@@ -11,13 +11,13 @@ const mocks = vi.hoisted(() => ({ fetchMerchantClicks: vi.fn(), logError: vi.fn(
 
 vi.mock('@/lib/api/admin-analytics', () => ({ fetchMerchantClicks: mocks.fetchMerchantClicks }));
 vi.mock('@/lib/logger', () => ({ logger: { error: mocks.logError } }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('@/app/actions/admin/merchant-clicks-actions', () => ({
   exportMerchantClicksAction: vi.fn(),
 }));
 
 import {
   CHOOSE_MERCHANT_TEXT,
-  MerchantClicksLoading,
   MerchantClicksResults,
   NO_OFFERS_TEXT,
 } from '@/app/(admin)/admin/analytics/merchant-clicks-results';
@@ -83,11 +83,11 @@ describe('MerchantClicksResults', () => {
     });
   });
 
-  it('summarises the range in a status message and shows a captioned table with header cells', async () => {
+  it('summarises the range and shows a captioned table with header cells', async () => {
     const markup = html(await MerchantClicksResults({ query: QUERY }));
 
     expect(markup).toContain('Acme: 1,203 clicks from 10 Mar 2026 to 31 Mar 2026 (22 days, UTC).');
-    expect(markup).toMatch(/<p role="status"[^>]*>Acme: 1,203 clicks/);
+    expect(markup).toMatch(/<p class="[^"]*">Acme: 1,203 clicks/);
     expect(markup).toMatch(
       /<caption[^>]*>Clicks per offer for Acme, 10 Mar 2026 to 31 Mar 2026, in UTC days<\/caption>/
     );
@@ -96,6 +96,9 @@ describe('MerchantClicksResults', () => {
     }
     expect(markup).toContain('>1,200<');
     expect(markup).toContain('All offers');
+    expect(markup).toMatch(/<th[^>]*scope="row"[^>]*>Soap &lt;b&gt;sample&lt;\/b&gt;<\/th>/);
+    expect(markup).toMatch(/<tfoot[\s\S]*<th[^>]*scope="row"[^>]*>All offers<\/th>/);
+    expect(markup).toMatch(/<td[^>]*colSpan="2"[^>]*>1,203<\/td>/);
   });
 
   it('escapes an offer title and shows no markup from it', async () => {
@@ -122,13 +125,14 @@ describe('MerchantClicksResults', () => {
 
     const markup = html(await MerchantClicksResults({ query: QUERY }));
 
-    expect(markup.match(/<th /g)?.length).toBeLessThanOrEqual(5);
+    expect(markup.match(/<th /g)?.length).toBeLessThanOrEqual(8);
     expect(markup).toContain('366 days with clicks');
     expect(markup).toContain('<details');
     expect(markup).toContain('role="region"');
     expect(markup).toContain('aria-label="Daily clicks for Busy"');
     expect(markup).toContain('tabindex="0"');
-    expect(markup).toContain('<time dateTime="2025-01-01">1 Jan 2025</time>');
+    expect(markup).toContain('<time dateTime="2026-01-01">1 Jan 2026</time>');
+    expect(markup).not.toContain('<time dateTime="2025-01-01">');
   });
 
   it('says "No clicks" for an offer without days and "1 day" for one day', async () => {
@@ -200,6 +204,10 @@ describe('MerchantClicksResults', () => {
     const markup = html(await MerchantClicksResults({ query: QUERY }));
 
     expect(markup).toContain('Only the 100 offers with the most clicks are listed, out of 140.');
+    expect(markup).toContain(
+      'The total above and at the bottom counts every offer of this merchant. ' +
+        'The table and the CSV file list only these 100, so the file adds up to less.'
+    );
     expect(markup).toContain('All offers of this merchant');
   });
 
@@ -224,22 +232,28 @@ describe('MerchantClicksResults', () => {
     const markup = html(await MerchantClicksResults({ query: QUERY }));
 
     expect(markup).toContain('Download CSV');
-    expect(markup).toMatch(/<p role="status"[^>]*><\/p><p role="alert"/);
   });
 
   it.each([
-    [404, 'That merchant no longer exists. Choose another.', false],
-    [403, 'You do not have permission to do that', false],
-    [422, 'Something went wrong. Please try again.', false],
-    [502, 'Something went wrong. Please try again.', true],
-    [undefined, 'The admin service is unavailable. Please try again later.', true],
+    [404, undefined, 'That merchant no longer exists. Choose another.', false],
+    [403, undefined, 'You do not have permission to do that', false],
+    [429, undefined, 'Too many requests. Wait a minute and try again.', false],
+    [
+      422,
+      'invalid_range',
+      'Choose dates where the start is on or before the end, at most 366 days apart.',
+      false,
+    ],
+    [502, undefined, 'Something went wrong. Please try again.', true],
+    [undefined, undefined, 'The admin service is unavailable. Please try again later.', true],
   ])(
-    'status %s shows a curated alert with a retry link (logged: %s)',
-    async (status, message, logged) => {
+    'status %s (code %s) shows the same curated message as the export action (logged: %s)',
+    async (status, code, message, logged) => {
       mocks.fetchMerchantClicks.mockResolvedValue({
         success: false,
         error: 'SECRET select * from clicks',
         status,
+        code,
       });
 
       const markup = html(await MerchantClicksResults({ query: QUERY }));
@@ -247,19 +261,69 @@ describe('MerchantClicksResults', () => {
       expect(markup).toContain('role="alert"');
       expect(markup).toContain(message);
       expect(markup).not.toContain('SECRET');
-      expect(markup).toMatch(
-        /<a[^>]*href="\/admin\/analytics\?merchant=m1&amp;from=2026-03-10&amp;to=2026-03-31"[^>]*>Retry<\/a>/
-      );
+      expect(markup).toContain('>Retry</button>');
       expect(markup).not.toContain('Download CSV');
       expect(mocks.logError).toHaveBeenCalledTimes(logged ? 1 : 0);
     }
   );
-});
 
-describe('MerchantClicksLoading', () => {
-  it('is announced as a status', () => {
-    expect(html(<MerchantClicksLoading />)).toBe(
-      '<p role="status" class="text-sm text-muted-foreground">Loading the click report…</p>'
+  it('lists at most 31 days per offer and says how many are not shown', async () => {
+    const days = Array.from({ length: 40 }, (_, i): [string, number] => [
+      new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
+      1,
+    ]);
+    mocks.fetchMerchantClicks.mockResolvedValue({
+      success: true,
+      data: report({ offers: [offer('Busy', days)], total_clicks: 40 }),
+    });
+
+    const markup = html(await MerchantClicksResults({ query: QUERY }));
+
+    expect(markup).toContain('40 days with clicks');
+    expect(markup).toContain('Showing the 31 most recent days with clicks.');
+    expect(markup).toContain('9 earlier days are not shown; the CSV file has every day.');
+    expect(markup).toContain('<time dateTime="2026-02-09">');
+    expect(markup).not.toContain('<time dateTime="2026-01-09">');
+    expect(markup).toContain('>40<');
+  });
+
+  it('does not mention hidden days when every day fits', async () => {
+    const markup = html(await MerchantClicksResults({ query: QUERY }));
+
+    expect(markup).not.toContain('not shown');
+  });
+
+  it('keeps the page light for 100 offers over 366 days: a bounded number of rows', async () => {
+    const days = Array.from({ length: 366 }, (_, i): [string, number] => [
+      new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10),
+      1,
+    ]);
+    const offers = Array.from({ length: 100 }, (_, i) => offer(`Offer ${i}`, days, `o${i}`));
+    mocks.fetchMerchantClicks.mockResolvedValue({
+      success: true,
+      data: report({
+        from_date: '2025-01-01',
+        to_date: '2026-01-01',
+        offers,
+        total_clicks: 36600,
+        offers_total: 100,
+      }),
+    });
+
+    const markup = html(await MerchantClicksResults({ query: QUERY }));
+
+    // per offer: 31 day rows and a header row, plus 100 offer rows, the table header and the footer
+    expect(markup.match(/<tr[ >]/g)?.length).toBeLessThan(100 * 32 + 102 + 1);
+    expect(markup.match(/<time /g)).toHaveLength(100 * 31);
+    expect(markup).toContain('335 earlier days are not shown');
+    expect(markup).toContain('366 days with clicks');
+  });
+
+  it('names the offer inside each disclosure so the toggles are told apart', async () => {
+    const markup = html(await MerchantClicksResults({ query: QUERY }));
+
+    expect(markup).toMatch(
+      /<summary[^>]*>2 days with clicks<span class="sr-only">, Soap &lt;b&gt;sample&lt;\/b&gt;<\/span><\/summary>/
     );
   });
 });

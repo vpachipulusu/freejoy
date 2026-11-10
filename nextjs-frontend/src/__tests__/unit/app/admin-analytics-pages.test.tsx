@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const mocks = vi.hoisted(() => ({
   requireAdminPage: vi.fn(),
+  fetchAdminMerchants: vi.fn(),
   fetchAdminOverview: vi.fn(),
   fetchAdminRevenue: vi.fn(),
   fetchAdminSystemStats: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/lib/api/admin-analytics', () => ({
 vi.mock('@/app/(admin)/admin/_lib/require-admin-page', () => ({
   requireAdminPage: mocks.requireAdminPage,
 }));
+vi.mock('@/lib/api/admin-merchants', () => ({ fetchAdminMerchants: mocks.fetchAdminMerchants }));
 // The section is an async server component (its own tests render it directly): here it is a stub that shows
 // what the page handed it.
 vi.mock('@/app/(admin)/admin/analytics/merchant-clicks-section', () => ({
@@ -82,6 +84,10 @@ describe('admin analytics page', () => {
     mocks.fetchAdminOverview.mockResolvedValue(ok(OVERVIEW));
     mocks.fetchAdminRevenue.mockResolvedValue(ok(REVENUE));
     mocks.requireAdminPage.mockResolvedValue(undefined);
+    mocks.fetchAdminMerchants.mockResolvedValue({
+      success: true,
+      data: { merchants: [], total_count: 0 },
+    });
   });
 
   it('shows users, organisations and revenue in the platform currency', async () => {
@@ -124,7 +130,9 @@ describe('admin analytics page', () => {
 
     expect(markup).toContain('You do not have permission to do that');
     expect(markup).not.toContain('SECRET');
-    expect(markup).toMatch(/<a[^>]*href="\/admin\/analytics"[^>]*>Retry<\/a>/);
+    expect(markup).toMatch(
+      /<a[^>]*href="\/admin\/analytics\?from=[0-9-]+&amp;to=[0-9-]+"[^>]*>Retry<\/a>/
+    );
     expect(markup).toContain('£1,234.56');
     expect(mocks.logError).toHaveBeenCalled();
   });
@@ -164,6 +172,47 @@ describe('admin analytics page', () => {
     expect(markup).toContain('&quot;merchant&quot;:&quot;m1&quot;');
     expect(markup).toContain('&quot;from&quot;:&quot;2026-03-10&quot;');
     expect(markup).toContain('&quot;to&quot;:&quot;2026-03-11&quot;');
+  });
+
+  it('keeps the chosen merchant and range in the Retry link of a failed overview and of a failed revenue', async () => {
+    mocks.fetchAdminOverview.mockResolvedValue(fail(502));
+    mocks.fetchAdminRevenue.mockResolvedValue(fail(502));
+    const props = {
+      searchParams: Promise.resolve({ merchant: 'm1', from: '2026-03-10', to: '2026-03-11' }),
+    };
+
+    const markup = html(await AdminAnalyticsPage(props));
+
+    const links = markup.match(/<a[^>]*href="([^"]*)"[^>]*>Retry<\/a>/g) ?? [];
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link).toContain('merchant=m1');
+      expect(link).toContain('from=2026-03-10');
+      expect(link).toContain('to=2026-03-11');
+    }
+  });
+
+  it('starts the merchant list with the other reads, before the overview has answered', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    mocks.fetchAdminOverview.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+
+    const rendering = AdminAnalyticsPage(PROPS);
+    await vi.waitFor(() => expect(mocks.fetchAdminMerchants).toHaveBeenCalledTimes(1));
+    expect(mocks.fetchAdminOverview).toHaveBeenCalledTimes(1);
+    answer(ok(OVERVIEW));
+    await rendering;
+  });
+
+  it('hands the section the merchant list it started', async () => {
+    const list = { success: true, data: { merchants: [], total_count: 0 } };
+    mocks.fetchAdminMerchants.mockResolvedValue(list);
+    const element = (await AdminAnalyticsPage(PROPS)) as React.ReactElement<{
+      children: React.ReactElement<{ merchants?: Promise<unknown> }>[];
+    }>;
+
+    const section = element.props.children.flat().find((child) => child?.props?.merchants);
+
+    expect(await section?.props.merchants).toBe(list);
   });
 });
 

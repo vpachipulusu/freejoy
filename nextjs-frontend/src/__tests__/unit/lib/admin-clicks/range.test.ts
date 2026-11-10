@@ -65,6 +65,7 @@ describe('parseClicksQuery', () => {
 
     expect(parsed.query).toEqual({ merchant: 'abc_123-X', from: '2026-03-10', to: '2026-03-11' });
     expect(parsed.invalid.size).toBe(0);
+    expect(parsed.rangeRefused).toBe(false);
   });
 
   it('treats blank values as not set', () => {
@@ -86,6 +87,7 @@ describe('parseClicksQuery', () => {
     const parsed = parseClicksQuery(raw, NOW);
 
     expect(parsed.invalid.has(field as 'merchant' | 'from' | 'to')).toBe(true);
+    expect(parsed.rangeRefused).toBe(field !== 'merchant');
     expect(parsed.notices).toHaveLength(1);
     expect(JSON.stringify(parsed)).not.toContain('bad id');
     expect(JSON.stringify(parsed)).not.toContain('tomorrow');
@@ -101,6 +103,7 @@ describe('parseClicksQuery', () => {
       expect(parsed.query).toMatchObject({ from: '2026-09-18', to: '2026-10-17' });
       expect(parsed.notices).toHaveLength(1);
       expect([...parsed.invalid].sort()).toEqual(['from', 'to']);
+      expect(parsed.rangeRefused).toBe(true);
     }
   });
 
@@ -113,6 +116,29 @@ describe('parseClicksQuery', () => {
       from: '2026-09-06',
       to: '2026-10-05',
     });
+  });
+});
+
+describe('a range in the future, and one that reaches the first day', () => {
+  it('accepts a start in the future and ends on that day', () => {
+    const parsed = parseClicksQuery({ from: '2027-01-01' }, NOW);
+
+    expect(parsed.query).toMatchObject({ from: '2027-01-01', to: '2027-01-01' });
+    expect(parsed.rangeRefused).toBe(false);
+  });
+
+  it('accepts a range that lies wholly in the future', () => {
+    const parsed = parseClicksQuery({ from: '2027-01-01', to: '2027-01-31' }, NOW);
+
+    expect(parsed.query).toMatchObject({ from: '2027-01-01', to: '2027-01-31' });
+    expect(parsed.notices).toEqual([]);
+  });
+
+  it('never fills a start before 2000-01-01, the first day the API accepts', () => {
+    const parsed = parseClicksQuery({ to: '2000-01-05' }, NOW);
+
+    expect(parsed.query).toMatchObject({ from: '2000-01-01', to: '2000-01-05' });
+    expect(parsed.rangeRefused).toBe(false);
   });
 });
 

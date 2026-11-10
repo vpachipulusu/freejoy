@@ -12,7 +12,7 @@ import {
   parseAuditLogsQuery,
   type AuditLogsQuery,
 } from '@/app/(admin)/admin/audit-logs/audit-logs-query';
-import { ResultsFocus } from '@/app/(admin)/admin/audit-logs/results-focus';
+import { ResultsFocus } from '@/app/(admin)/admin/_components/results-focus';
 
 type Raw = Record<string, string>;
 const parsedOf = (raw: Raw = {}) => parseAuditLogsQuery(raw);

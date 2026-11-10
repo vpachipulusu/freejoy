@@ -10,7 +10,8 @@ import { logger } from '@/lib/logger';
 import { KpiStrip, type KpiCell } from '@/components/dashboard/kpi-strip';
 import { Panel } from '@/components/dashboard/overview/panel';
 import { RefreshButton } from '@/components/admin/refresh-button';
-import { parseClicksQuery } from '@/lib/admin-clicks/range';
+import { fetchAdminMerchants } from '@/lib/api/admin-merchants';
+import { clicksHref, parseClicksQuery } from '@/lib/admin-clicks/range';
 import { InlineError } from '../_components/inline-error';
 import { formatCount, formatMinorUnits } from '../_components/format-money';
 import { requireAdminPage } from '../_lib/require-admin-page';
@@ -22,7 +23,6 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const ANALYTICS_HREF = '/admin/analytics';
 const number = formatCount;
 
 function failed(what: string, result: Extract<ApiResult<unknown>, { success: false }>) {
@@ -90,7 +90,11 @@ function revenueCells(revenue: RevenueData): KpiCell[] {
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: SearchParams }) {
   await requireAdminPage();
   const parsedClicks = parseClicksQuery(await searchParams, new Date());
+  // The merchant list for the clicks section starts with the other reads; the section awaits it.
+  const merchants = fetchAdminMerchants();
   const [overview, revenue] = await Promise.all([fetchAdminOverview(), fetchAdminRevenue()]);
+  // Retry keeps the report the admin was looking at: the same merchant and range.
+  const retryHref = clicksHref(parsedClicks.query);
 
   return (
     <div className="space-y-6">
@@ -118,7 +122,7 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
           </div>
         </>
       ) : (
-        <InlineError message={failed('overview', overview)} retryHref={ANALYTICS_HREF} />
+        <InlineError message={failed('overview', overview)} retryHref={retryHref} />
       )}
 
       {revenue.success ? (
@@ -155,10 +159,10 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
           </div>
         </>
       ) : (
-        <InlineError message={failed('revenue', revenue)} retryHref={ANALYTICS_HREF} />
+        <InlineError message={failed('revenue', revenue)} retryHref={retryHref} />
       )}
 
-      <MerchantClicksSection parsed={parsedClicks} />
+      <MerchantClicksSection parsed={parsedClicks} merchants={merchants} />
     </div>
   );
 }

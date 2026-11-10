@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildClicksCsv,
   clicksCsvFilename,
+  csvByteLength,
   csvCell,
+  CSV_TOO_LARGE_MESSAGE,
+  MAX_CSV_BYTES,
   CSV_HEADER,
   type ClicksCsvReport,
 } from '@/lib/admin-clicks/csv';
@@ -51,10 +54,62 @@ describe('csvCell', () => {
     expect(csvCell('=SUM(A1,A2)')).toBe('"\'=SUM(A1,A2)"');
   });
 
-  it('only looks at the first character', () => {
+  it('leaves a formula character in the middle of a word alone', () => {
     expect(csvCell('a=b')).toBe('a=b');
     expect(csvCell('1-2')).toBe('1-2');
-    expect(csvCell(' =x')).toBe(' =x');
+    expect(csvCell('50% off + free post')).toBe('50% off + free post');
+  });
+
+  it.each([
+    ['a leading space', ' =1+1'],
+    ['a no-break space', ' =1+1'],
+    ['an ideographic space', '　=1+1'],
+    ['a zero-width space', '​=1+1'],
+    ['a zero-width joiner', '‍+1'],
+    ['a word joiner', '⁠@SUM(A1)'],
+    ['a byte-order mark', String.fromCharCode(0xfeff) + '=1+1'],
+    ['a mix of them', ' ​ -2+3'],
+  ])('neutralises a formula after %s', (_name, input) => {
+    expect(csvCell(input)).toBe(`'${input}`);
+  });
+
+  it.each([
+    ['a line feed', '\n=1+1'],
+    ['a line feed and text', '\nhello'],
+    ['a carriage return', '\rhello'],
+    ['a tab', '\thello'],
+  ])('neutralises a cell that starts with %s', (_name, input) => {
+    const cell = csvCell(input);
+
+    expect(cell.startsWith('"\'')).toBe(true);
+    expect(cell.endsWith('"')).toBe(true);
+  });
+
+  it.each([
+    ['＝', 'full-width ='],
+    ['＋', 'full-width +'],
+    ['－', 'full-width -'],
+    ['＠', 'full-width @'],
+  ])('neutralises %s (%s) at the start of a cell', (char) => {
+    expect(csvCell(`${char}1`)).toBe(`'${char}1`);
+  });
+
+  it('puts the quote after a semicolon or a tab inside a cell and quotes the cell', () => {
+    expect(csvCell('a;=1+1;b')).toBe(`"a;'=1+1;b"`);
+    expect(csvCell('a; =1+1')).toBe(`"a; '=1+1"`);
+    expect(csvCell('a\t@x')).toBe(`"a\t'@x"`);
+    expect(csvCell('a;​-2')).toBe(`"a;​'-2"`);
+  });
+
+  it('quotes a cell that holds a semicolon or a tab', () => {
+    expect(csvCell('one; two')).toBe('"one; two"');
+    expect(csvCell('one\ttwo')).toBe('"one\ttwo"');
+  });
+
+  it('writes a number only when it is finite', () => {
+    expect(csvCell(Number.NaN)).toBe('');
+    expect(csvCell(Number.POSITIVE_INFINITY)).toBe('');
+    expect(csvCell(-3)).toBe('-3');
   });
 
   it('writes counts as plain numbers, never as text', () => {
@@ -159,5 +214,91 @@ describe('clicksCsvFilename', () => {
 
     expect(name.length).toBeLessThan(120);
     expect(name).toMatch(/^freejoy-clicks-a+-2026-03-10-to-2026-03-11\.csv$/);
+  });
+});
+
+describe('a hostile report', () => {
+  const HOSTILE = [
+    '=1+1',
+    ' =1+1',
+    '+1',
+    '-1',
+    '@SUM(A1)',
+    ' =1',
+    '​+1',
+    '＝1',
+    '＋1',
+    '－1',
+    '＠x',
+    'x;=1+1',
+    'x\t=1+1',
+    '\n=1+1',
+    '\r@x',
+    '\t-1',
+  ];
+  // A cell, at the start of a line or after a comma, semicolon or tab, that a spreadsheet could read as a
+  // formula (a quoted cell is looked at from inside its opening quote).
+  const RISKY = /(^|[,;\t])"?[\s​-‍⁠]*[=+\-@＝＋－＠]/;
+
+  it.each(HOSTILE)('leaves no risky cell when the merchant, title and slug are %j', (hostile) => {
+    const csv = buildClicksCsv({
+      merchant: { name: hostile, slug: 'x' },
+      from_date: '2026-03-10',
+      to_date: '2026-03-11',
+      offers: [offer(hostile, [['2026-03-10', 1]], hostile), offer(hostile, [], hostile)],
+    });
+
+    // The strictest reading: every physical line, also those inside a quoted cell with a line break.
+    const lines = csv.slice(1).split(/\r\n|\n|\r/);
+    expect(lines.filter((line) => RISKY.test(line))).toEqual([]);
+  });
+});
+
+describe('the size of the file', () => {
+  it('is measured in UTF-8 bytes, not characters', () => {
+    expect(csvByteLength('abc')).toBe(3);
+    expect(csvByteLength('é')).toBe(2);
+    expect(csvByteLength('日')).toBe(3);
+  });
+
+  it('is pinned for a report of 100 offers over 366 days with 40-character titles', () => {
+    const days = Array.from({ length: 366 }, (_, i): [string, number] => [
+      new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10),
+      i % 90,
+    ]);
+    const title = (i: number) => `Free sample offer ${String(i).padStart(3, '0')} deluxe pk`;
+    const offers = Array.from({ length: 100 }, (_, i) =>
+      offer(title(i).padEnd(40, 'x'), days, title(i).toLowerCase().replaceAll(' ', '-'))
+    );
+
+    const bytes = csvByteLength(
+      buildClicksCsv({
+        merchant: { name: 'Acme', slug: 'acme' },
+        from_date: '2025-01-01',
+        to_date: '2026-01-01',
+        offers,
+      })
+    );
+
+    // 36,600 rows, the most one report can hold. Pinned so that a longer row (a new column, a longer date) is a
+    // visible change; with titles of this length the largest report still fits under the limit.
+    expect(bytes).toBe(3399254);
+    expect(bytes).toBeLessThan(MAX_CSV_BYTES);
+  });
+
+  it('has a curated message for a file over the limit', () => {
+    expect(MAX_CSV_BYTES).toBe(4 * 1024 * 1024);
+    expect(CSV_TOO_LARGE_MESSAGE).toBe(
+      'This report is too large to download as one file. Choose a shorter date range.'
+    );
+  });
+});
+
+describe('clicksCsvFilename from unvalidated input', () => {
+  it('never carries a path or odd characters, whatever the dates are', () => {
+    expect(clicksCsvFilename('acme', '../../evil', 'x/y')).toMatch(/^[a-z0-9.-]+\.csv$/);
+    expect(clicksCsvFilename('acme', '../../evil', 'x/y')).toBe(
+      'freejoy-clicks-acme-date-to-date.csv'
+    );
   });
 });

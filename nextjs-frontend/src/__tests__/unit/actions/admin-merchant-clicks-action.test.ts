@@ -20,6 +20,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { exportMerchantClicksAction } from '@/app/actions/admin/merchant-clicks-actions';
+import { CSV_TOO_LARGE_MESSAGE } from '@/lib/admin-clicks/csv';
 import {
   ADMIN_FORBIDDEN_MESSAGE,
   ADMIN_REQUEST_FAILED_MESSAGE,
@@ -75,6 +76,51 @@ describe('exportMerchantClicksAction', () => {
           'Acme,"\'=HYPERLINK(""x"")",soap,2026-03-10,3\r\n',
         truncated: false,
       },
+    });
+  });
+
+  it('refuses a file over the size limit with a curated message and sends nothing', async () => {
+    const days = Array.from({ length: 366 }, (_, i) => ({
+      date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10),
+      clicks: 1,
+    }));
+    const big = Array.from({ length: 100 }, (_, i) => ({
+      offer_id: `o${i}`,
+      slug: `slug-${i}`,
+      title: `${'T'.repeat(120)} ${i}`,
+      total_clicks: 366,
+      days,
+    }));
+    mocks.fetchMerchantClicks.mockResolvedValue({
+      success: true,
+      data: { ...REPORT, offers: big },
+    });
+
+    const result = await exportMerchantClicksAction({
+      merchantId: 'm1',
+      from: '2025-01-01',
+      to: '2026-01-01',
+    });
+
+    expect(result).toEqual({ success: false, error: CSV_TOO_LARGE_MESSAGE });
+  });
+
+  it('builds the file name from the validated dates, not from the API answer', async () => {
+    mocks.fetchMerchantClicks.mockResolvedValue({
+      success: true,
+      data: {
+        ...REPORT,
+        merchant: { ...REPORT.merchant, slug: '../EVIL slug' },
+        from_date: 'x/y',
+        to_date: '..',
+      },
+    });
+
+    const result = await exportMerchantClicksAction(INPUT);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { filename: 'freejoy-clicks-evil-slug-2026-03-10-to-2026-03-11.csv' },
     });
   });
 

@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 // tables carry explicit ARIA roles. The hidden header also hides sort buttons:
 // stacked tables with SortableTableHead need a separate sort control on phones.
 const STACKED_CLASSES =
-  'max-sm:[&>thead]:sr-only max-sm:[&>tbody>tr]:flex max-sm:[&>tbody>tr]:flex-wrap max-sm:[&>tbody>tr]:items-baseline max-sm:[&>tbody>tr]:justify-between max-sm:[&>tbody>tr]:gap-x-4 max-sm:[&>tbody>tr]:py-3';
+  'max-sm:[&>thead]:sr-only max-sm:[&>tbody>tr]:flex max-sm:[&>tbody>tr]:flex-wrap max-sm:[&>tbody>tr]:items-baseline max-sm:[&>tbody>tr]:justify-between max-sm:[&>tbody>tr]:gap-x-4 max-sm:[&>tbody>tr]:py-3 max-sm:[&>tfoot>tr]:flex max-sm:[&>tfoot>tr]:flex-wrap max-sm:[&>tfoot>tr]:items-baseline max-sm:[&>tfoot>tr]:justify-between max-sm:[&>tfoot>tr]:gap-x-4 max-sm:[&>tfoot>tr]:py-3';
 
 const StackedContext = React.createContext(false);
 
@@ -118,6 +118,10 @@ const TableHead = React.forwardRef<
 ));
 TableHead.displayName = 'TableHead';
 
+/** The `label` prefix a stacked cell shows before its value (below 640px). */
+const LABELLED_CELL_CLASSES =
+  'max-sm:p-0 max-sm:before:mr-2 max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:uppercase max-sm:before:tracking-wider max-sm:before:text-muted-foreground max-sm:before:content-[attr(data-label)]';
+
 interface TableCellProps extends React.TdHTMLAttributes<HTMLTableCellElement>, NumericProps {
   /** Column name shown before the value when rows are stacked (below 640px). */
   label?: string;
@@ -131,8 +135,7 @@ const TableCell = React.forwardRef<HTMLTableCellElement, TableCellProps>(
       data-label={label}
       className={cn(
         'px-4 py-3 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
-        label &&
-          'max-sm:p-0 max-sm:before:mr-2 max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:uppercase max-sm:before:tracking-wider max-sm:before:text-muted-foreground max-sm:before:content-[attr(data-label)]',
+        label && LABELLED_CELL_CLASSES,
         numeric && NUMERIC_CLASSES,
         className
       )}
@@ -141,6 +144,26 @@ const TableCell = React.forwardRef<HTMLTableCellElement, TableCellProps>(
   )
 );
 TableCell.displayName = 'TableCell';
+
+/** A row header cell (`th scope="row"`): the cell that names its row, laid out like a `TableCell`. */
+const TableRowHeader = React.forwardRef<HTMLTableCellElement, TableCellProps>(
+  ({ className, numeric = false, label, ...props }, ref) => (
+    <th
+      ref={ref}
+      scope="row"
+      role={React.useContext(StackedContext) ? 'rowheader' : undefined}
+      data-label={label}
+      className={cn(
+        'px-4 py-3 text-left align-middle font-medium',
+        label && LABELLED_CELL_CLASSES,
+        numeric && NUMERIC_CLASSES,
+        className
+      )}
+      {...(props as React.ThHTMLAttributes<HTMLTableCellElement>)}
+    />
+  )
+);
+TableRowHeader.displayName = 'TableRowHeader';
 
 interface TableCaptionProps extends React.HTMLAttributes<HTMLTableCaptionElement> {
   /** Show the caption on screen; by default it is visually hidden. */
@@ -206,5 +229,6 @@ export {
   TableHead,
   TableRow,
   TableCell,
+  TableRowHeader,
   TableCaption,
 };

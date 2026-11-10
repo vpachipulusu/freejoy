@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { MAX_CLICK_RANGE_DAYS } from '@/lib/admin-clicks/range';
 import {
   ADMIN_REQUEST_FAILED_MESSAGE,
   adminErrorMessage as baseAdminErrorMessage,
@@ -37,7 +38,7 @@ const CODE_MESSAGES: Record<string, string> = {
   invalid_window: 'The end date must be after the start date.',
   unknown_category: 'That category does not exist. Choose another.',
   unknown_merchant: 'That merchant does not exist. Choose another.',
-  invalid_range: 'Choose dates where the start is on or before the end, at most 366 days apart.',
+  invalid_range: `Choose dates where the start is on or before the end, at most ${MAX_CLICK_RANGE_DAYS} days apart.`,
 };
 
 /** The backend's fixed publish rules (`PUBLISH_BLOCKERS`), mapped to our own wording. */
