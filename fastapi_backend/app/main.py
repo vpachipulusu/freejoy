@@ -9,6 +9,9 @@ from app.core.errors import ERROR_RESPONSES, register_error_handlers
 from app.core.logging import configure_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.sentry import init_sentry
+from app.partner.app import create_partner_app
+from app.partner.mount import PartnerMount
+from app.partner.surface import PARTNER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,10 @@ def create_app() -> FastAPI:
     application.add_middleware(RequestIdMiddleware)
     register_error_handlers(application)
     application.include_router(api_router)
+    # The one mount (ADR-013): partner handlers live only here, behind their own surface wrapper.
+    application.routes.append(
+        PartnerMount(PARTNER_PREFIX, app=create_partner_app(), name="partner")
+    )
     return application
 
 

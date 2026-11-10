@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Relaxes nothing else. Remove the variable at go-live.
     API_DOCS_ENABLED: bool = False
 
+    # Partner API (ADR-013). Off by default: while false every path under /partner/v1 answers the
+    # same 404 as an unknown path. Nothing is served there yet; this is the switch for later stories.
+    PARTNER_API_ENABLED: bool = False
+
     # Database
     DATABASE_URL: str
     EXPIRE_ON_COMMIT: bool = False
