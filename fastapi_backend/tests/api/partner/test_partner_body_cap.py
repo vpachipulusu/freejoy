@@ -272,3 +272,25 @@ async def _never() -> Message:
 
 async def _discard(message: Message) -> None:
     return None
+
+
+async def test_reading_again_after_the_overflow_reports_a_disconnect() -> None:
+    seen: list[str] = []
+
+    class ReadsAgain:
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            try:
+                while (await receive()).get("more_body"):
+                    pass
+            except BaseException:  # noqa: BLE001 - the point of the test
+                seen.append((await receive())["type"])
+
+    response = await call_raw(
+        PartnerSurface(ReadsAgain(), enabled=lambda: True, max_body_bytes=LIMIT),
+        "POST",
+        "/x",
+        chunks=OVER,
+    )
+
+    assert seen == ["http.disconnect"]
+    assert response.status == 413
