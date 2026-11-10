@@ -22,7 +22,8 @@ def build_engine(
     Every engine gets the pooler-safe connect args from ``to_async_target``
     (statement cache off, bounded connect timeout).
 
-    Only this module and ``app.services.store_sessions`` may call it (ruff TID251).
+    Only this module (and ``alembic_migrations/env.py`` and the tests) may call it: ruff ``TID251``
+    in ``pyproject.toml`` bans ``build_engine`` and the SQLAlchemy engine factories everywhere else.
     """
     target = to_async_target(database_url)
     # Disable connection pooling for serverless environments like Vercel

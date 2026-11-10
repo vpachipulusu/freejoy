@@ -4,7 +4,8 @@ Guidance for agents working on the FastAPI service. Repo-wide rules are in
 [`../.claude/CLAUDE.md`](../.claude/CLAUDE.md). Run every command below from `fastapi_backend/`. Decisions:
 [ADR-003](../docs/adr/0003-nextjs-to-fastapi-authentication.md),
 [ADR-004](../docs/adr/0004-backend-layering.md), [ADR-007](../docs/adr/0007-rate-limit-keys.md),
-[ADR-008](../docs/adr/0008-api-client-generation.md).
+[ADR-008](../docs/adr/0008-api-client-generation.md), [ADR-013](../docs/adr/0013-partner-api.md) (partner surface:
+[`../docs/developer/backend-partner-api.md`](../docs/developer/backend-partner-api.md)).
 
 ## Commands
 

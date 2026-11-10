@@ -73,6 +73,15 @@ repos:
         files: ^(fastapi_backend/(app|commands)/.*\.py|fastapi_backend/pyproject\.toml|nextjs-frontend/openapi\.json)$
         pass_filenames: false
 
+      - id: partner-openapi-schema-check
+        name: check docs/partner/openapi.json is up to date
+        # The partner contract (ADR-013), a separate file from the internal schema above.
+        # Fix: cd fastapi_backend && uv run python -m commands.generate_partner_openapi_schema
+        entry: sh -c 'cd fastapi_backend && uv run python -m commands.check_partner_openapi_schema'
+        language: system
+        files: ^(fastapi_backend/(app|commands)/.*\.py|fastapi_backend/pyproject\.toml|docs/partner/openapi\.json)$
+        pass_filenames: false
+
       # ------------------------------------------------------------ frontend
       - id: openapi-client-check
         name: check generated TypeScript client is up to date (nextjs-frontend)

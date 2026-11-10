@@ -2,6 +2,7 @@
 
 - **Status:** Accepted by the product owner, 2026-10-12
 - **Date:** 2026-10-11
+- **Amended by:** [ADR-013](0013-partner-api.md) (a second public backend rewrite, `/partner/v1/(.*)`)
 - **Supersedes:** an earlier two-Vercel-projects decision (not kept in this template)
 
 ## Context
