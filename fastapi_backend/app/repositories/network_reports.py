@@ -6,11 +6,12 @@ and writes ``network_report_rows``. The run lock is a Postgres advisory lock wit
 run and an offers import never wait for each other.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform.affiliate_link import AffiliateLink
@@ -22,11 +23,9 @@ from app.repositories.base import BaseRepository
 REPORT_LOCK_KEY = 7_460_046_002
 # Longest a page waits for the run lock before it fails (``lock_timeout``, SQLSTATE 55P03).
 DEFAULT_LOCK_TIMEOUT_MS = 30_000
-# More links than this holding one tracking id is already ambiguous, so there is no point reading further.
-MAX_TRACKING_CANDIDATES = 5
-# The destination search is only a pre-filter (the caller compares whole parameter values), so it reads
-# widely; a reference that appears in more links than this cannot be matched reliably.
-MAX_TEXT_CANDIDATES = 200
+# Most links one reference may bring back. The queries read one more than this, so the caller can tell
+# "exactly the cap" from "more than the cap" and refuse to match on a list that may be cut short.
+MAX_CANDIDATES = 200
 
 
 @dataclass(frozen=True)
@@ -38,9 +37,11 @@ class LinkCandidate:
 
 @dataclass(frozen=True)
 class ReportRowRecord:
+    """What the importer needs to know about a stored row (not the whole row)."""
+
     id: str
-    external_id: str
     report_hash: str
+    click_ref: str | None
     offer_id: str | None
     affiliate_link_id: str | None
 
@@ -75,28 +76,25 @@ class NetworkReportRepository(BaseRepository):
     async def links_by_tracking_id(
         self, provider: str, tracking_id: str
     ) -> list[LinkCandidate]:
+        """Active links of the provider with this tracking id (at most ``MAX_CANDIDATES + 1``)."""
         return await self._candidates(
-            provider,
-            AffiliateLink.tracking_id == tracking_id,
-            MAX_TRACKING_CANDIDATES,
+            provider, AffiliateLink.tracking_id == tracking_id
         )
 
     async def links_with_text(
         self, provider: str, fragment: str
     ) -> list[LinkCandidate]:
-        """Active links whose destination contains ``fragment`` (LIKE wildcards in it are escaped).
+        """Active links whose destination contains ``=fragment`` (LIKE wildcards in it are escaped).
 
-        Only a pre-filter: the caller parses each destination and compares whole parameter values.
+        Only a pre-filter, narrowed to a parameter value: the caller parses each destination and compares
+        whole parameter values. At most ``MAX_CANDIDATES + 1`` come back.
         """
         return await self._candidates(
             provider,
-            AffiliateLink.destination_url.contains(fragment, autoescape=True),
-            MAX_TEXT_CANDIDATES,
+            AffiliateLink.destination_url.contains("=" + fragment, autoescape=True),
         )
 
-    async def _candidates(
-        self, provider: str, condition: Any, limit: int
-    ) -> list[LinkCandidate]:
+    async def _candidates(self, provider: str, condition: Any) -> list[LinkCandidate]:
         result = await self._session.execute(
             select(
                 AffiliateLink.id, AffiliateLink.offer_id, AffiliateLink.destination_url
@@ -107,34 +105,51 @@ class NetworkReportRepository(BaseRepository):
                 condition,
             )
             .order_by(AffiliateLink.id)
-            .limit(limit)
+            .limit(MAX_CANDIDATES + 1)
         )
         return [LinkCandidate(*row) for row in result.all()]
 
     # --- rows -------------------------------------------------------------------------------
 
-    async def find_row(self, provider: str, external_id: str) -> ReportRowRecord | None:
-        row = await self._session.scalar(
-            select(NetworkReportRow).where(
+    async def find_rows(
+        self, provider: str, external_ids: Sequence[str]
+    ) -> dict[str, ReportRowRecord]:
+        """The stored rows for these transaction ids, by id, in one query."""
+        if not external_ids:
+            return {}
+        result = await self._session.execute(
+            select(
+                NetworkReportRow.external_id,
+                NetworkReportRow.id,
+                NetworkReportRow.report_hash,
+                NetworkReportRow.click_ref,
+                NetworkReportRow.offer_id,
+                NetworkReportRow.affiliate_link_id,
+            ).where(
                 NetworkReportRow.provider == provider,
-                NetworkReportRow.external_id == external_id,
+                NetworkReportRow.external_id.in_(list(external_ids)),
             )
         )
-        if row is None:
-            return None
-        return ReportRowRecord(
-            row.id,
-            row.external_id,
-            row.report_hash,
-            row.offer_id,
-            row.affiliate_link_id,
-        )
+        return {
+            external_id: ReportRowRecord(
+                row_id, report_hash, click_ref, offer_id, link_id
+            )
+            for external_id, row_id, report_hash, click_ref, offer_id, link_id in result.all()
+        }
 
     async def insert_row(self, values: dict[str, Any]) -> None:
         self._session.add(NetworkReportRow(**values))
         await self._session.flush()
 
     async def update_row(self, row_id: str, values: dict[str, Any]) -> None:
+        """Update a row; ``last_seen_at`` never moves backwards (``GREATEST``), so a slow older run cannot rewind it."""
+        if "last_seen_at" in values:
+            values = {
+                **values,
+                "last_seen_at": func.greatest(
+                    NetworkReportRow.last_seen_at, values["last_seen_at"]
+                ),
+            }
         await self._session.execute(
             update(NetworkReportRow)
             .where(NetworkReportRow.id == row_id)

@@ -118,7 +118,14 @@ def test_a_run_requests_the_window_imports_and_prints_counts_only(
     good_feed: Server, capsys: pytest.CaptureFixture[str]
 ) -> None:
     db = FakeReportDatabase()
-    db.add_link(FakeLink("l1", "o1", "https://x.example", "ref-1"))
+    db.add_link(
+        FakeLink(
+            "l1",
+            "o1",
+            "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242",
+            "ref-1",
+        )
+    )
 
     code = run(["--from", "2026-11-01", "--to", "2026-11-10"], good_feed, db)
 

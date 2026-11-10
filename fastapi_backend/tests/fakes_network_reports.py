@@ -5,13 +5,19 @@ state that becomes the committed state only when the unit's session commits, so 
 page leaves behind. The real SQL is covered by ``tests/commands/test_import_awin_reports_e2e.py``.
 """
 
+import asyncio
 import dataclasses
-from collections.abc import AsyncIterator
+from collections import Counter
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.repositories.network_reports import LinkCandidate, ReportRowRecord
+from app.repositories.network_reports import (
+    MAX_CANDIDATES,
+    LinkCandidate,
+    ReportRowRecord,
+)
 from app.services.network_report_run import ReportUnit
 
 
@@ -62,8 +68,8 @@ class FakeSession:
 
 
 class FakeAuditor:
-    def __init__(self, working: State) -> None:
-        self._working = working
+    def __init__(self, working: State, database: "FakeReportDatabase") -> None:
+        self._working, self._database = working, database
 
     async def record_system_action(
         self,
@@ -76,6 +82,10 @@ class FakeAuditor:
         after: Any = None,
         details: Any = None,
     ) -> None:
+        if self._database.audit_delay:
+            await asyncio.sleep(self._database.audit_delay)
+        if self._database.audit_error is not None:
+            raise self._database.audit_error
         self._working.audits.append(
             {
                 "source": source,
@@ -90,8 +100,8 @@ class FakeAuditor:
 def _record(values: dict[str, Any]) -> ReportRowRecord:
     return ReportRowRecord(
         id=values["id"],
-        external_id=values["external_id"],
         report_hash=values["report_hash"],
+        click_ref=values["click_ref"],
         offer_id=values["offer_id"],
         affiliate_link_id=values["affiliate_link_id"],
     )
@@ -107,33 +117,47 @@ class FakeReportStore:
         self.s.run_locks += 1
 
     async def find_merchant_id(self, provider: str, external_id: str) -> str | None:
+        self._database.calls["find_merchant_id"] += 1
         return self.s.merchants.get((provider, external_id))
 
     async def links_by_tracking_id(
         self, provider: str, tracking_id: str
     ) -> list[LinkCandidate]:
-        return [
-            LinkCandidate(link.link_id, link.offer_id, link.destination_url)
-            for link in self.s.links
-            if link.active
-            and link.provider == provider
-            and link.tracking_id == tracking_id
-        ]
+        self._database.calls["links_by_tracking_id"] += 1
+        return self._candidates(
+            lambda link: link.provider == provider and link.tracking_id == tracking_id
+        )
 
     async def links_with_text(
         self, provider: str, fragment: str
     ) -> list[LinkCandidate]:
+        self._database.calls["links_with_text"] += 1
+        return self._candidates(
+            lambda link: (
+                link.provider == provider and ("=" + fragment) in link.destination_url
+            )
+        )
+
+    def _candidates(self, wanted: Callable[[FakeLink], bool]) -> list[LinkCandidate]:
+        """Active links in id order, cut at ``MAX_CANDIDATES + 1`` like the real query."""
+        found = sorted(
+            (link for link in self.s.links if link.active and wanted(link)),
+            key=lambda link: link.link_id,
+        )
         return [
             LinkCandidate(link.link_id, link.offer_id, link.destination_url)
-            for link in self.s.links
-            if link.active
-            and link.provider == provider
-            and fragment in link.destination_url
+            for link in found[: MAX_CANDIDATES + 1]
         ]
 
-    async def find_row(self, provider: str, external_id: str) -> ReportRowRecord | None:
-        values = self.s.rows.get((provider, external_id))
-        return _record(values) if values else None
+    async def find_rows(
+        self, provider: str, external_ids: Sequence[str]
+    ) -> dict[str, ReportRowRecord]:
+        self._database.calls["find_rows"] += 1
+        return {
+            external_id: _record(values)
+            for external_id in external_ids
+            if (values := self.s.rows.get((provider, external_id)))
+        }
 
     async def insert_row(self, values: dict[str, Any]) -> None:
         self._database.row_inserts += 1
@@ -148,7 +172,10 @@ class FakeReportStore:
     async def update_row(self, row_id: str, values: dict[str, Any]) -> None:
         for stored in self.s.rows.values():
             if stored["id"] == row_id:
+                previous = stored["last_seen_at"]
                 stored.update(values)
+                if "last_seen_at" in values:  # never backwards, like the real GREATEST
+                    stored["last_seen_at"] = max(values["last_seen_at"], previous)
                 return
         raise LookupError(row_id)
 
@@ -164,13 +191,18 @@ class FakeReportDatabase:
         *,
         fail_insert_at: int | None = None,
         lock_error: Exception | None = None,
+        audit_error: Exception | None = None,
+        audit_delay: float = 0.0,
     ) -> None:
         self.committed = State()
         self.commits = 0
         self.units_opened = 0
         self.row_inserts = 0
+        self.calls: Counter[str] = Counter()
         self.fail_insert_at = fail_insert_at
         self.lock_error = lock_error
+        self.audit_error = audit_error
+        self.audit_delay = audit_delay
 
     @asynccontextmanager
     async def unit(self) -> AsyncIterator[ReportUnit]:
@@ -179,7 +211,7 @@ class FakeReportDatabase:
         yield ReportUnit(
             FakeReportStore(working, self),
             FakeSession(self, working),
-            FakeAuditor(working),
+            FakeAuditor(working, self),
         )
 
     # --- helpers for tests -----------------------------------------------------------------

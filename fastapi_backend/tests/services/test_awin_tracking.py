@@ -272,3 +272,48 @@ def test_passive_values_of_a_malformed_query_is_empty() -> None:
         frozenset()
     )
     assert passive_values("https://www.awin1.com/cread.php?clickref") == frozenset()
+
+
+def test_passive_values_can_be_limited_to_named_slots() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = (
+        "https://www.awin1.com/cread.php?awinmid=77&awinaffid=1&clickref=a&clickref2=b"
+    )
+
+    assert passive_values(url, frozenset({"clickref"})) == {"a"}
+    assert passive_values(url, frozenset({"clickref2"})) == {"b"}
+    assert passive_values(url, frozenset()) == frozenset()
+
+
+def test_link_advertiser_id_reads_the_advertiser_of_either_click_shape() -> None:
+    from app.services.awin_tracking import link_advertiser_id
+
+    cread = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref=a"
+    awclick = "https://www.awin1.com/awclick.php?mid=88&id=424242"
+
+    assert link_advertiser_id(cread) == 77
+    assert link_advertiser_id(awclick) == 88
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.awin1.com/other.php?awinmid=77",
+        "https://www.awin1.com/cread.php?awinaffid=424242",
+        "https://www.awin1.com/cread.php?awinmid=77&awinmid=78",
+        "https://www.awin1.com/cread.php?awinmid=abc",
+        "https://www.awin1.com/cread.php?awinmid=",
+        "https://www.awin1.com/cread.php?awinmid=-5",
+        "https://www.awin1.com/cread.php?awinmid=7;awinaffid=1",
+        "https://www.awin1.com/awclick.php?awinmid=77",
+        "https://x.example/landing",
+        "not a url",
+    ],
+)
+def test_link_advertiser_id_is_none_for_anything_not_a_recognised_click_link(
+    url: str,
+) -> None:
+    from app.services.awin_tracking import link_advertiser_id
+
+    assert link_advertiser_id(url) is None

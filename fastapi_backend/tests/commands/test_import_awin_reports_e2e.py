@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.database import build_engine
 from app.core.ids import new_id
-from app.repositories.network_reports import REPORT_LOCK_KEY
+from app.repositories.network_reports import MAX_CANDIDATES, REPORT_LOCK_KEY
 from app.services.network_report_run import (
     ReportRunFailed,
     RunOptions,
@@ -155,8 +155,9 @@ async def add_link(
     destination: str = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242",
     tracking_id: str | None = None,
     active: bool = True,
+    link_id: str | None = None,
 ) -> str:
-    link_id = new_id()
+    link_id = link_id or new_id()
     await execute(
         engine,
         "INSERT INTO affiliate_links (id, offer_id, provider, destination_url, tracking_id, active)"
@@ -268,7 +269,7 @@ async def test_a_run_stores_rows_matched_by_tracking_id_by_url_and_by_merchant_o
     by_url = await add_link(
         engine,
         ids["offer"],
-        destination="https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref3=ref-2",
+        destination="https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref=ref-2",
     )
     page = [raw_row(1), raw_row(2), raw_row(3, clickRefs=None), raw_row(4)]
 
@@ -414,8 +415,11 @@ async def test_a_completed_run_writes_one_audit_row_with_counts_only(
         "updated": 0,
         "unchanged": 0,
         "unmatched": 1,
+        "rejected_known": 0,
         "skipped": {"unknown_status": 1},
+        "match_problems": {},
         "stopped_early": None,
+        "resume_from": None,
     }
     text_of_row = repr(audit.metadata)
     for fragment in ("ref-1", "GBP", "approved"):
@@ -433,6 +437,156 @@ async def test_a_failure_after_a_committed_page_leaves_a_failed_audit_row(
     assert await scalar(engine, "SELECT count(*) FROM network_report_rows") == 200
     details = await scalar(engine, "SELECT metadata->'details' FROM audit_logs")
     assert details["status"] == "failed" and details["cause"] == "server_error"
+
+
+async def test_a_status_change_keeps_a_stored_match_even_when_the_link_is_deactivated(
+    engine: AsyncEngine,
+) -> None:
+    ids = await seed_catalogue(engine)
+    link = await add_link(engine, ids["offer"], tracking_id="ref-1")
+    await run(engine, [[raw_row(1, commissionStatus="pending")]])
+    await execute(
+        engine, "UPDATE affiliate_links SET active = false WHERE id = :i", i=link
+    )
+    await add_link(engine, ids["offer"], tracking_id="ref-1")  # a second active carrier
+
+    report = await run(
+        engine,
+        [
+            [
+                raw_row(
+                    1,
+                    commissionStatus="approved",
+                    commissionAmount={"amount": 2, "currency": "GBP"},
+                )
+            ]
+        ],
+        now=LATER,
+    )
+
+    changed = await stored(engine, "1")
+    assert report.tally.updated == 1
+    assert (changed.offer_id, changed.affiliate_link_id) == (ids["offer"], link)
+    assert (
+        changed.commission_status == "approved"
+        and changed.commission_amount_minor == 200
+    )
+
+
+async def test_a_changed_click_reference_is_matched_again(engine: AsyncEngine) -> None:
+    ids = await seed_catalogue(engine)
+    await add_link(engine, ids["offer"], tracking_id="ref-1")
+    second = await add_link(engine, ids["offer"], tracking_id="ref-new")
+    await run(engine, [[raw_row(1)]])
+
+    await run(
+        engine,
+        [[raw_row(1, clickRefs={"clickRef": "ref-new"}, commissionStatus="paid")]],
+        now=LATER,
+    )
+
+    assert (await stored(engine, "1")).affiliate_link_id == second
+
+
+@pytest.mark.parametrize("path", ["tracking_id", "destination"])
+async def test_another_advertisers_link_never_matches_and_is_counted(
+    engine: AsyncEngine, path: str
+) -> None:
+    ids = await seed_catalogue(engine)
+    if path == "tracking_id":
+        await add_link(engine, ids["offer"], tracking_id="ref-1")
+    else:
+        await add_link(
+            engine,
+            ids["offer"],
+            destination="https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref=ref-1",
+        )
+
+    report = await run(engine, [[raw_row(1, advertiserId=88)]])
+
+    row_ = await stored(engine, "1")
+    assert row_.offer_id is None and row_.affiliate_link_id is None
+    assert dict(report.tally.match_problems) == {"merchant_mismatch": 1}
+
+
+async def test_more_carriers_than_the_cap_match_nothing_whatever_their_ids(
+    engine: AsyncEngine,
+) -> None:
+    ids = await seed_catalogue(engine)
+    base = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref="
+    await add_link(engine, ids["offer"], destination=base + "ref-1", link_id="a-first")
+    await add_link(engine, ids["offer"], destination=base + "ref-1", link_id="z-last")
+    for n in range(MAX_CANDIDATES):
+        await add_link(
+            engine, ids["offer"], destination=base + "ref-1x", link_id=f"m-{n:03d}"
+        )
+
+    report = await run(engine, [[raw_row(1, clickRefs={"clickRef": "ref-1"})]])
+
+    assert (await stored(engine, "1")).offer_id is None
+    assert dict(report.tally.match_problems) == {"too_many_candidates": 1}
+
+
+async def test_a_link_with_the_reference_only_in_slot_two_does_not_match(
+    engine: AsyncEngine,
+) -> None:
+    ids = await seed_catalogue(engine)
+    await add_link(
+        engine,
+        ids["offer"],
+        destination="https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&clickref2=ref-1",
+    )
+
+    await run(engine, [[raw_row(1, clickRefs={"clickRef": "ref-1"})]])
+
+    assert (await stored(engine, "1")).offer_id is None
+
+
+async def test_an_approved_transaction_that_is_later_deleted_updates_the_row(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [[raw_row(1, commissionStatus="approved")]])
+
+    report = await run(engine, [[raw_row(1, commissionStatus="deleted")]], now=LATER)
+
+    assert (report.tally.updated, report.tally.inserted) == (1, 0)
+    assert (await stored(engine, "1")).commission_status == "deleted"
+
+
+async def test_a_stored_row_that_later_fails_validation_is_left_alone_and_counted(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [[raw_row(1), raw_row(2)]])
+    before = await stored(engine, "1")
+
+    report = await run(
+        engine,
+        [[raw_row(1, commissionAmount={"amount": -1, "currency": "GBP"}), raw_row(2)]],
+        now=LATER,
+    )
+
+    after = await stored(engine, "1")
+    assert report.tally.rejected_known == 1 and report.tally.unchanged == 1
+    assert (after.report_hash, after.commission_amount_minor) == (
+        before.report_hash,
+        before.commission_amount_minor,
+    )
+
+
+async def test_updated_at_advances_on_a_real_update_but_last_seen_at_never_moves_back(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [[raw_row(1, commissionStatus="pending")]], now=LATER)
+    first = await stored(engine, "1")
+
+    await run(
+        engine, [[raw_row(1, commissionStatus="approved")]], now=NOW
+    )  # an older run
+
+    second = await stored(engine, "1")
+    assert second.updated_at > first.updated_at
+    assert second.commission_status == "approved"
+    assert second.last_seen_at == LATER  # GREATEST: not rewound to NOW
 
 
 # --- locks ---------------------------------------------------------------------------------
