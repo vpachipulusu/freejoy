@@ -67,6 +67,7 @@ Details: [backend-auth.md](backend-auth.md), [backend-totp.md](backend-totp.md).
 ```
 fastapi_backend/app/
 ├── main.py              create_app(): request ID and error envelope, JSON logging, Sentry, mounts the v1 router; `app` is the entrypoint
+├── partner/             the partner sub-app, its surface wrapper and mount (ADR-013); imports core only
 ├── core/                config (pydantic-settings), base (declarative Base), database (NullPool engine, SessionProvider),
 │                        logging, errors, request_id, rate_limit, permissions, plans, firebase, ids, platform_schema, stripe_* (module)
 ├── api/
@@ -95,6 +96,17 @@ and downgrade against a throwaway Postgres 17 service container. See [platform-m
 **OpenAPI.** `commands/generate_openapi_schema.py` writes `nextjs-frontend/openapi.json`; `npm run generate:client`
 produces `src/lib/api/generated/`; `commands/check_openapi_schema.py` and `npm run check:client` fail when either is
 stale (pre-commit and CI).
+
+## Partner surface (ADR-013)
+
+Retailers will later call a partner API. It lives in this backend as a second FastAPI app mounted once at `/partner/v1`
+(`app/partner/`), reached through one extra rewrite in the root `vercel.json`, and it is switched off
+(`PARTNER_API_ENABLED`, default `false`): every path under the prefix answers the same 404. The invariant is that a
+caller with a valid partner key and the public partner URL can invoke only partner handlers and touch only its own
+merchant's data. Today the surface is empty; tests walk every route and parse `vercel.json` so that nothing else
+can become reachable by that route. The residual risk (partner code shares the backend process and its secrets) is
+accepted and recorded. See [backend-partner-api.md](backend-partner-api.md) and
+[ADR-013](../adr/0013-partner-api.md).
 
 ## Feature areas
 
@@ -138,3 +150,4 @@ non-200; the cause is logged server-side. `src/proxy.ts` leaves it unauthenticat
 | [007](../adr/0007-rate-limit-keys.md) | Rate limit keys and fail modes |
 | [008](../adr/0008-api-client-generation.md) | Generated OpenAPI client and response envelope |
 | [011](../adr/0011-single-vercel-project-with-services.md) | Single Vercel project with services |
+| [013](../adr/0013-partner-api.md) | Partner API inside the backend: one mount, one rewrite, switched off until its endpoints exist |

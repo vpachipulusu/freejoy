@@ -171,3 +171,39 @@ def test_a_validation_error_does_not_echo_the_input_values(
 
     assert sentinel not in str(error.value)
     assert "input_value" not in str(error.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_partner_switch_means_off(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", blank)
+
+    assert Settings(_env_file=None).PARTNER_API_ENABLED is False  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("true", True), ("false", False), ("1", True)]
+)
+def test_the_partner_switch_reads_booleans(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", raw)
+
+    assert Settings(_env_file=None).PARTNER_API_ENABLED is expected  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("bad", ["maybe", "enabled", "2"])
+def test_a_partner_switch_that_is_not_a_boolean_stops_startup(
+    monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", bad)
+
+    with pytest.raises(ValidationError, match="PARTNER_API_ENABLED"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_the_partner_switch_is_off_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PARTNER_API_ENABLED", raising=False)
+
+    assert Settings(_env_file=None).PARTNER_API_ENABLED is False  # type: ignore[call-arg]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Complete check suite for merged main, run as ONE job: scripts/gate.sh [<logfile>]
 # Covers frontend lint/typecheck/unit/coverage/build + client freshness, backend ruff/format/mypy/
-# pytest --cov (incl. *_e2e.py when GATE_TEST_DATABASE_URL is set), OpenAPI schema freshness and
+# pytest --cov (incl. *_e2e.py when GATE_TEST_DATABASE_URL is set), OpenAPI schema freshness (internal and partner) and
 # the Alembic up / check / down / up cycle. Never run two gates at once: they share the test database.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,6 +69,7 @@ step "backend ruff" "$BE" uv run ruff check .
 step "backend format" "$BE" uv run ruff format --check .
 step "backend mypy" "$BE" uv run mypy
 step "backend openapi fresh" "$BE" uv run python -m commands.check_openapi_schema
+step "backend partner openapi fresh" "$BE" uv run python -m commands.check_partner_openapi_schema
 if [ -n "$DB" ]; then
   # DATABASE_URL_DIRECT wins over DATABASE_URL in Alembic, so pin it to the test database too.
   export TEST_DATABASE_URL="$DB" DATABASE_URL="$DB" DATABASE_URL_DIRECT="$DB" ENVIRONMENT=test

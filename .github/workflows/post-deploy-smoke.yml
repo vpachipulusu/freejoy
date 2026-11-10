@@ -1,5 +1,6 @@
 # Post-deploy smoke test. Vercel reports each finished deployment as a
-# deployment_status event; this curls /api/health on the deployed URL. It is outside the
+# deployment_status event; this curls /api/health on the deployed URL, and the partner-surface job
+# requests the adversarial partner paths (scripts/smoke-partner-surface.sh, ADR-013). It is outside the
 # CI gate (it runs after a deploy, not on PRs). Preview deployments behind Vercel
 # protection answer 401 and are skipped; only public production deploys are asserted.
 name: Post-deploy smoke
@@ -32,3 +33,21 @@ jobs:
           curl --fail --silent --show-error --location \
             --retry 5 --retry-delay 5 --retry-all-errors --max-time 15 \
             "${DEPLOY_URL%/}/api/health"
+
+  partner-surface:
+    # ADR-013: adversarial paths against the real domain. Needs no secret and passes while
+    # PARTNER_API_ENABLED is off. Fails if the backend answers a request under or around
+    # /partner/v1 without the X-Freejoy-Surface header.
+    name: Smoke partner surface
+    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Request the adversarial partner paths
+        env:
+          DEPLOY_URL: ${{ inputs.url || github.event.deployment_status.environment_url }}
+        run: bash scripts/smoke-partner-surface.sh "$DEPLOY_URL"

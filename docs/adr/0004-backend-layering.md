@@ -2,6 +2,7 @@
 
 - **Status:** Accepted by the product owner, 2026-10-12
 - **Date:** 2026-10-11
+- **Amended by:** [ADR-013](0013-partner-api.md) (the `partner/` package, and the engine-ban lint rule now configured)
 
 ## Context
 
@@ -19,13 +20,17 @@ services/      business logic and transaction boundaries; no FastAPI imports
 repositories/ SQLAlchemy queries for one aggregate each; no business rules
 models/platform/ SQLAlchemy models, one Alembic tree
 core/          config (pydantic-settings), database seam, structured logging, error types and handlers, Sentry
+partner/       the partner sub-app and its surface (ADR-013); imports `core` only
 ```
 
 Rules:
 - Routers call services; services call repositories; repositories receive an `AsyncSession` and never create
   one.
-- Engines and sessions are created only in `db/`. A lint rule bans `create_async_engine` and
-  `async_sessionmaker` anywhere else.
+- Engines are built only in `app/core/database.py`. A lint rule (ruff `TID251`, configured in
+  `fastapi_backend/pyproject.toml`) bans the SQLAlchemy engine factories (`create_engine`, `create_async_engine`, `engine_from_config` and
+  `async_engine_from_config`, under their `sqlalchemy.engine` and `sqlalchemy.ext.asyncio.engine` paths too) and
+  `app.core.database.build_engine` everywhere else (`app/core/database.py`, `alembic_migrations/env.py` and tests
+  are exempt). Session makers are not banned: commands and tests receive one from that module.
 - Services raise domain errors (`core/errors`). One exception handler turns them into the
   `{ success, data?, error? }` envelope ([ADR-008](0008-api-client-generation.md)) with the right HTTP status,
   with no stack traces or internal details.
@@ -36,7 +41,7 @@ Rules:
 
 Only `app/core/database.py` builds engines (`build_engine`, the platform engine and the session maker behind
 `SessionProvider`). Ruff `TID251` (`[tool.ruff.lint.flake8-tidy-imports.banned-api]`
-in `fastapi_backend/pyproject.toml`) bans `create_engine`, `create_async_engine` and `build_engine` everywhere
+in `fastapi_backend/pyproject.toml`, added by FREEJ-56: the rule was written here before it was configured) bans `create_engine`, `create_async_engine` and `build_engine` everywhere
 except that module, `alembic_migrations/env.py` and tests, so CI fails on an engine built anywhere else. Every
 engine, and Alembic, takes its connect args from `app/core/db_url.py` (`to_async_target`): the TLS mode from the
 URL, asyncpg's statement cache off (safe behind a connection pooler) and a bounded connect timeout.
