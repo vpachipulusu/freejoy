@@ -94,7 +94,7 @@ async def test_a_run_writes_the_valid_rows_counts_the_rest_and_writes_one_audit_
     database.add_link(FakeLink("l1", "o1", "https://x.example", "ref-1"))
     page = [
         raw_row(1),
-        raw_row(2, commissionStatus="deleted"),
+        raw_row(2, commissionStatus="refunded"),
         raw_row(3, clickRefs=None),
         "garbage",
         raw_row(1),  # the same id twice
@@ -269,7 +269,7 @@ async def test_a_page_of_ids_all_seen_before_fails_the_run() -> None:
 async def test_a_dry_run_fetches_and_validates_and_writes_nothing() -> None:
     database = FakeReportDatabase()
     client = FakeAwinClient(
-        transaction_pages=[[raw_row(1), raw_row(2, commissionStatus="deleted")]]
+        transaction_pages=[[raw_row(1), raw_row(2, commissionStatus="refunded")]]
     )
 
     report = await run_report_import(client, None, options(dry_run=True), NOW)

@@ -103,7 +103,7 @@ def run(
 def good_feed() -> Server:
     rows = [
         raw_row(1),
-        raw_row(2, commissionStatus="deleted"),
+        raw_row(2, commissionStatus="refunded"),
         raw_row(3, clickRefs=None),
         raw_row(4, commissionAmount={"amount": -1, "currency": "GBP"}),
         raw_row(5),
@@ -433,7 +433,7 @@ def test_an_unexpected_error_before_the_run_exits_1_with_its_type(
 
 def test_one_failure_event_carries_stage_cause_counts_and_reason_codes_only() -> None:
     reporter = Reporter()
-    rows = [raw_row(1), raw_row(2, commissionStatus="deleted"), *raw_rows(3, 198)]
+    rows = [raw_row(1), raw_row(2, commissionStatus="refunded"), *raw_rows(3, 198)]
     server = Server(rows, 500)
 
     run(DAY_ARGS, server, FakeReportDatabase(), reporter)

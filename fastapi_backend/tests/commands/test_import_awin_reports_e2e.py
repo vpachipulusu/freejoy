@@ -200,46 +200,51 @@ INSERT_ROW = (
     " transaction_at, commission_status, commission_status_raw, commission_amount_minor,"
     " sale_amount_minor, currency, click_ref, report_hash, first_seen_at, last_seen_at)"
     " VALUES (:id, :provider, :external, :merchant_ext, now(), :status, :raw, :commission,"
-    " :sale, :currency, :click_ref, :hash, now(), now())"
+    " :sale, :currency, :click_ref, :hash, now(), now() + :last_after * interval '1 second')"
 )
+PREFIX = "ck_network_report_rows_"
 
 
 async def test_the_table_enforces_its_constraints(engine: AsyncEngine) -> None:
-    await execute(engine, INSERT_ROW, id=new_id(), **GOOD_ROW)
+    good = {**GOOD_ROW, "last_after": 0}
+    await execute(engine, INSERT_ROW, id=new_id(), **good)
     cases: list[tuple[dict[str, Any], str]] = [
-        ({}, "the same provider and external id"),
-        ({"external": "2", "provider": "AWIN"}, "upper-case provider"),
-        ({"external": "2", "provider": "a b"}, "provider with a space"),
-        ({"external": ""}, "empty external id"),
-        ({"external": "x" * 65}, "over-long external id"),
-        ({"external": "2", "merchant_ext": ""}, "empty advertiser id"),
-        ({"external": "2", "status": "deleted"}, "a status outside the four"),
-        ({"external": "2", "status": "APPROVED"}, "an upper-case status"),
-        ({"external": "2", "raw": ""}, "an empty raw status"),
-        ({"external": "2", "raw": "x" * 33}, "an over-long raw status"),
-        ({"external": "2", "commission": -1}, "a negative commission"),
-        ({"external": "2", "sale": -1}, "a negative sale amount"),
-        ({"external": "2", "currency": "gbp"}, "a lower-case currency"),
-        ({"external": "2", "currency": "GB"}, "a short currency"),
-        ({"external": "2", "click_ref": ""}, "an empty click reference"),
-        ({"external": "2", "click_ref": "x" * 101}, "an over-long click reference"),
-        ({"external": "2", "hash": "short"}, "a short hash"),
-        ({"external": "2", "hash": "A" * 64}, "an upper-case hash"),
+        ({}, "uq_network_report_rows_provider_external_id"),
+        ({"external": "2", "provider": "AWIN"}, PREFIX + "provider_valid"),
+        ({"external": "2", "provider": "a b"}, PREFIX + "provider_valid"),
+        ({"external": ""}, PREFIX + "external_id_valid"),
+        ({"external": "x" * 65}, PREFIX + "external_id_valid"),
+        ({"external": "2", "merchant_ext": ""}, PREFIX + "merchant_external_id_valid"),
+        ({"external": "2", "status": "refunded"}, PREFIX + "commission_status_valid"),
+        ({"external": "2", "status": "APPROVED"}, PREFIX + "commission_status_valid"),
+        ({"external": "2", "raw": ""}, PREFIX + "commission_status_raw_valid"),
+        ({"external": "2", "raw": "x" * 33}, PREFIX + "commission_status_raw_valid"),
+        ({"external": "2", "commission": -1}, PREFIX + "amounts_valid"),
+        ({"external": "2", "sale": -1}, PREFIX + "amounts_valid"),
+        ({"external": "2", "currency": "gbp"}, PREFIX + "currency_valid"),
+        ({"external": "2", "currency": "GB"}, PREFIX + "currency_valid"),
+        ({"external": "2", "click_ref": ""}, PREFIX + "click_ref_valid"),
+        ({"external": "2", "click_ref": "x" * 101}, PREFIX + "click_ref_valid"),
+        ({"external": "2", "hash": "short"}, PREFIX + "report_hash_valid"),
+        ({"external": "2", "hash": "A" * 64}, PREFIX + "report_hash_valid"),
+        ({"external": "2", "last_after": -5}, PREFIX + "seen_order_valid"),
     ]
-    for changes, why in cases:
-        with pytest.raises(IntegrityError):
-            await execute(engine, INSERT_ROW, id=new_id(), **{**GOOD_ROW, **changes})
-        assert why
-    await execute(  # a null click reference and a large amount are fine
-        engine,
-        INSERT_ROW,
-        id=new_id(),
-        **{
-            **GOOD_ROW,
-            "external": "3",
-            "click_ref": None,
-            "commission": 99_999_999_999,
-        },
+    for changes, constraint in cases:
+        with pytest.raises(IntegrityError, match=constraint):
+            await execute(engine, INSERT_ROW, id=new_id(), **{**good, **changes})
+    await (
+        execute(  # a null click reference, a large amount and a deleted status are fine
+            engine,
+            INSERT_ROW,
+            id=new_id(),
+            **{
+                **good,
+                "external": "3",
+                "click_ref": None,
+                "commission": 99_999_999_999,
+                "status": "deleted",
+            },
+        )
     )
 
 
@@ -249,7 +254,7 @@ async def test_the_catalogue_links_must_exist_when_given(engine: AsyncEngine) ->
     )
 
     with pytest.raises(IntegrityError):
-        await execute(engine, insert, id=new_id(), **GOOD_ROW)
+        await execute(engine, insert, id=new_id(), **GOOD_ROW, last_after=0)
 
 
 # --- a run ---------------------------------------------------------------------------------
@@ -388,7 +393,7 @@ async def test_deleting_the_offer_link_and_merchant_keeps_the_row_with_nulls(
 async def test_a_completed_run_writes_one_audit_row_with_counts_only(
     engine: AsyncEngine,
 ) -> None:
-    await run(engine, [[raw_row(1), raw_row(2, commissionStatus="deleted")]])
+    await run(engine, [[raw_row(1), raw_row(2, commissionStatus="refunded")]])
 
     (audit,) = await rows(
         engine,

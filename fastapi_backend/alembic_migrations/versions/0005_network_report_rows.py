@@ -3,7 +3,7 @@
 Adds ``network_report_rows`` (model in ``app/models/platform/network_report.py``): one row per
 transaction in an affiliate network's own report, keyed by ``(provider, external_id)`` (for Awin, the
 transaction id), with the commission status (mapped onto ``pending``, ``approved``, ``declined`` or
-``paid``, the raw value kept beside it), the commission and sale amounts in minor units, the currency,
+``paid`` or ``deleted``, the raw value kept beside it), the commission and sale amounts in minor units, the currency,
 the click reference the network reported, and a hash of the normalised row so a rerun can tell a
 change at the network from nothing new. Revenue is attributed from these rows, never from clicks.
 The optional links to the catalogue (offer, affiliate link, merchant) are ``ON DELETE SET NULL``:
@@ -77,7 +77,7 @@ def upgrade() -> None:
             name=op.f("ck_network_report_rows_merchant_external_id_valid"),
         ),
         sa.CheckConstraint(
-            "commission_status IN ('pending', 'approved', 'declined', 'paid')",
+            "commission_status IN ('pending', 'approved', 'declined', 'paid', 'deleted')",
             name=op.f("ck_network_report_rows_commission_status_valid"),
         ),
         sa.CheckConstraint(
@@ -99,6 +99,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "report_hash ~ '^[0-9a-f]{64}$'",
             name=op.f("ck_network_report_rows_report_hash_valid"),
+        ),
+        sa.CheckConstraint(
+            "last_seen_at >= first_seen_at",
+            name=op.f("ck_network_report_rows_seen_order_valid"),
         ),
         sa.ForeignKeyConstraint(
             ["offer_id"],
@@ -137,12 +141,19 @@ def upgrade() -> None:
         ["offer_id"],
         unique=False,
     )
+    op.create_index(
+        "ix_network_report_rows_affiliate_link_id",
+        "network_report_rows",
+        ["affiliate_link_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_network_report_rows_merchant_id",
+        "network_report_rows",
+        ["merchant_id"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_network_report_rows_offer_id", table_name="network_report_rows")
-    op.drop_index(
-        "ix_network_report_rows_provider_transaction_at",
-        table_name="network_report_rows",
-    )
-    op.drop_table("network_report_rows")
+    op.drop_table("network_report_rows")  # its indexes and constraints go with it

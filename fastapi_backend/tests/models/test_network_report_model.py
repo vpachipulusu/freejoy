@@ -71,6 +71,7 @@ def test_the_check_constraints_are_named() -> None:
             "currency_valid",
             "click_ref_valid",
             "report_hash_valid",
+            "seen_order_valid",
         )
     }
 
@@ -93,6 +94,8 @@ def test_the_indexes_serve_the_reports_by_time_and_by_offer() -> None:
 
     assert ("provider", "transaction_at") in indexes
     assert ("offer_id",) in indexes
+    assert ("affiliate_link_id",) in indexes
+    assert ("merchant_id",) in indexes
 
 
 def test_migration_0005_is_registered() -> None:

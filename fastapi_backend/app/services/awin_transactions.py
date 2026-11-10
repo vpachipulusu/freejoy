@@ -18,14 +18,16 @@ Assumed row shape::
 * **Ids** are positive integers (not strings, not booleans).
 * **The date** is ``YYYY-MM-DDTHH:MM:SS[.fraction][Z]`` and is read as UTC, because the request asks for
   ``timezone=UTC``; any other shape (an offset, a date alone, a number) is ``invalid_date``.
-* **The status** is one of Awin's ``pending``, ``approved``, ``declined`` or ``paid`` (case-insensitive);
-  the value as written is kept (32 plain characters at most). Any other word, ``deleted`` included, is
-  ``unknown_status``: it is counted, never mapped onto the nearest state.
+* **The status** is one of Awin's ``pending``, ``approved``, ``declined``, ``paid`` or ``deleted``
+  (case-insensitive), stored one to one; the value as written is kept (32 plain characters at most). Any
+  other word is ``unknown_status``: it is counted, never mapped onto the nearest state.
 * **Amounts** are decimal numbers or decimal strings in **major units** (``1.5`` is 1.50), converted to
   integer minor units with ``decimal.Decimal``, never by multiplying a float. Negative, non-finite,
   exponent notation, more than two decimals, or more than 999,999,999.99 is ``invalid_amount``.
   A missing amount is rejected too (a lead without a sale amount is not assumed to be zero).
-* **The currency** is three upper-case ASCII letters and is the same on both amounts.
+* **The currency** is three upper-case ASCII letters, the same on both amounts, and one of
+  ``TWO_DECIMAL_CURRENCIES``: minor units are x100 only for a two-decimal currency, so any other code
+  (JPY, KWD, ...) is ``unsupported_currency`` rather than stored at the wrong scale.
 * **The click reference** is at most 100 of ``[A-Za-z0-9_.-]``; empty or absent is ``None``.
 
 ``report_hash`` fingerprints the normalised row (not the raw payload), so a key that appears in the
@@ -67,6 +69,10 @@ MINOR_PER_MAJOR = 100
 CENT = Decimal("0.01")
 _DECIMAL_TEXT = re.compile(r"[0-9]{1,12}(?:\.[0-9]{1,12})?", re.ASCII)
 _CURRENCY = re.compile(r"[A-Z]{3}", re.ASCII)
+# ISO 4217 currencies with two minor-unit digits, the only ones whose amounts are stored x100.
+TWO_DECIMAL_CURRENCIES = frozenset(
+    {"GBP", "EUR", "USD", "AUD", "CAD", "CHF", "DKK", "NOK", "SEK", "PLN", "NZD"}
+)
 _STATUS_TEXT = re.compile(rf"[A-Za-z0-9 _-]{{1,{MAX_STATUS_RAW_LENGTH}}}", re.ASCII)
 _CLICK_REF = re.compile(rf"[A-Za-z0-9_.-]{{1,{MAX_CLICK_REF_LENGTH}}}", re.ASCII)
 _STATUSES = {status.value: status for status in CommissionStatus}
@@ -84,6 +90,7 @@ class SkipReason(enum.StrEnum):
     INVALID_AMOUNT = "invalid_amount"
     INVALID_CURRENCY = "invalid_currency"
     CURRENCY_MISMATCH = "currency_mismatch"
+    UNSUPPORTED_CURRENCY = "unsupported_currency"
     INVALID_CLICK_REF = "invalid_click_ref"
     DUPLICATE_IN_FEED = "duplicate_in_feed"
 
@@ -178,6 +185,8 @@ def _currency(commission: object, sale: object) -> str:
     if commission != sale:
         raise _Reject(SkipReason.CURRENCY_MISMATCH)
     assert isinstance(commission, str)
+    if commission not in TWO_DECIMAL_CURRENCIES:
+        raise _Reject(SkipReason.UNSUPPORTED_CURRENCY)
     return commission
 
 

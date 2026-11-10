@@ -86,6 +86,7 @@ def test_text_fields_are_stripped_and_the_raw_status_is_kept_as_written() -> Non
         ("approved", CommissionStatus.APPROVED),
         ("declined", CommissionStatus.DECLINED),
         ("paid", CommissionStatus.PAID),
+        ("deleted", CommissionStatus.DELETED),
         ("PENDING", CommissionStatus.PENDING),
     ],
 )
@@ -154,7 +155,7 @@ def test_a_status_must_be_a_short_plain_string(value: object) -> None:
     assert reason_of(raw_row(1, commissionStatus=value)) is SkipReason.INVALID_STATUS
 
 
-@pytest.mark.parametrize("value", ["deleted", "validated", "refunded"])
+@pytest.mark.parametrize("value", ["validated", "refunded", "paid out"])
 def test_a_status_outside_the_vocabulary_is_unknown_not_guessed(value: str) -> None:
     assert reason_of(raw_row(1, commissionStatus=value)) is SkipReason.UNKNOWN_STATUS
 
@@ -277,6 +278,24 @@ def test_the_commission_and_sale_currencies_must_agree() -> None:
 )
 def test_a_click_reference_must_be_a_short_plain_token(refs: object) -> None:
     assert reason_of(raw_row(1, clickRefs=refs)) is SkipReason.INVALID_CLICK_REF
+
+
+@pytest.mark.parametrize(
+    "code", ["GBP", "EUR", "USD", "AUD", "CAD", "CHF", "DKK", "NOK", "SEK", "PLN"]
+)
+def test_a_two_decimal_currency_is_accepted(code: str) -> None:
+    parsed = row(1, commissionAmount=amount(1.5, code), saleAmount=amount(3, code))
+
+    assert parsed.currency == code and parsed.commission_amount_minor == 150
+
+
+@pytest.mark.parametrize("code", ["JPY", "KWD", "BHD", "XXX", "ZZZ"])
+def test_a_currency_that_is_not_two_decimal_is_unsupported_not_scaled_wrong(
+    code: str,
+) -> None:
+    item = raw_row(1, commissionAmount=amount(1, code), saleAmount=amount(3, code))
+
+    assert reason_of(item) is SkipReason.UNSUPPORTED_CURRENCY
 
 
 def test_a_rejection_never_carries_the_row() -> None:

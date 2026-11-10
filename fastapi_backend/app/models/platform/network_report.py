@@ -17,12 +17,13 @@ MAX_CLICK_REF_LENGTH = 100
 
 
 class CommissionStatus(enum.StrEnum):
-    """The four states a network's commission status is mapped onto (lower-case, stored as text)."""
+    """The states a network's commission status is mapped onto, one to one (lower-case, stored as text)."""
 
     PENDING = "pending"
     APPROVED = "approved"
     DECLINED = "declined"
     PAID = "paid"
+    DELETED = "deleted"
 
 
 _STATUSES = ", ".join(f"'{status.value}'" for status in CommissionStatus)
@@ -73,12 +74,16 @@ class NetworkReportRow(IdMixin, TimestampMixin, Base):
         CheckConstraint(
             f"report_hash ~ '^[0-9a-f]{{{HASH_LENGTH}}}$'", name="report_hash_valid"
         ),
+        CheckConstraint("last_seen_at >= first_seen_at", name="seen_order_valid"),
         Index(
             "ix_network_report_rows_provider_transaction_at",
             "provider",
             "transaction_at",
         ),
         Index("ix_network_report_rows_offer_id", "offer_id"),
+        # Deleting a link or a merchant sets these to NULL: without an index that scans the table.
+        Index("ix_network_report_rows_affiliate_link_id", "affiliate_link_id"),
+        Index("ix_network_report_rows_merchant_id", "merchant_id"),
     )
 
     provider: Mapped[str]
