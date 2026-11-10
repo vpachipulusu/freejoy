@@ -15,6 +15,7 @@ from app.api.deps import get_session
 from app.api.v1.admin_categories import get_category_service
 from app.api.v1.admin_merchants import get_merchant_service
 from app.api.v1.admin_offers import get_offer_service
+from app.api.v1.admin_offers_schemas import summary_out
 from app.core.firebase import VerifiedIdentity
 from app.main import create_app
 from app.models.platform.offer import OfferStatus
@@ -34,6 +35,7 @@ from tests.fakes_admin_catalogue import (
     link,
     merchant,
     offer,
+    provenance,
 )
 
 KEY = "test-only-internal-service-key-not-for-deployment"
@@ -59,6 +61,10 @@ OFFER_BODY: dict[str, Any] = {
     "source_url": "https://shop.example.com/box",
 }
 TOKEN_BODY: dict[str, Any] = {"review_token": "token-from-the-read"}
+MARKER_SEEN = (
+    "2026-05-31T12:00:00Z"  # EARLIER, the marker the fakes' imported offers carry
+)
+DISMISS_BODY: dict[str, Any] = {**TOKEN_BODY, "source_changed_at": MARKER_SEEN}
 CATEGORY_BODY = {
     "name": "Home & cleaning",
     "short_name": "Home",
@@ -123,6 +129,13 @@ class Harness:
         return AsyncClient(transport=transport, base_url="http://test", headers=headers)
 
 
+async def dismiss_body(
+    client: AsyncClient, offer_id: str = "off1", marker: str = MARKER_SEEN
+) -> dict[str, Any]:
+    """What the admin UI sends to dismiss: the loaded review token and the marker the page showed."""
+    return {**await token_body(client, offer_id), "source_changed_at": marker}
+
+
 async def token_body(client: AsyncClient, offer_id: str = "off1") -> dict[str, Any]:
     """What the admin UI sends: the review token from the offer it loaded."""
     loaded = await client.get(f"/v1/admin/offers/{offer_id}")
@@ -148,6 +161,12 @@ ROUTES: list[tuple[str, str, dict[str, Any] | None, str]] = [
     ("POST", "/v1/admin/offers/off1/expire", None, "offers.publish"),
     ("POST", "/v1/admin/offers/off1/archive", None, "offers.publish"),
     ("POST", "/v1/admin/offers/off1/verify", TOKEN_BODY, "offers.publish"),
+    (
+        "POST",
+        "/v1/admin/offers/off1/dismiss-source-change",
+        DISMISS_BODY,
+        "offers.publish",
+    ),
     (
         "POST",
         "/v1/admin/offers/off1/links",
@@ -670,3 +689,227 @@ async def test_taking_an_offer_off_the_site_needs_no_token(harness, step):
         result = await client.post(f"/v1/admin/offers/off1/{step}")
 
     assert result.status_code == 200
+
+
+# --- the review queue: filter, provenance on the rows and the page, dismiss -----------------------
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [("", None), ("&needs_review=true", True), ("&needs_review=false", False)],
+)
+async def test_the_list_passes_needs_review_with_the_other_filters(
+    harness, query, expected
+):
+    async with harness.client() as client:
+        result = await client.get(
+            f"/v1/admin/offers?status=DRAFT&search=box&category_id=cat1{query}"
+        )
+
+    filters = harness.offers.filters[0][0]
+    assert result.status_code == 200
+    assert filters.needs_review is expected
+    assert (filters.status, filters.search, filters.category_id) == (
+        OfferStatus.DRAFT,
+        "box",
+        "cat1",
+    )
+
+
+@pytest.mark.parametrize("value", ["maybe", "2", ""])
+async def test_a_needs_review_value_that_is_not_a_boolean_is_422(harness, value):
+    async with harness.client() as client:
+        result = await client.get(f"/v1/admin/offers?needs_review={value}")
+
+    assert result.status_code == 422
+    assert harness.offers.filters == []
+
+
+async def test_list_rows_name_the_import_and_the_source_change_or_null_for_hand_made(
+    harness,
+):
+    marked = EARLIER
+    harness.offers.offers["imp"] = offer("imp")
+    harness.offers.offers["hand"] = offer("hand")
+    harness.offers.provenance["imp"] = provenance(source_changed_at=marked)
+
+    async with harness.client() as client:
+        result = await client.get("/v1/admin/offers")
+
+    rows = {row["id"]: row for row in result.json()["data"]["offers"]}
+    assert rows["imp"]["import_provider"] == "awin"
+    assert rows["imp"]["source_changed_at"].startswith("2026-05-31T12:00:00")
+    assert rows["hand"]["import_provider"] is None
+    assert rows["hand"]["source_changed_at"] is None
+    assert "review_token" not in rows["imp"] and "provenance" not in rows["imp"]
+
+
+async def test_the_offer_read_carries_the_provenance_only_for_an_imported_offer(
+    harness,
+):
+    harness.offers.offers["imp"] = offer("imp")
+    harness.offers.offers["hand"] = offer("hand")
+    harness.offers.provenance["imp"] = provenance(source_changed_at=EARLIER)
+
+    async with harness.client() as client:
+        imported = (await client.get("/v1/admin/offers/imp")).json()["data"]
+        by_hand = (await client.get("/v1/admin/offers/hand")).json()["data"]
+
+    assert set(imported["provenance"]) == {
+        "provider",
+        "external_id",
+        "applied_at",
+        "source_changed_at",
+    }
+    assert imported["provenance"]["provider"] == "awin"
+    assert imported["provenance"]["external_id"] == "1001"
+    assert imported["import_provider"] == "awin"
+    assert imported["source_changed_at"] == imported["provenance"]["source_changed_at"]
+    assert by_hand["provenance"] is None and by_hand["import_provider"] is None
+
+
+async def test_dismissing_answers_with_both_tokens_and_the_cleared_marker(harness):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.provenance["off1"] = provenance(source_changed_at=EARLIER)
+
+    async with harness.client() as client:
+        body = await dismiss_body(client)
+        result = await client.post(
+            "/v1/admin/offers/off1/dismiss-source-change", json=body
+        )
+
+    data = result.json()["data"]
+    assert result.status_code == 200
+    assert result.headers["cache-control"] == "no-store"
+    assert data["review_token"] == data["previous_review_token"] == body["review_token"]
+    assert data["source_changed_at"] is None
+    assert data["provenance"]["source_changed_at"] is None
+    assert [row["action"] for row in harness.auditor.rows] == [
+        "admin.offers.source_change_dismissed"
+    ]
+    assert harness.session.commits == 1
+
+
+async def test_dismissing_with_a_stale_token_is_409_offer_changed_and_writes_nothing(
+    harness,
+):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.provenance["off1"] = provenance(source_changed_at=EARLIER)
+
+    async with harness.client() as client:
+        stale = await dismiss_body(client)
+        harness.offers.offers["off1"] = replace(
+            harness.offers.offers["off1"], title="X"
+        )
+        result = await client.post(
+            "/v1/admin/offers/off1/dismiss-source-change", json=stale
+        )
+
+    assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
+    assert harness.offers.provenance["off1"].source_changed_at == EARLIER
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+@pytest.mark.parametrize("imported", [False, True])
+async def test_dismissing_with_nothing_to_dismiss_is_409_illegal_transition(
+    harness, imported
+):
+    harness.offers.offers["off1"] = offer("off1")
+    if imported:
+        harness.offers.provenance["off1"] = provenance(source_changed_at=None)
+
+    async with harness.client() as client:
+        result = await client.post(
+            "/v1/admin/offers/off1/dismiss-source-change",
+            json=await dismiss_body(client),
+        )
+
+    assert (result.status_code, result.json()["code"]) == (409, "illegal_transition")
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+async def test_dismissing_an_unknown_offer_is_404(harness):
+    async with harness.client() as client:
+        result = await client.post(
+            "/v1/admin/offers/ghost/dismiss-source-change", json=DISMISS_BODY
+        )
+
+    assert (result.status_code, result.json()["code"]) == (404, "not_found")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        {},
+        {"review_token": ""},
+        {"review_token": "has space"},
+        {"review_token": "x" * 129},
+        {"review_token": "ok", "note": "extra"},
+        {"review_token": "ok"},
+        {"source_changed_at": MARKER_SEEN},
+        {"review_token": "ok", "source_changed_at": "2026-05-31T12:00:00"},
+        {"review_token": "ok", "source_changed_at": "yesterday"},
+        {"review_token": "ok", "source_changed_at": None},
+        {"review_token": "ok", "source_changed_at": MARKER_SEEN, "note": "extra"},
+    ],
+)
+async def test_dismissing_with_a_missing_or_malformed_body_is_422(harness, body):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.provenance["off1"] = provenance(source_changed_at=EARLIER)
+
+    async with harness.client() as client:
+        result = await client.post(
+            "/v1/admin/offers/off1/dismiss-source-change", json=body
+        )
+
+    assert result.status_code == 422
+    assert harness.offers.provenance["off1"].source_changed_at == EARLIER
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+async def test_dismissing_a_newer_marker_than_the_page_showed_is_409_offer_changed(
+    harness,
+):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.provenance["off1"] = provenance(source_changed_at=EARLIER)
+
+    async with harness.client() as client:
+        loaded = await dismiss_body(client)
+        newer = EARLIER.replace(hour=15)  # the importer noted another change meanwhile
+        harness.offers.provenance["off1"] = provenance(source_changed_at=newer)
+        result = await client.post(
+            "/v1/admin/offers/off1/dismiss-source-change", json=loaded
+        )
+
+    assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
+    assert harness.offers.provenance["off1"].source_changed_at == newer
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+
+
+def test_a_summary_cannot_be_built_without_saying_whether_the_offer_is_imported():
+    with pytest.raises(TypeError):
+        summary_out(offer("off1"))  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body", "permission"), ROUTES, ids=ROUTE_IDS
+)
+async def test_a_request_without_the_internal_key_is_refused_before_anything_runs(
+    harness, method, path, body, permission
+):
+    harness.offers.offers["off1"] = offer("off1")
+    harness.offers.provenance["off1"] = provenance(source_changed_at=EARLIER)
+    transport = ASGITransport(app=harness.app, raise_app_exceptions=False)
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-Test-Uid": "editor"},  # signed in, but no X-Internal-Key
+    ) as client:
+        result = await client.request(method, path, json=body)
+
+    assert result.status_code == 401
+    assert harness.auditor.rows == [] and harness.session.commits == 0
+    assert harness.offers.offers["off1"].title == "Offer off1"
+    assert harness.offers.provenance["off1"].source_changed_at == EARLIER

@@ -10,6 +10,7 @@ import {
 } from '@/lib/admin-catalogue/offer-status';
 import { useFormBusy, useFormDirty } from '../../_components/dirty-form-context';
 import { ArchiveDialog } from './archive-dialog';
+import { ARIA_DISABLED_STYLE } from './disabled-style';
 import { useOfferReview, useReportLoadedToken } from './offer-review-context';
 import { useOfferAction } from './use-offer-action';
 
@@ -21,7 +22,6 @@ type OfferLifecycleButtonsProps = {
   reviewToken: string;
 };
 
-const DISABLED_STYLE = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 const CHANGED_NOTICE =
   'This offer changed since you opened it. This page now shows the latest version: review it again.';
 
@@ -114,7 +114,7 @@ export function OfferLifecycleButtons({
             ref={action === 'archive' ? archiveRef : undefined}
             type="button"
             variant={action === 'publish' ? 'default' : 'outline'}
-            className={DISABLED_STYLE}
+            className={ARIA_DISABLED_STYLE}
             aria-disabled={blocked || undefined}
             onClick={() => choose(action)}
           >

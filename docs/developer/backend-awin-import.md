@@ -340,15 +340,50 @@ Awin's page does not document these. Each is handled defensively; the **first dr
   `check_offer_health` when their `end_at` passes.
 - **An item that stops validating** (for example its tracking host changed) is skipped and counted; its existing offer is
   left alone and **not** marked as changed.
-- **No review queue yet.** `source_changed_at` is stored for one; nothing reads it. Likewise there is no admin action to
-  map an advertiser to an existing merchant, so an editor who wants an existing merchant changes the offer's merchant
-  and leaves the imported one inactive.
+- **The review queue reads the marker** (see [the review queue and the importer's hashes](#the-review-queue-and-the-importers-hashes)).
+  There is still no admin action to map an advertiser to an existing merchant, so an editor who wants an existing
+  merchant changes the offer's merchant and leaves the imported one inactive.
 - **No public exposure.** Drafts are never in the public catalogue. The holding category is hidden only because it is
   disabled: an admin who enables it by hand would make every draft in it eligible to publish (the importer then refuses
   to run, but does not undo that).
 - `HASH_VERSION` (in `awin_promotions.py`) must be bumped when the normalisation changes; after a bump every promotion
   reads as changed once (untouched drafts refresh, edited offers get a marker).
 - Copy is the merchant's, not original editorial writing: the editor reviews it before publishing.
+
+## The review queue and the importer's hashes
+
+The admin API ([backend-admin-catalogue.md](backend-admin-catalogue.md#review-queue)) lists the offers that *need
+review*: imported offers (an `offer_imports` row) that are drafts or whose `source_changed_at` is set, never archived,
+never an offer made by hand. `source_changed_at` is the importer's flag; the admin's **dismiss source change** is the
+only other thing that writes it.
+
+**What dismissing writes.** Only `source_changed_at = NULL`. `source_hash`, `applied_source_hash`,
+`applied_content_hash` and `applied_at` stay exactly as they were. The brief for this story proposed also setting
+`applied_source_hash = source_hash`; that is not needed and would be wrong, for two reasons found by reading
+`_import_one`, `_note_source_change` and `_may_refresh`:
+
+- **Not re-flagged without it.** The first check of `_import_one` is `known.source_hash == digest and
+  known.source_changed_at is None` -> `unchanged`, written nowhere. After a dismissal `source_hash` already holds the
+  source the editor looked at and the marker is gone, so the next run with the same source returns before any hash
+  comparison. A source that differs from it (a newer change) goes to `_reconcile`; an offer that is not an untouched
+  import then reaches `_note_source_change`, where the digest differs from `applied_source_hash`, and the marker is set
+  again with a new `admin.offers.source_changed` row.
+- **`applied_source_hash` means "the source content the offer currently reflects".** A dismissal does not make the
+  offer reflect the new source (its text was not touched), so storing the new hash there would make the field false. It
+  would also make the importer treat a later return of the source to what the offer really reflects as a change:
+  `_note_source_change` clears the marker when `digest == applied_source_hash`, and with the new hash stored that
+  comparison would fail and flag a source that is back to normal. Leaving the field alone keeps that rule true.
+  Nothing else reads `applied_source_hash` (`_may_refresh` uses the content fingerprint, the status, the link, the
+  source URL and the merchant, not this hash).
+
+After a dismissal, then: the same source is `unchanged`; a different source is `source_changed` again (marker set to
+that run's time, audited); the source returning to what the offer reflects is `unchanged` with no marker. An untouched
+draft is still refreshed when its source changes and nothing else moved. One consequence to know: if the editor reverts
+all their edits after dismissing, a pending source change is no longer applied by a later run (the pending change has
+been acknowledged), which a marker that stays set would have allowed.
+`tests/services/test_awin_offer_import.py` (the importer on the in-memory catalogue) and
+`tests/commands/test_import_awin_offers_e2e.py` (a real dismissal through `AdminOfferService`, then two runs against
+Postgres) pin all of this.
 
 ## Tests
 

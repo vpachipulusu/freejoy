@@ -38,6 +38,7 @@ vi.mock('@/lib/api/admin-offers', async () => {
 
 import EditOfferPage from '@/app/(admin)/admin/offers/[id]/page';
 import { OfferLifecycleButtons } from '@/app/(admin)/admin/offers/_components/offer-lifecycle-buttons';
+import { OfferProvenancePanel } from '@/app/(admin)/admin/offers/_components/offer-provenance-panel';
 
 const OFFER = {
   id: 'o1',
@@ -51,6 +52,9 @@ const OFFER = {
   end_at: null,
   last_verified_at: null,
   updated_at: '2026-03-06T10:00:00Z',
+  import_provider: null,
+  source_changed_at: null,
+  provenance: null,
   review_token: 'token-from-this-read',
   summary: 'A sachet.',
   description: [],
@@ -97,5 +101,48 @@ describe('edit offer page', () => {
       props: { offerId: string; reviewToken: string };
     }[];
     expect(buttons.props).toMatchObject({ offerId: 'o1', reviewToken: 'token-from-this-read' });
+  });
+
+  it('shows the provenance panel of an imported offer, with the token it read and the status', async () => {
+    mocks.fetchAdminOffer.mockResolvedValue({
+      success: true,
+      data: {
+        ...OFFER,
+        import_provider: 'awin',
+        source_changed_at: '2026-03-05T10:00:00Z',
+        provenance: {
+          provider: 'awin',
+          external_id: '1001',
+          applied_at: '2026-03-01T10:00:00Z',
+          source_changed_at: '2026-03-05T10:00:00Z',
+        },
+      },
+    });
+
+    const page = await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) });
+
+    const [panel] = findAll(page as ReactNode, OfferProvenancePanel) as {
+      props: Record<string, unknown>;
+    }[];
+    expect(panel.props).toMatchObject({
+      offerId: 'o1',
+      offerTitle: 'Free coffee',
+      status: 'DRAFT',
+      reviewToken: 'token-from-this-read',
+      provenance: {
+        provider: 'awin',
+        externalId: '1001',
+        appliedAt: '2026-03-01T10:00:00Z',
+        sourceChangedAt: '2026-03-05T10:00:00Z',
+      },
+    });
+  });
+
+  it('shows no provenance panel for an offer made by hand', async () => {
+    mocks.fetchAdminOffer.mockResolvedValue({ success: true, data: OFFER });
+
+    const page = await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) });
+
+    expect(findAll(page as ReactNode, OfferProvenancePanel)).toHaveLength(0);
   });
 });

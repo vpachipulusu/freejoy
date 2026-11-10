@@ -11,6 +11,7 @@ import {
 import type {
   OfferDetailView,
   OfferLinkView,
+  OfferProvenanceView,
   OfferRowView,
 } from '@/lib/admin-catalogue/offer-view';
 import { ADMIN_OFFERS_PAGE_SIZE } from '@/lib/admin-catalogue/paging';
@@ -18,6 +19,7 @@ import { callBackend, type ApiResult } from './server';
 import {
   adminArchiveOffer,
   adminCreateOffer,
+  adminDismissOfferSourceChange,
   adminExpireOffer,
   adminListOffers,
   adminPublishOffer,
@@ -28,6 +30,7 @@ import {
   type AffiliateLinkOut,
   type CreateOfferRequest,
   type OfferOut,
+  type OfferProvenanceOut,
   type OfferSummaryOut,
   type UpdateOfferRequest,
 } from './generated';
@@ -46,6 +49,8 @@ export interface OfferListParams {
   search?: string;
   status?: OfferStatus;
   categoryId?: string;
+  /** Only the review queue: imported offers that are drafts or whose source changed (see the backend docs). */
+  needsReview?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -61,6 +66,7 @@ export function fetchAdminOffers(params: OfferListParams) {
         ...(search ? { search } : {}),
         ...(params.status ? { status: params.status } : {}),
         ...(params.categoryId ? { category_id: params.categoryId } : {}),
+        ...(params.needsReview ? { needs_review: true } : {}),
       },
     })
   );
@@ -106,17 +112,40 @@ export function runAdminOfferAction(offerId: string, request: OfferActionRequest
   });
 }
 
-export type OfferStatusCounts = Record<OfferStatus | 'TOTAL', number>;
+/**
+ * Dismiss the "source changed" marker of an imported offer. It says "a person has seen the change" and sends the
+ * `review_token` of the offer the admin loaded and the `source_changed_at` the page showed (the token does not
+ * cover the marker); the backend answers 409 `offer_changed` when either moved since, and 409 `illegal_transition`
+ * when there is nothing to dismiss.
+ */
+export function dismissAdminOfferSourceChange(
+  offerId: string,
+  reviewToken: string,
+  sourceChangedAt: string
+) {
+  return callBackend((client) =>
+    adminDismissOfferSourceChange({
+      client,
+      path: { offer_id: offerId },
+      body: { review_token: reviewToken, source_changed_at: sourceChangedAt },
+    })
+  );
+}
+
+export type OfferStatusCounts = Record<OfferStatus | 'TOTAL' | 'NEEDS_REVIEW', number>;
 
 /**
- * Offer counts for the stats strip, read from the list endpoint's `total_count` (a one-row page per status). The
- * total is the sum of the four statuses, so the strip is always consistent with itself. Nothing is estimated: if
- * any call fails the whole read fails and the strip says so.
+ * Offer counts for the stats strip, read from the list endpoint's `total_count` (a one-row page per status, and
+ * one more for the review queue). The total is the sum of the four statuses, so the strip is always consistent
+ * with itself; the review queue overlaps the statuses and is never added in. Nothing is estimated: if any call
+ * fails the whole read fails and the strip says so.
  */
 export async function fetchOfferStatusCounts(): Promise<ApiResult<OfferStatusCounts>> {
-  const results = await Promise.all(
-    OFFER_STATUSES.map((status) => fetchAdminOffers({ status, limit: COUNT_ONLY_LIMIT }))
-  );
+  const [queue, ...results] = await Promise.all([
+    fetchAdminOffers({ needsReview: true, limit: COUNT_ONLY_LIMIT }),
+    ...OFFER_STATUSES.map((status) => fetchAdminOffers({ status, limit: COUNT_ONLY_LIMIT })),
+  ]);
+  if (!queue.success) return queue;
   const counts: Partial<OfferStatusCounts> = {};
   let total = 0;
   for (const [index, result] of results.entries()) {
@@ -124,7 +153,14 @@ export async function fetchOfferStatusCounts(): Promise<ApiResult<OfferStatusCou
     counts[OFFER_STATUSES[index]] = result.data.total_count;
     total += result.data.total_count;
   }
-  return { success: true, data: { ...(counts as Record<OfferStatus, number>), TOTAL: total } };
+  return {
+    success: true,
+    data: {
+      ...(counts as Record<OfferStatus, number>),
+      TOTAL: total,
+      NEEDS_REVIEW: queue.data.total_count,
+    },
+  };
 }
 
 /** A status this UI does not know is kept as UNKNOWN: shown plainly and never offered an action. */
@@ -145,6 +181,18 @@ export function toOfferRow(offer: OfferSummaryOut): OfferRowView {
     endAt: offer.end_at,
     lastVerifiedAt: offer.last_verified_at,
     updatedAt: offer.updated_at,
+    importProvider: offer.import_provider,
+    sourceChangedAt: offer.source_changed_at,
+  };
+}
+
+function toProvenance(provenance: OfferProvenanceOut | null): OfferProvenanceView | null {
+  if (!provenance) return null;
+  return {
+    provider: provenance.provider,
+    externalId: provenance.external_id,
+    appliedAt: provenance.applied_at,
+    sourceChangedAt: provenance.source_changed_at,
   };
 }
 
@@ -187,5 +235,6 @@ export function toOfferDetail(offer: OfferOut): OfferDetailView {
     publisherNotes: offer.publisher_notes,
     createdAt: offer.created_at,
     links: offer.links.map(toOfferLink),
+    provenance: toProvenance(offer.provenance),
   };
 }

@@ -19,6 +19,7 @@ import { OfferStatusPill } from '../_components/offer-status-pill';
 import { OfferForm } from '../_components/offer-form';
 import { OfferLifecycleButtons } from '../_components/offer-lifecycle-buttons';
 import { OfferLinksList } from '../_components/offer-links-list';
+import { OfferProvenancePanel } from '../_components/offer-provenance-panel';
 import { OfferReviewProvider } from '../_components/offer-review-context';
 
 type Params = Promise<{ id: string }>;
@@ -102,6 +103,16 @@ export default async function EditOfferPage({ params }: { params: Params }) {
               reviewToken={offer.reviewToken}
             />
           </div>
+
+          {offer.provenance ? (
+            <OfferProvenancePanel
+              provenance={offer.provenance}
+              offerId={offer.id}
+              offerTitle={offer.title}
+              status={offer.status}
+              reviewToken={offer.reviewToken}
+            />
+          ) : null}
 
           <OfferLinksList links={offer.links} />
 

@@ -14,11 +14,23 @@ import { requireAdminPage } from '../_lib/require-admin-page';
 import { OffersResults } from './offers-results';
 import { OFFERS_COLUMNS } from './offers-table';
 import { OfferStatsSkeleton, OfferStatsStrip } from './offers-stats';
-import { MAX_QUERY_LENGTH, offersHref, OFFERS_PATH, parseOffersQuery } from './offers-query';
+import {
+  MAX_QUERY_LENGTH,
+  offersHref,
+  OFFERS_PATH,
+  parseOffersQuery,
+  REVIEW_NEEDED,
+} from './offers-query';
 
-type SearchParams = Promise<{ q?: string; status?: string; category?: string; page?: string }>;
+type SearchParams = Promise<{
+  q?: string;
+  status?: string;
+  category?: string;
+  review?: string;
+  page?: string;
+}>;
 
-/** The chip order of the design: Published first, then Draft and Expired; Archived last. */
+/** The chip order of the design: Published first, then Draft and Expired; Archived, then the review queue. */
 const CHIP_STATUSES: readonly OfferStatus[] = ['PUBLISHED', 'DRAFT', 'EXPIRED', 'ARCHIVED'];
 
 const CHIP_BASE =
@@ -31,9 +43,15 @@ export default async function AdminOffersPage({ searchParams }: { searchParams: 
   await requireAdminPage();
   const query = parseOffersQuery(await searchParams);
   const categories = await loadCategoryOptions();
+  // The chips replace one another: a status (or All) leaves the review queue and the queue leaves the status.
   const chips = [
-    { label: 'All', status: undefined },
-    ...CHIP_STATUSES.map((status) => ({ label: OFFER_STATUS_LABELS[status], status })),
+    { label: 'All', status: undefined, review: false },
+    ...CHIP_STATUSES.map((status) => ({
+      label: OFFER_STATUS_LABELS[status],
+      status,
+      review: false,
+    })),
+    { label: 'Needs review', status: undefined, review: true },
   ];
 
   return (
@@ -58,12 +76,12 @@ export default async function AdminOffersPage({ searchParams }: { searchParams: 
       <Card>
         <CardContent className="space-y-4 pt-6">
           <nav aria-label="Filter by status" className="flex flex-wrap gap-2">
-            {chips.map(({ label, status }) => {
-              const current = query.status === status;
+            {chips.map(({ label, status, review }) => {
+              const current = review ? query.review : !query.review && query.status === status;
               return (
                 <Link
                   key={label}
-                  href={offersHref({ ...query, status, page: 1 })}
+                  href={offersHref({ ...query, status, review, page: 1 })}
                   aria-current={current ? 'true' : undefined}
                   className={cn(CHIP_BASE, current && CHIP_CURRENT)}
                 >
@@ -82,6 +100,7 @@ export default async function AdminOffersPage({ searchParams }: { searchParams: 
             {query.status ? (
               <input type="hidden" name="status" value={query.status.toLowerCase()} />
             ) : null}
+            {query.review ? <input type="hidden" name="review" value={REVIEW_NEEDED} /> : null}
             <div className="space-y-2">
               <Label htmlFor="offer-search">Search offers by title, slug or summary</Label>
               <div className="relative">

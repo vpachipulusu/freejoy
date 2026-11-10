@@ -727,3 +727,84 @@ async def test_a_changed_source_url_with_a_pending_marker_is_not_audited_again()
     tally = await run(db, moved, now=LATER + timedelta(days=1))
 
     assert tally.unchanged == 1 and snapshot(db) == before
+
+
+# --- a dismissed source change (the admin's "dismiss source change" clears only the marker) ------
+
+
+def dismiss_source_change(db: FakeDatabase) -> None:
+    """What ``AdminOfferService.dismiss_source_change`` stores: the marker goes, every hash stays."""
+    record = only_import(db)
+    db.committed.imports[(record.provider, record.external_id)] = dataclasses.replace(
+        record, source_changed_at=None
+    )
+
+
+async def dismissed_edited_offer(db: FakeDatabase) -> Promotion:
+    """An edited offer whose source moved on, flagged, then dismissed. Returns the dismissed source."""
+    await run(db, promotion())
+    db.edit_offer(only_offer(db).id, title="Edited by a person")
+    moved = promotion(title="Source moved on")
+    await run(db, moved, now=LATER)
+    assert only_import(db).source_changed_at == LATER
+    dismiss_source_change(db)
+    return moved
+
+
+async def test_a_dismissed_source_change_is_not_flagged_again_by_the_same_source() -> (
+    None
+):
+    db = FakeDatabase()
+    moved = await dismissed_edited_offer(db)
+    before = snapshot(db)
+
+    tally = await run(db, moved, now=LATER + timedelta(days=1))
+
+    assert tally.unchanged == 1 and tally.source_changed == 0
+    assert snapshot(db) == before
+    assert only_import(db).source_changed_at is None
+
+
+async def test_a_dismissed_source_change_leaves_the_applied_hash_on_what_the_offer_reflects() -> (
+    None
+):
+    db = FakeDatabase()
+    moved = await dismissed_edited_offer(db)
+
+    record = only_import(db)
+
+    assert record.source_hash == source_hash(moved)
+    assert record.applied_source_hash == source_hash(promotion())
+
+
+async def test_a_dismissed_offer_is_flagged_again_when_the_source_changes_again() -> (
+    None
+):
+    db = FakeDatabase()
+    await dismissed_edited_offer(db)
+    db.committed.audits.clear()
+    moved_again = promotion(title="Source moved on, again")
+
+    tally = await run(db, moved_again, now=LATER + timedelta(days=2))
+
+    record = only_import(db)
+    assert tally.source_changed == 1 and tally.updated == 0
+    assert record.source_changed_at == LATER + timedelta(days=2)
+    assert record.source_hash == source_hash(moved_again)
+    assert actions(db) == ["admin.offers.source_changed"]
+    assert only_offer(db).title == "Edited by a person"
+
+
+async def test_a_dismissed_offer_whose_source_returns_to_what_it_reflects_is_not_flagged() -> (
+    None
+):
+    db = FakeDatabase()
+    await dismissed_edited_offer(db)
+    db.committed.audits.clear()
+
+    tally = await run(db, promotion(), now=LATER + timedelta(days=2))
+
+    assert tally.unchanged == 1 and tally.source_changed == 0
+    assert only_import(db).source_changed_at is None
+    assert only_import(db).source_hash == source_hash(promotion())
+    assert actions(db) == []

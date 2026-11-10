@@ -26,7 +26,11 @@ from app.models.platform.offer import (
     OfferType,
     PostageKind,
 )
-from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
+from app.repositories.admin_offers import (
+    AffiliateLinkRecord,
+    OfferProvenance,
+    OfferRecord,
+)
 from app.services.admin_offers import OfferDetail
 
 MAX_PARAGRAPHS = 20
@@ -141,6 +145,20 @@ class PublishRequest(BaseModel):
     review_token: ReviewToken
 
 
+class DismissSourceChangeRequest(BaseModel):
+    """Needs the ``review_token`` of the offer the editor loaded and the ``source_changed_at`` it showed.
+
+    The token does not cover the marker, so the marker is sent too: either one stale is 409
+    ``offer_changed``. ``source_changed_at`` must carry a timezone (``provenance.source_changed_at`` of the
+    offer read, sent back unchanged).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken
+    source_changed_at: AwareDatetime
+
+
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -188,6 +206,19 @@ class AffiliateLinkOut(BaseModel):
     updated_at: datetime
 
 
+class OfferProvenanceOut(BaseModel):
+    """Where an imported offer came from.
+
+    ``source_changed_at`` is set while the source has moved on and nobody has reviewed it: the
+    importer sets it and "dismiss source change" clears it.
+    """
+
+    provider: str
+    external_id: str
+    applied_at: datetime
+    source_changed_at: datetime | None
+
+
 class OfferSummaryOut(BaseModel):
     id: str
     title: str
@@ -200,10 +231,14 @@ class OfferSummaryOut(BaseModel):
     end_at: datetime | None
     last_verified_at: datetime | None
     updated_at: datetime
+    # Both null for an offer made by hand.
+    import_provider: str | None
+    source_changed_at: datetime | None
 
 
 class OfferOut(OfferSummaryOut):
     review_token: str
+    provenance: OfferProvenanceOut | None
     summary: str
     description: list[str]
     image_tint: str
@@ -266,15 +301,27 @@ def link_out(record: AffiliateLinkRecord) -> AffiliateLinkOut:
     return AffiliateLinkOut(**record.__dict__)
 
 
-def summary_out(record: OfferRecord) -> OfferSummaryOut:
-    return OfferSummaryOut.model_validate(record, from_attributes=True)
+def _import_fields(provenance: OfferProvenance | None) -> dict[str, Any]:
+    return {
+        "import_provider": provenance.provider if provenance else None,
+        "source_changed_at": provenance.source_changed_at if provenance else None,
+    }
+
+
+def summary_out(
+    record: OfferRecord, provenance: OfferProvenance | None
+) -> OfferSummaryOut:
+    return OfferSummaryOut(**record.__dict__, **_import_fields(provenance))
 
 
 def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
+    provenance = detail.provenance
     return {
         **detail.offer.__dict__,
+        **_import_fields(provenance),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
+        "provenance": OfferProvenanceOut(**provenance.__dict__) if provenance else None,
     }
 
 

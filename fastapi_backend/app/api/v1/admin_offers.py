@@ -1,11 +1,14 @@
 """Admin offers API: list, create, read, update, publish lifecycle, verify and affiliate links.
 
 Permissions: ``offers.read`` for reads, ``offers.write`` for create, update and links,
-``offers.publish`` for publish, unpublish, expire, archive and verify (they change what the
-public sees or the "Last checked" claim). The offer read (and every write's response) returns a ``review_token``; ``verify`` and
-``publish`` require the one the editor loaded and answer 409 ``offer_changed`` when the offer or
-its links changed since (the other transitions do not need it). Every write stages its audit row in the same
-transaction (``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.
+``offers.publish`` for publish, unpublish, expire, archive, verify and dismissing a source
+change (they change what the public sees, the "Last checked" claim or the review queue).
+The offer read (and every write's response) returns a ``review_token``; ``verify``,
+``publish`` and ``dismiss-source-change`` require the one the editor loaded and answer 409
+``offer_changed`` when the offer or its links changed since (the other transitions do not
+need it; dismissing also sends the ``source_changed_at`` the editor saw, which the token does
+not cover). Every write stages its audit row in the same transaction
+(``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.
 """
 
 from typing import Annotated
@@ -24,6 +27,7 @@ from app.api.v1.admin_catalogue_common import (
 from app.api.v1.admin_offers_schemas import (
     CreateLinkRequest,
     CreateOfferRequest,
+    DismissSourceChangeRequest,
     LinkResponse,
     OfferResponse,
     OffersPage,
@@ -86,14 +90,17 @@ async def admin_list_offers(
     search: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     status: OfferStatus | None = None,
     category_id: Annotated[IdText | None, Query()] = None,
+    needs_review: bool | None = None,
 ) -> OffersPageResponse:
     no_store(response)
     page = await service.list_offers(
-        OfferFilters(search, status, category_id), limit, offset
+        OfferFilters(search, status, category_id, needs_review), limit, offset
     )
     return OffersPageResponse(
         data=OffersPage(
-            offers=[summary_out(item) for item in page.offers],
+            offers=[
+                summary_out(item, page.provenance.get(item.id)) for item in page.offers
+            ],
             total_count=page.total_count,
             limit=limit,
             offset=offset,
@@ -191,6 +198,24 @@ async def admin_verify_offer(
     no_store(response)
     try:
         detail = await service.verify(admin, offer_id, body.note, body.review_token)
+    except CatalogueError as exc:
+        raise catalogue_http_error(exc) from None
+    return OfferWriteResponse(data=offer_write_out(detail))
+
+
+@router.post("/{offer_id}/dismiss-source-change", response_model=OfferWriteResponse)
+async def admin_dismiss_offer_source_change(
+    offer_id: ResourceId,
+    response: Response,
+    body: DismissSourceChangeRequest,
+    admin: PublishAdmin,
+    service: ServiceDep,
+) -> OfferWriteResponse:
+    no_store(response)
+    try:
+        detail = await service.dismiss_source_change(
+            admin, offer_id, body.review_token, body.source_changed_at
+        )
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
     return OfferWriteResponse(data=offer_write_out(detail))
