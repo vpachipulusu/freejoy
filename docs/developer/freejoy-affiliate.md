@@ -192,7 +192,7 @@ directly. Send the CSV and say plainly:
 - We keep click records for 13 months. A report that starts earlier than that is missing its oldest days.
 - Your own figures (orders, visits from our referrer) are the only measure of what the clicks became; we never claim
   sales from clicks or call them redemptions.
-- Every live listing of yours is in the file, with 0 where it had no clicks.
+- Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
 
 ## Retention
 
