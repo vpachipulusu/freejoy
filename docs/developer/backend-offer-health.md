@@ -165,11 +165,37 @@ expired certificate is `tls_error`.
 
 ## Scheduling
 
-**Nothing schedules this command yet.** Run it by hand, or add a schedule. A daily run is plenty: expiry is idempotent
-and the checks are rate-limited by design. Whatever runs it needs `DATABASE_URL` (a database you own), outbound HTTPS
-and DNS, and optionally `SENTRY_DSN`; no new environment variable is introduced. A scheduled GitHub Actions workflow or
-a host cron entry running `uv run python -m commands.check_offer_health` from `fastapi_backend/` would do; neither
-exists. Pair it with `commands.prune_click_events` and `commands.purge_subscribers`, which are also unscheduled.
+`.github/workflows/scheduled-housekeeping.yml` ("Scheduled housekeeping", FREEJ-50) runs this command every day at
+**03:17 UTC**, followed by `commands.prune_click_events` and `commands.purge_subscribers` (one job, three separate
+steps, in that order; each runs even when an earlier one failed). It is outside the `CI gate`: it does not run on
+pull requests and nothing requires it.
+
+- **Secrets** (repository secrets; setup in [workflow.md](workflow.md#owner-setup-scheduled-housekeeping)):
+  `HOUSEKEEPING_DATABASE_URL` is required and becomes `DATABASE_URL` for the three steps; `SENTRY_DSN` is optional (an
+  unset secret means no Sentry event, as everywhere else). The workflow introduces no environment variable in the
+  apps. The settings object also insists on production values the commands never read (Upstash, Firebase Admin,
+  the internal key, the email HMAC key, the subscriber token secret), so the job sets obvious placeholders for them,
+  commented in the workflow. If the secret is empty the run fails at a guard step with a clear message.
+- **Run it by hand:** Actions tab, "Scheduled housekeeping", "Run workflow". Two optional inputs apply to this command
+  only: `skip_reachability` (expire only: no request, no Sentry summary) and `limit` (a whole number, passed as
+  `--limit`; blank keeps the default of 500, the command refuses 0 or more than 5000). A manual run also runs the other
+  two commands. Runs never overlap (`concurrency: scheduled-housekeeping`, a second one waits) and the job stops after
+  30 minutes; the request phase has its own cap (`--max-seconds`, 900).
+- **Where the output goes:** the step log of each command (the count lines and the JSON warning lines for each
+  problem, as above), and Sentry when `SENTRY_DSN` is set and there is something to report. Nothing is stored on
+  GitHub beyond the log, which holds no URLs, addresses or secrets.
+- **What a failure looks like:** a red run on the Actions tab and the email GitHub sends to the person who last changed
+  the schedule. The failing step is the one that exited non-zero (1: the run failed, with the error type on stderr and,
+  for expiry, how many offers were already committed; 2: bad arguments). Unreachable destinations are **not** a
+  failure: the run stays green and the report is in the log and in the Sentry event. Re-running the workflow is safe.
+  No step is retried automatically.
+- **Limits.** GitHub skips scheduled runs on a repository with no activity for 60 days (the schedule is disabled until
+  the workflow is re-enabled on the Actions tab), and it may start a scheduled run some minutes late at busy times. The
+  database must accept TLS connections from GitHub-hosted runners (the URL carries `?sslmode=require`, which the
+  backend honours; see `app/core/db_url.py`). A run cannot be proven from this repository: the first real run is the
+  owner's check.
+
+`commands.import_awin_offers` is deliberately not scheduled: it has not been verified against the live Awin API.
 
 ## Known limits
 

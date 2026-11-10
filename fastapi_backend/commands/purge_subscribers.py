@@ -3,7 +3,7 @@
     uv run python -m commands.purge_subscribers --dry-run    # count only, change nothing
     uv run python -m commands.purge_subscribers              # delete
 
-Run by hand (nothing schedules it). It removes
+Run daily by ``.github/workflows/scheduled-housekeeping.yml`` (and by hand). It removes
 
 * PENDING sign-ups whose consent is older than 30 days (nobody ever confirmed), and
 * UNSUBSCRIBED rows whose unsubscribe is older than 12 months (the suppression record is no longer needed).

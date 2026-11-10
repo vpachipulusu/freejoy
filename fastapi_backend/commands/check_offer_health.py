@@ -20,8 +20,8 @@ stdout when run as a script) and, when ``SENTRY_DSN`` is set, to ONE Sentry summ
 No URL, query string or header is ever printed or logged.
 
 Exit codes: 0 the run completed (also when URLs are unreachable); 1 the run itself failed (stderr
-says how many offers were already expired); 2 bad arguments. Safe to repeat. Nothing schedules it
-yet: see ``docs/developer/backend-offer-health.md``.
+says how many offers were already expired); 2 bad arguments. Safe to repeat. Scheduled daily by
+``.github/workflows/scheduled-housekeeping.yml``: see ``docs/developer/backend-offer-health.md``.
 """
 
 import argparse

@@ -183,9 +183,15 @@ uv run python -m commands.prune_click_events --days 90  # a shorter period; 0 or
 It deletes rows whose `occurred_at` is older than the period, in committed batches of `--batch-size` rows (default
 10000; the ids come from a limited subquery served by `ix_click_events_occurred_at`, migration `0003`), and prints
 the total. If a batch fails it prints the error type and **how many rows were already deleted** to stderr and exits
-1; the earlier batches stay deleted and a rerun carries on. Run it on a schedule (for example monthly, from a cron
-job or a scheduled workflow with `DATABASE_URL` set); it is safe to repeat. The period is
-stated on the privacy page ("If you use an offer button"): change both together. Nothing schedules it yet.
+1; the earlier batches stay deleted and a rerun carries on. It is safe to repeat. The period is
+stated on the privacy page ("If you use an offer button"): change both together.
+
+**Schedule.** `.github/workflows/scheduled-housekeeping.yml` runs it daily at 03:17 UTC (with the default `--days`;
+after the offer health check, as its own step), using the repository secret `HOUSEKEEPING_DATABASE_URL`. A day with
+nothing older than the period prints `deleted 0 click events`. It needs `SELECT` and `DELETE` on `click_events`
+only. Setup, running it by hand and what a failure looks like:
+[backend-offer-health.md](backend-offer-health.md#scheduling) and
+[workflow.md](workflow.md#owner-setup-scheduled-housekeeping).
 
 ## Referrer policy
 
@@ -231,8 +237,10 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
   The per-client and per-offer limits only bound the rate.
 - `click_events.referrer_host` comes from the visitor's browser and is untrusted
   (see [platform-models.md](platform-models.md)).
-- Nothing schedules `prune_click_events` yet.
+- `prune_click_events` is scheduled daily by the housekeeping workflow (see Retention above); a skipped or disabled
+  schedule (GitHub pauses cron on a repository inactive for 60 days) only delays deletion.
 - A destination that no longer answers is not detected on the click path (the visitor gets the provider's error page).
   `commands.check_offer_health` reports dead offer source URLs and `direct` links, but it never requests a network
   provider's tracking link (that would record a click), so a dead `awin`, `cj` or other network link is only visible in
-  the network's own reports. See [backend-offer-health.md](backend-offer-health.md). Nothing schedules it yet either.
+  the network's own reports. See [backend-offer-health.md](backend-offer-health.md); the housekeeping workflow runs it
+  daily.

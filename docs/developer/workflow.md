@@ -69,6 +69,37 @@ answers 503 `migrations_pending` until then. Details: [platform-models.md](platf
   `uv export --frozen --no-dev --no-hashes --quiet -o requirements.txt` (pre-commit checks the export).
 - Dependabot opens weekly grouped updates for npm, pip and GitHub Actions (`.github/dependabot.yml`).
 
+## Owner setup: scheduled housekeeping
+
+`.github/workflows/scheduled-housekeeping.yml` runs three backend commands every day at 03:17 UTC
+(`check_offer_health`, `prune_click_events`, `purge_subscribers`; details in
+[backend-offer-health.md](backend-offer-health.md#scheduling)). It is outside the `CI gate`. Until the owner sets the
+secrets below, each run fails fast at a guard step with the message "Set the repository secret
+HOUSEKEEPING_DATABASE_URL". Under Settings, Secrets and variables, Actions, add two **repository secrets**:
+
+- `HOUSEKEEPING_DATABASE_URL` (required): the production database URL, ending in `?sslmode=require`, for a **dedicated
+  role** with only the rights these commands use (do not reuse the application's owner role, and never the migration
+  role). From the repositories' SQL:
+
+  | Table | Rights | Used by |
+  | --- | --- | --- |
+  | `offers` | `SELECT`, `UPDATE` (`status`, `updated_at`) | `check_offer_health` reads offers to expire and to check, locks them (`FOR UPDATE SKIP LOCKED`) and sets `status` |
+  | `affiliate_links`, `merchants` | `SELECT` | `check_offer_health` reads the `direct` links to check and each merchant's website |
+  | `audit_logs` | `INSERT`, `SELECT` | `check_offer_health` writes one `admin.offers.expire` row per expired offer (SQLAlchemy reads the generated `created_at` back with `RETURNING`, which needs `SELECT`) |
+  | `click_events` | `SELECT`, `DELETE` | `prune_click_events` |
+  | `email_subscribers` | `SELECT`, `DELETE` | `purge_subscribers` |
+
+  No other table, no DDL and no `alembic_version`. This list comes from reading the SQL, not from running the
+  commands as a restricted role: after creating the role, run the workflow by hand once and read the step logs; a
+  "permission denied" failure names the missing right, so widen by exactly that one.
+- `SENTRY_DSN` (optional): the same DSN as the deployed backend. Without it nothing is sent to Sentry; the commands
+  and their logs work as before.
+
+The database must accept TLS connections from GitHub-hosted runners, whose addresses are not fixed: a hosted
+Postgres with an IP allow-list needs to allow them (or use a provider that does not filter by address). Check with
+"Run workflow" (inputs: tick `skip_reachability` for a first run that makes no outbound request). Nothing is
+introduced in the apps' environment; the workflow's placeholder settings are explained in its comments.
+
 ## Keeping the template's structure
 
 - Module code stays behind the touch points in [modules.md](modules.md) so the module remains removable.

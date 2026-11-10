@@ -139,7 +139,15 @@ uv run python -m commands.purge_subscribers --dry-run   # counts only, changes n
 uv run python -m commands.purge_subscribers             # deletes
 ```
 
-Run by hand; nothing schedules it. It deletes `PENDING` rows whose consent is older than **30 days** and
+It is scheduled: `.github/workflows/scheduled-housekeeping.yml` runs it for real (no `--dry-run`) daily at 03:17 UTC,
+as the last of three steps, with the repository secret `HOUSEKEEPING_DATABASE_URL`; run `--dry-run` by hand when you
+want counts first. Its output is the count line in the step log; exit 1 (a provider failure, rows kept) turns the run red.
+It needs `SELECT` and `DELETE` on `email_subscribers` only. The workflow sets no `EMAIL_PROVIDER` variables, so the
+command runs with the disabled provider: that is correct today (the alerts form is not live, no contact exists at a
+provider, and an unsubscribed row has its provider id cleared when the contact is erased), but **when Brevo goes
+live, add `EMAIL_PROVIDER`, `EMAIL_PROVIDER_API_KEY`, `EMAIL_PROVIDER_LIST_ID` and `EMAIL_FROM` to the purge step**
+(as repository secrets), so a row that still carries a provider contact id has it erased before the row is deleted.
+Setup: [workflow.md](workflow.md#owner-setup-scheduled-housekeeping). It deletes `PENDING` rows whose consent is older than **30 days** and
 `UNSUBSCRIBED` rows whose `unsubscribed_at` is older than **12 months** (the provider contact was already erased
 when they unsubscribed) (`PENDING_RETENTION` and
 `UNSUBSCRIBED_RETENTION` in `app/services/subscribers.py`). `CONFIRMED` rows are never touched. For a row with a
