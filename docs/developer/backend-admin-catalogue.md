@@ -37,15 +37,16 @@ plus a stable `code` (below). Lists take `limit` (1 to 100) and `offset`.
 
 | Route | Permission | Notes |
 | --- | --- | --- |
-| `GET /v1/admin/offers` | `offers.read` | `search` (title, slug, summary; `%` and `_` are literal), `status`, `category_id`, newest update first. Rows carry no `review_token` (see [the review token](#the-review-token)) |
+| `GET /v1/admin/offers` | `offers.read` | `search` (title, slug, summary; `%` and `_` are literal), `status`, `category_id`, `needs_review` (see [the review queue](#review-queue)), newest update first. Rows carry no `review_token` (see [the review token](#the-review-token)) but do carry `import_provider` and `source_changed_at` |
 | `POST /v1/admin/offers` | `offers.write` | 201. Always creates a `DRAFT`. `slug` optional |
-| `GET /v1/admin/offers/{id}` | `offers.read` | Offer with its affiliate links (admin view: includes `destination_url` and `publisher_notes`) and its `review_token` |
+| `GET /v1/admin/offers/{id}` | `offers.read` | Offer with its affiliate links (admin view: includes `destination_url` and `publisher_notes`), its `review_token` and its `provenance` (null for an offer made by hand) |
 | `PATCH /v1/admin/offers/{id}` | `offers.write` | Partial. The slug and the status cannot be changed; nullable fields clear with `null` |
 | `POST /v1/admin/offers/{id}/publish` | `offers.publish` | Body `{"review_token"}` (required). See the publish rules and [the review token](#the-review-token) |
 | `POST /v1/admin/offers/{id}/unpublish` | `offers.publish` | `PUBLISHED` to `DRAFT`. No body |
 | `POST /v1/admin/offers/{id}/expire` | `offers.publish` | `PUBLISHED` to `EXPIRED`. No body |
 | `POST /v1/admin/offers/{id}/archive` | `offers.publish` | Terminal. No body |
 | `POST /v1/admin/offers/{id}/verify` | `offers.publish` | Sets `last_verified_at` to now. Body `{"review_token", "note"?}` (`review_token` required; the note is audit only) |
+| `POST /v1/admin/offers/{id}/dismiss-source-change` | `offers.publish` | Clears the importer's "source changed" marker. Body `{"review_token"}` (required, like `verify`). Answers like the other writes (`review_token`, `previous_review_token`). See [the review queue](#review-queue) |
 | `POST /v1/admin/offers/{id}/links` | `offers.write` | 201. `provider`, `destination_url`, `tracking_id?`, `active?` |
 | `PATCH /v1/admin/offers/{id}/links/{link_id}` | `offers.write` | Links are deactivated, never deleted (click counts keep their link) |
 | `GET /v1/admin/categories`, `GET .../{id}` | `offers.read` | `search`, `enabled` |
@@ -190,6 +191,44 @@ an offer is a **full-form** save from the admin UI: every field it sends is writ
 made after the editor loaded the page is overwritten by the editor's Save (links, merchant and category are not touched by
 it). The `previous_review_token` is how the UI tells the editor that a foreign change was there.
 
+## Review queue
+
+The Awin importer ([backend-awin-import.md](backend-awin-import.md)) writes DRAFT offers with an `offer_imports` row
+and sets `offer_imports.source_changed_at` when the source moved on but the offer was not refreshed (it was edited,
+published, expired or archived). The admin API reads both.
+
+**The rule, defined once** (`needs_review()` in `app/repositories/admin_offers.py`): an offer *needs review* when it has
+an `offer_imports` row **and** (`status = DRAFT` **or** `source_changed_at IS NOT NULL`) **and** its status is not
+`ARCHIVED`. An offer made by hand (no `offer_imports` row) is never in the queue, even as a draft.
+
+**Filter.** `GET /v1/admin/offers?needs_review=true` returns exactly that set; `needs_review=false` returns everything
+else (the complement, so the two halves always partition the list); omitting it applies no filter. Anything that is not
+a boolean is 422. It combines with `status`, `search` and `category_id` (all are ANDed) and the paging. It is a
+`LEFT JOIN` on `offer_imports` (one row per offer, `offer_id` is unique), so the page and the count see the same rule.
+
+**Rows and the offer read.** The list selects the join's columns in the same query (no query per row): each row
+carries `import_provider` (null for an offer made by hand) and `source_changed_at` (null unless the source moved on).
+`GET /v1/admin/offers/{id}` and every write response add `provenance`:
+`{provider, external_id, applied_at, source_changed_at}`, or null for an offer made by hand. None of it is part of the
+`review_token`: the importer sets and clears the marker without changing the offer's content, so the token does not
+change with it.
+
+**Dismissing** (`POST /v1/admin/offers/{id}/dismiss-source-change`, `offers.publish`, body `{review_token}` validated
+like `VerifyRequest`): the editor says "I have seen that the source changed". In the service
+(`AdminOfferService.dismiss_source_change`) the order is the one of `verify`: offer row lock, `_require_unchanged`
+(409 `offer_changed`, nothing written), then the provenance row is read `FOR UPDATE` and, if there is none or its marker
+is already null (or the offer is archived), **409 `illegal_transition`**, nothing written. Otherwise
+`source_changed_at` becomes NULL, one audit row `admin.offers.source_change_dismissed` (resource `offers`, `before` and
+`after` hold `source_changed_at`, `details` the provider and external id) is staged on the same session and the
+transaction commits once. The response carries `review_token` and `previous_review_token` computed before the commit;
+the two are equal, since the offer itself did not change. Only that one column changes. What it leaves alone, and why,
+is in [backend-awin-import.md](backend-awin-import.md#the-review-queue-and-the-importers-hashes).
+
+**Not covered.** The token does not include the marker, so a dismissal clears whatever marker is set when it runs: if
+the importer noted a newer source change between the editor's page load and the click, that newer one is cleared too
+(the next run only flags a source that differs from the one recorded). A body field naming the marker's timestamp would
+close that gap; it is not in the contract.
+
 ## Slugs
 
 `app/core/slugs.py`: `slugify` folds accents, turns every other run of characters into one hyphen and cuts at 80
@@ -218,8 +257,8 @@ suite.
 | 403 | | Not an admin, or the permission is missing (body is just `Forbidden`) |
 | 404 | `not_found` | Unknown offer, link, category or merchant |
 | 409 | `slug_taken` | The slug exists |
-| 409 | `illegal_transition` | The status table refuses the action, or the offer is archived and edited |
-| 409 | `offer_changed` | `verify` or `publish` carried a `review_token` that no longer matches the offer, its links, its merchant or its category: nothing was written |
+| 409 | `illegal_transition` | The status table refuses the action, or the offer is archived and edited, or `dismiss-source-change` finds nothing to dismiss (the offer was never imported, its marker is already clear, or it is archived) |
+| 409 | `offer_changed` | `verify`, `publish` or `dismiss-source-change` carried a `review_token` that no longer matches the offer, its links, its merchant or its category: nothing was written |
 | 422 | `publish_blocked` | A publish rule is unmet |
 | 422 | `invalid_url`, `invalid_slug`, `invalid_postage`, `invalid_window`, `unknown_category`, `unknown_merchant` | A value the service rejects |
 | 422 | none | Schema validation (`Invalid request`): unknown fields, wrong types, control characters, lengths, and a missing or malformed `review_token` |
@@ -234,7 +273,7 @@ router's schema rejects a missing or empty token first, so the API never returns
 
 Every write stages one `audit_logs` row on the request's session and commits once after `record`, so the change and
 its audit row commit or roll back together (a test makes the audit write fail and checks the offer is not stored).
-Actions: `admin.offers.create|update|publish|unpublish|expire|archive|verify`, `admin.offer_links.create|update`,
+Actions: `admin.offers.create|update|publish|unpublish|expire|archive|verify|source_change_dismissed`, `admin.offer_links.create|update`,
 `admin.categories.create|update|enable|disable`, `admin.merchants.create|update|activate|deactivate` (resources
 `offers`, `affiliate_links`, `categories`, `merchants`). Rows hold ids, enums, flags and dates (`before` and `after`). Offer and category titles or names (public content)
 and the `verify` note (at most 500 characters, passed through the audit secret-pattern sanitiser) **are** recorded.
@@ -258,5 +297,11 @@ writes nothing and stages no audit row. Denied requests write no row.
 - `tests/services/test_admin_offers_review_token.py` (the token: what it covers and ignores, stale, missing, taken under the
   lock), `tests/api/test_admin_offer_review_token_e2e.py` (the 409 against Postgres after an admin edit, a link change or a merchant or
   category edit, nothing written) and the importer path in `tests/commands/test_import_awin_offers_e2e.py`.
+- `tests/repositories/test_admin_offers.py` (the review filter's SQL: one LEFT JOIN, the rule once, every combination),
+  `tests/repositories/test_admin_offers_review_queue_e2e.py` (imported draft, published and expired with and without the
+  marker, hand-made, archived; every filter combination against Postgres; one query per page),
+  `tests/services/test_admin_offers_dismiss.py` (happy path, stale token, nothing to dismiss, archived, audit row,
+  tokens), `tests/api/test_admin_catalogue.py` (the query parameter, the row and read fields, the endpoint: 403, 404, 409,
+  422) and `tests/api/test_admin_offer_dismiss_e2e.py` (the endpoint against Postgres).
 - `tests/services/test_admin_catalogue_atomicity.py`: slug races (unique violation, with and without `__cause__`) and
   a failing audit write, deterministic and without a database.

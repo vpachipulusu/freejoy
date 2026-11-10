@@ -10,9 +10,9 @@ admin's own permission on every call and writes the audit log.
 
 | Route | What it is | API permission it needs |
 | --- | --- | --- |
-| `/admin/offers` | Stats strip, status chips, search, category filter, offers table with a row menu | `offers.read` (row actions: `offers.publish`) |
+| `/admin/offers` | Stats strip, status chips (and the review queue), search, category filter, offers table with a row menu | `offers.read` (row actions: `offers.publish`) |
 | `/admin/offers/new` | Offer form; creates a **draft** | `offers.read` to open, `offers.write` to save |
-| `/admin/offers/[id]` | Offer form, status actions, affiliate links (read only), card preview | `offers.read`; `offers.write` to save; `offers.publish` for the status actions |
+| `/admin/offers/[id]` | Offer form, status actions, provenance of an imported offer, affiliate links (read only), card preview | `offers.read`; `offers.write` to save; `offers.publish` for the status actions and for dismissing a source change |
 | `/admin/categories`, `/new`, `/[id]` | Table, add form, edit form, enable and disable | `offers.read`; `categories.write` for changes |
 | `/admin/merchants`, `/new`, `/[id]` | Table, add form, edit form, activate and deactivate | `offers.read`; `merchants.write` for changes |
 
@@ -25,15 +25,26 @@ of them.
 ## The list (`/admin/offers`)
 
 * **URL parameters** (`offers-query.ts`): `q` (at most 100 characters), `status` (`published`, `draft`, `expired`,
-  `archived`), `category` (an id), `page`. The search and category select are a plain GET form (no script needed),
-  like `/admin/users`. The status chips are links; the current one carries `aria-current="page"`. Archived is a fifth
-  chip next to the four in the design so an archived offer can be found; the offers there cannot be edited.
-* **Stats strip** (`offers-stats.tsx`): Total, Published, Drafts, Expired, Archived. Each status number is the
-  `total_count` of a one-row list request to the API (four requests; `fetchOfferStatusCounts`) and Total is their sum,
-  so the strip always adds up. Nothing is estimated or cached: if any request fails the strip shows an error (a 429
-  says so) and no numbers. The
-  design's "Needs review" card has no matching API count and is not shown.
-* **Table** (`offers-table.tsx`): Offer (title links to the editor, merchant and type underneath), Category,
+  `archived`), `category` (an id), `review` (only `needed` means anything, every other value is ignored), `page`. The
+  search and category select are a plain GET form (no script needed), like `/admin/users`; `status` and `review`
+  travel in hidden inputs so a search keeps them. The status chips are links; the current one carries
+  `aria-current` (the code sets `"true"` on every chip, which is what the unit tests pin). Archived is a fifth chip
+  next to the four in the design so an archived offer can be found; the offers there cannot be edited.
+* **Review queue chip.** "Needs review" is the last chip (`?review=needed`) and asks the API for `needs_review=true`:
+  imported offers that are drafts or whose source changed since the importer last applied it, never an archived
+  offer, never an offer made by hand ([the rule](backend-admin-catalogue.md#review-queue), defined once in the
+  backend). The chips replace one another: a status chip or All drops `review`, and the review chip drops `status`
+  (a hand-edited URL with both still sends both to the API, which combines them). An empty queue says "Nothing
+  needs review".
+* **Stats strip** (`offers-stats.tsx`): Total, Published, Drafts, Expired, Archived, Needs review. Each status number
+  is the `total_count` of a one-row list request to the API and Total is the sum of the four statuses, so the strip
+  always adds up. **Needs review** is one more one-row request with `needs_review=true` (five requests in all;
+  `fetchOfferStatusCounts`) and is **not** part of the total: it overlaps the statuses (an imported draft is a draft
+  and in the queue). Nothing is estimated or cached: if any request fails, the queue's included, the strip shows an
+  error (a 429 says so) and no numbers.
+* **Table** (`offers-table.tsx`): Offer (title links to the editor, merchant and type underneath, then a small badge:
+  "Source changed" when the API sent `source_changed_at`, which wins, else "Imported" when it sent `import_provider`,
+  none for an offer made by hand; the badge is a `StatusPill` with text and a decorative icon, never colour alone), Category,
   Status (`StatusPill`: good = Published, neutral = Draft, warn = Expired, info = Archived), Verified
   (`formatAdminDate`, or "Not verified"), Edit and a row menu. Below 640px each row stacks and cells name their
   column. Category and merchant names come from the two pick lists (see below).
@@ -77,6 +88,21 @@ off the site is never blocked by staleness. (See [backend-admin-catalogue.md](ba
 URL, so approving from it would approve unseen content. It offers Edit and **Review** (both open the offer's page), then
 Unpublish, Expire and Archive.
 
+**Imported offers and the review queue.** An offer the Awin importer created has a **Provenance** panel
+(`offer-provenance-panel.tsx`, read only, shown only when the API sends `provenance`): network name, external id,
+"Last imported" (the importer's `applied_at`: the first import or the last refresh) and "Source changed" (a date, or
+No), dates through `formatAdminDate`. While the source has moved on and nobody has reviewed it, the panel says so in
+words and, when the status allows any step (not archived, not unknown), offers **Dismiss source change**
+(`dismiss-source-change-button.tsx`). The button asks for confirmation, then calls `dismissSourceChangeAction`, wired
+like Mark verified: it sends the review token the page loaded, `OfferReviewProvider` is told how the write ended
+(`recordWrite(token, previousToken)`, or `recordFailure('offer_changed')` for a stale token, which raises the same
+lasting notice and shows "This offer changed since you opened it. Review it again."), a toast announces the outcome and
+`router.refresh()` loads the result. It waits like the other status buttons while the form holds unsaved edits or a save
+is reloading. Dismissing never edits the offer and never refreshes the public site; when the API finds nothing to
+dismiss (somebody else did it first) the admin is told and the pages refresh. See
+[backend-awin-import.md](backend-awin-import.md#the-review-queue-and-the-importers-hashes) for what dismissing does to the
+importer's hashes.
+
 **Preview.** A draft has no public page, so the editor shows a card preview drawn from the form as it is typed
 (`offer-preview-card.tsx`), labelled "Not public". The link to the live page (`/freebies/<slug>`) appears only when the
 status is `PUBLISHED`; it opens in a new tab. Status actions act on the last **saved** version, so while the form beside
@@ -90,7 +116,8 @@ successful write into an error.
 
 ## Server actions
 
-`src/app/actions/admin/offer-actions.ts`, `category-actions.ts`, `merchant-actions.ts`. Each action:
+`src/app/actions/admin/offer-actions.ts` (create, update, `offerLifecycleAction`, `dismissSourceChangeAction`),
+`category-actions.ts`, `merchant-actions.ts`. Each action:
 
 1. runs `asAdmin` (`src/lib/api/admin-catalogue-action.ts`), which calls `requireAdminSession`
    (`src/lib/api/admin-guard.ts`): a verified session cookie and a confirmed admin, exactly as the `/admin` layout
@@ -156,7 +183,10 @@ unarchiving, and optimistic concurrency on edits (a save is last-write-wins, as 
   `unit/actions/admin-catalogue-actions.test.ts` (authorisation failures for every action, validation, refresh),
   `unit/app/admin-offers-list.test.tsx`, `admin-offers-actions-ui.test.tsx` (including the changed-since-opened toast and reload),
   `admin-offers-form.test.tsx` (the form follows new data; the buttons wait for a save's reload),
-  `admin-offer-review-notice.test.tsx` (the lasting notice, verify then publish, focus), `admin-offer-edit-page-review-token.test.tsx`.
+  `admin-offer-review-notice.test.tsx` (the lasting notice, verify then publish, focus), `admin-offer-edit-page-review-token.test.tsx`
+  (also: the page hands the provenance to its panel), `admin-offer-provenance.test.tsx` (the panel, when the dismiss
+  button exists, the confirmation, the outcomes), `unit/actions/admin-dismiss-source-change-action.test.ts`.
+  The list tests (`admin-offers-list.test.tsx`) cover the review chip, the stat card and the badge.
 * Backend: `fastapi_backend/tests/test_e2e_identity_server.py` (the journey server's guards).
 * Playwright: `src/__tests__/e2e/admin-offers.spec.ts` (Journey 4 and layout checks).
 
