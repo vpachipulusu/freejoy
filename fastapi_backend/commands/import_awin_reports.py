@@ -22,9 +22,11 @@ Output is counts by outcome and by reason code. No URL, token, amount, click ref
 ever printed or logged. A failed run sends ONE Sentry event (stage, cause, counts, reason codes) after the
 HTTP client has been closed.
 
-Exit codes: 0 the run completed (also when rows were skipped or the run stopped at ``--max-pages``); 1 the
-run failed (stderr says how much was already committed, which stays committed); 2 bad arguments or missing
-settings.
+Exit codes: 0 the run completed (also when some rows were skipped, and for a ``--dry-run`` that stopped at
+``--max-pages``); 1 the run failed, including a run that writes and stops at ``--max-pages`` (an incomplete
+range) or one where no row was valid (stderr says how much was already committed, which stays committed, and
+from which date to rerun); 2 bad arguments (a range that needs more windows than ``--max-pages`` included) or
+missing settings.
 """
 
 import argparse
@@ -46,7 +48,9 @@ from app.repositories.network_reports import (
     NetworkReportRepository,
 )
 from app.services.audit import AuditService
+from app.services.awin_import_run import RUN_DEADLINE
 from app.services.network_report_run import (
+    CAUSE_MAX_PAGES,
     DEFAULT_MAX_PAGES,
     MAX_MAX_PAGES,
     MAX_WINDOW_DAYS,
@@ -55,6 +59,7 @@ from app.services.network_report_run import (
     ReportUnitOpener,
     RunOptions,
     RunReport,
+    report_windows,
     run_report_import,
 )
 
@@ -62,7 +67,13 @@ PROG = "import-awin-reports"
 FAILURE_MESSAGE = "Awin network report import run failed"
 EVENT_CONTEXT = "awin_reports"
 MIN_VALUE = 1
-MAX_PAGES_NOTE = "stopped at --max-pages: more transactions may exist, raise --max-pages or run again"
+MAX_PAGES_NOTE = (
+    "stopped at --max-pages: more transactions may exist; raise --max-pages "
+    "(a run that writes would stop here and exit 1)"
+)
+EARLIEST_DATE = date(
+    2000, 1, 1
+)  # the same floor the report parser applies to a transaction date
 
 
 class Reporter(Protocol):
@@ -178,9 +189,11 @@ def _fail(message: str, code: int) -> int:
     return code
 
 
-def _invalid(args: argparse.Namespace) -> str | None:
+def _invalid(args: argparse.Namespace, today: date) -> str | None:
     if args.end < args.start:
         return "--to must not be before --from."
+    if args.start < EARLIEST_DATE or args.end > today + timedelta(days=1):
+        return f"--from and --to must be between {EARLIEST_DATE.isoformat()} and tomorrow (UTC)."
     days = (args.end - args.start) + timedelta(days=1)
     if days > timedelta(days=MAX_WINDOW_DAYS) and not args.allow_long_range:
         return (
@@ -189,6 +202,12 @@ def _invalid(args: argparse.Namespace) -> str | None:
         )
     if not MIN_VALUE <= args.max_pages <= MAX_MAX_PAGES:
         return f"--max-pages must be between {MIN_VALUE} and {MAX_MAX_PAGES}."
+    windows = len(report_windows(args.start, args.end))
+    if windows > args.max_pages:
+        return (
+            f"the range needs {windows} windows of at most {MAX_WINDOW_DAYS} days but --max-pages is "
+            f"{args.max_pages}: raise --max-pages or shorten the range."
+        )
     return None
 
 
@@ -209,8 +228,12 @@ def _counts_text(report: RunReport) -> str:
     )
 
 
+def _counts_of(counts: Mapping[str, int]) -> str:
+    return ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+
+
 def _reason_text(report: RunReport) -> str:
-    return ", ".join(f"{k} {v}" for k, v in sorted(report.tally.skipped.items()))
+    return _counts_of(report.tally.skipped)
 
 
 def _summary_lines(report: RunReport, options: RunOptions) -> list[str]:
@@ -229,6 +252,14 @@ def _summary_lines(report: RunReport, options: RunOptions) -> list[str]:
         ]
     if tally.skipped:
         lines.append(f"{PROG}: skipped by reason: {_reason_text(report)}.")
+    if tally.match_problems:
+        lines.append(
+            f"{PROG}: not matched because: {_counts_of(tally.match_problems)}."
+        )
+    if tally.rejected_known:
+        lines.append(
+            f"{PROG}: {tally.rejected_known} rejected row(s) are already stored and were left as they were."
+        )
     if report.stopped_early:
         lines.append(f"{PROG}: {MAX_PAGES_NOTE}.")
     return lines
@@ -250,7 +281,10 @@ def _failure_context(failure: ReportRunFailed, options: RunOptions) -> dict[str,
         "updated": report.tally.updated,
         "unchanged": report.tally.unchanged,
         "unmatched": report.tally.unmatched,
+        "rejected_known": report.tally.rejected_known,
         "skipped": dict(report.tally.skipped),
+        "match_problems": dict(report.tally.match_problems),
+        "resume_from": report.resume_from.isoformat() if report.resume_from else None,
     }
 
 
@@ -264,16 +298,31 @@ def _send(reporter: Reporter, context: Mapping[str, Any]) -> None:
         )
 
 
+def _outcome_text(failure: ReportRunFailed, options: RunOptions) -> str:
+    """What was done before the failure, and what to do next (dates and counts only)."""
+    if options.dry_run:
+        return "nothing was written (dry run)"
+    # A deadline can cancel a chunk inside its own commit: it may be committed and not counted.
+    qualifier = " (at least)" if failure.cause == RUN_DEADLINE else ""
+    kept = f"already committed and kept{qualifier}: {_counts_text(failure.report)}"
+    resume = failure.report.resume_from
+    if failure.cause == CAUSE_MAX_PAGES and resume is not None:
+        day = resume.isoformat()
+        return f"{kept}; stopped in the window starting {day}; rerun with --from {day}"
+    return f"{kept}; running it again is safe"
+
+
 def _fail_run(failure: ReportRunFailed, options: RunOptions, reporter: Reporter) -> int:
-    done = (
-        "nothing was written (dry run)"
-        if options.dry_run
-        else f"already committed and kept: {_counts_text(failure.report)}; run it again to continue"
-    )
     code = _fail(
-        f"failed ({failure.cause}) {failure.stage}. After {failure.report.pages} page(s), {done}.",
+        f"failed ({failure.cause}) {failure.stage}. After {failure.report.pages} page(s), "
+        f"{_outcome_text(failure, options)}.",
         1,
     )
+    if failure.audit_error is not None:
+        _fail(
+            f"could not record the failed run in the audit log ({failure.audit_error}).",
+            1,
+        )
     _send(reporter, _failure_context(failure, options))
     return code
 
@@ -357,7 +406,8 @@ def main(
         args = _parse(sys.argv[1:] if argv is None else argv)
     except SystemExit as stop:  # argparse: --help is 0, a bad flag or value is 2
         return stop.code if isinstance(stop.code, int) else 2
-    if (problem := _invalid(args)) is not None:
+    now = now or datetime.now(UTC)
+    if (problem := _invalid(args, now.date())) is not None:
         return _fail(problem, 2)
     if client is None:
         credentials = _credentials()
@@ -370,9 +420,7 @@ def main(
         dry_run=args.dry_run,
         max_pages=args.max_pages,
     )
-    return _execute(
-        options, client, units, now or datetime.now(UTC), reporter or report_to_sentry
-    )
+    return _execute(options, client, units, now, reporter or report_to_sentry)
 
 
 if __name__ == "__main__":

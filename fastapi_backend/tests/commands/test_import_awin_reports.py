@@ -190,15 +190,129 @@ def test_a_second_run_changes_nothing_and_says_so(
     assert "inserted 0, updated 0, unchanged 3" in capsys.readouterr().out
 
 
-def test_stopping_at_max_pages_is_reported_and_is_still_exit_0(
+def test_a_run_that_writes_and_stops_at_max_pages_fails_and_says_where_to_resume(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     server = Server(raw_rows(1, 200), raw_rows(1000, 200))
+    db = FakeReportDatabase()
+    reporter = Reporter()
 
-    code = run([*DAY_ARGS, "--max-pages", "1"], server)
+    code = run([*DAY_ARGS, "--max-pages", "1"], server, db, reporter)
 
-    assert code == 0 and len(server.requests) == 1
-    assert "stopped at --max-pages" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert code == 1 and len(server.requests) == 1
+    assert "failed (max_pages_reached) at the page limit" in captured.err
+    assert "inserted 200" in captured.err
+    assert (
+        "stopped in the window starting 2026-11-03; rerun with --from 2026-11-03"
+        in captured.err
+    )
+    assert "or run again" not in captured.err + captured.out
+    assert len(db.committed.rows) == 200  # what was read is kept
+    (audit,) = db.committed.audits
+    assert audit["details"]["status"] == "incomplete"
+    assert audit["details"]["resume_from"] == "2026-11-03"
+    ((message, context, level),) = reporter.calls
+    assert message == FAILURE_MESSAGE and context["cause"] == "max_pages_reached"
+    assert level == "error" and context["resume_from"] == "2026-11-03"
+
+
+def test_a_dry_run_that_stops_at_max_pages_is_still_exit_0_with_a_note(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server = Server(raw_rows(1, 200), raw_rows(1000, 200))
+    reporter = Reporter()
+
+    code = run([*DAY_ARGS, "--max-pages", "1", "--dry-run"], server, None, reporter)
+
+    out = capsys.readouterr().out
+    assert code == 0 and len(server.requests) == 1 and reporter.calls == []
+    assert "stopped at --max-pages" in out and "or run again" not in out
+
+
+def test_a_report_where_every_row_is_rejected_fails_in_both_modes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows = [raw_row(1, commissionStatus="refunded"), raw_row(2, advertiserId="x")]
+    reporter = Reporter()
+
+    real = run(DAY_ARGS, Server(rows), None, reporter)
+    real_err = capsys.readouterr().err
+    dry = run([*DAY_ARGS, "--dry-run"], Server(rows), None, Reporter())
+    dry_err = capsys.readouterr().err
+
+    assert real == dry == 1
+    assert "failed (no_valid_rows)" in real_err and "failed (no_valid_rows)" in dry_err
+    assert "nothing was written (dry run)" in dry_err
+    assert reporter.calls[0][1]["cause"] == "no_valid_rows"
+
+
+def test_an_empty_report_is_still_a_success(capsys: pytest.CaptureFixture[str]) -> None:
+    assert run(DAY_ARGS, Server([])) == 0
+    assert "fetched 0 transaction(s)" in capsys.readouterr().out
+
+
+def test_match_problems_and_known_rejections_are_printed_as_counts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db = FakeReportDatabase()
+    db.add_link(
+        FakeLink(
+            "l1",
+            "o1",
+            "https://www.awin1.com/cread.php?awinmid=11&awinaffid=1",
+            "ref-1",
+        )
+    )
+    run(DAY_ARGS, Server([raw_row(1)]), db)
+    capsys.readouterr()
+
+    bad = raw_row(1, commissionAmount={"amount": -1, "currency": "GBP"})
+    run(DAY_ARGS, Server([bad, raw_row(2, clickRefs={"clickRef": "ref-1"})]), db)
+
+    out = capsys.readouterr().out
+    assert "not matched because: merchant_mismatch 1." in out
+    assert "1 rejected row(s) are already stored and were left as they were." in out
+
+
+def test_a_deadline_failure_says_the_count_is_at_least(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    class Stalls(HttpxAwinClient):
+        async def fetch_transactions(self, *args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(3600)  # cancelled by the deadline, never waited for
+
+    real_timeout = asyncio.timeout
+    monkeypatch.setattr(asyncio, "timeout", lambda _seconds: real_timeout(0))
+    client = Stalls(
+        PUBLISHER_ID, SecretStr(TOKEN), transport=httpx.MockTransport(Server([]))
+    )
+
+    code = command.main(
+        DAY_ARGS,
+        client=client,
+        units=FakeReportDatabase().unit,
+        reporter=Reporter(),
+        now=NOW,
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1 and "failed (run_deadline)" in err and "(at least)" in err
+
+
+def test_a_failed_runs_audit_row_that_cannot_be_written_is_said_on_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db = FakeReportDatabase(audit_error=KeyError("never shown"))
+
+    code = run(DAY_ARGS, Server(raw_rows(1, 200), 500), db)
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "could not record the failed run in the audit log (KeyError)." in err
+    assert "never shown" not in err
 
 
 def test_a_report_longer_than_31_days_needs_the_flag_and_is_read_in_windows() -> None:
@@ -255,6 +369,25 @@ def test_a_dry_run_validates_prints_and_writes_nothing(
         ["--from", "yesterday", "--to", "2026-11-03"],
         ["--from", "2026-11-01", "--to", "2026-11-03T00:00:00"],
         ["--from", "2026-10-01", "--to", "2026-11-01"],  # 32 days
+        [
+            "--from",
+            "2026-09-01",
+            "--to",
+            "2026-10-15",
+            "--allow-long-range",
+            "--max-pages",
+            "1",
+        ],
+        ["--from", "1999-12-31", "--to", "2000-01-02"],
+        [
+            "--from",
+            "2026-11-10",
+            "--to",
+            "2026-11-12",
+        ],  # after tomorrow (the clock says 2026-11-10)
+        ["--from", "2026-11-12", "--to", "2026-11-12"],
+        ["--from", "2026-11-01", "--to", "9999-12-31", "--allow-long-range"],
+        ["--from", "9999-12-31", "--to", "9999-12-31", "--allow-long-range"],
         [*DAY_ARGS, "--max-pages", "0"],
         [*DAY_ARGS, "--max-pages", "51"],
         [*DAY_ARGS, "--max-pages", "ten"],
@@ -372,7 +505,7 @@ def test_an_authentication_failure_exits_1_and_says_nothing_was_done(
     err = capsys.readouterr().err
     assert code == 1 and len(server.requests) == 1  # a 401 is never retried
     assert "failed (auth_failed) while fetching transactions" in err
-    assert "inserted 0, updated 0" in err and "run it again to continue" in err
+    assert "inserted 0, updated 0" in err and "running it again is safe" in err
     assert TOKEN not in err
 
 
@@ -460,7 +593,10 @@ def test_one_failure_event_carries_stage_cause_counts_and_reason_codes_only() ->
         "updated": 0,
         "unchanged": 0,
         "unmatched": 199,
+        "rejected_known": 0,
         "skipped": {"unknown_status": 1},
+        "match_problems": {},
+        "resume_from": None,
     }
     flat = repr(context)
     for fragment in (*FORBIDDEN, "https"):
