@@ -3,7 +3,7 @@
     uv run python -m commands.purge_subscribers --dry-run    # count only, change nothing
     uv run python -m commands.purge_subscribers              # delete
 
-Run by hand (nothing schedules it). It removes
+Run daily by ``.github/workflows/scheduled-housekeeping.yml`` (and by hand). It removes
 
 * PENDING sign-ups whose consent is older than 30 days (nobody ever confirmed), and
 * UNSUBSCRIBED rows whose unsubscribe is older than 12 months (the suppression record is no longer needed).
@@ -11,6 +11,9 @@ Run by hand (nothing schedules it). It removes
 CONFIRMED rows are never touched. For each row that has a provider contact the command first erases the
 contact at the provider; if that fails the row is kept and tried again on the next run, so a contact is never
 orphaned at the provider with no row pointing to it. Output is counts only, never addresses.
+
+Exit codes: 0 done; 1 a provider call failed (rows kept) or the database failed (stderr names the error type only);
+2 bad arguments.
 """
 
 import asyncio
@@ -21,7 +24,6 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from app.core.config import settings
-from app.core.database import async_session_maker
 from app.core.email_provider import (
     EmailProvider,
     EmailProviderError,
@@ -120,6 +122,9 @@ def report(summary: PurgeSummary) -> str:
 
 
 async def _run(dry_run: bool) -> PurgeSummary:
+    # Imported here, inside main()'s try: building the engine parses DATABASE_URL.
+    from app.core.database import async_session_maker
+
     async with async_session_maker() as session:
         return await purge_subscribers(
             SubscriberRepository(session),
@@ -135,7 +140,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args not in ([], ["--dry-run"]):
         print("purge-subscribers: the only option is --dry-run.")
         return 2
-    summary = asyncio.run(_run("--dry-run" in args))
+    try:
+        summary = asyncio.run(_run("--dry-run" in args))
+    except Exception as error:  # noqa: BLE001  (report the type only, never the message)
+        # A driver message can carry the role name and host, so no traceback and no text.
+        print(
+            f"purge-subscribers: failed ({type(error).__name__}). Check DATABASE_URL.",
+            file=sys.stderr,
+        )
+        return 1
     print(report(summary))
     return 1 if summary.provider_failures else 0
 

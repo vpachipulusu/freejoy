@@ -10,7 +10,7 @@ the error message says how many. ``occurred_at`` is already truncated to the min
 to the minute. The retention period and the reasoning are in ``docs/developer/freejoy-affiliate.md``; the
 privacy page states the same period, so change both together.
 
-Run it on a schedule (for example monthly). It uses ``DATABASE_URL`` and is safe to repeat.
+Run daily by ``.github/workflows/scheduled-housekeeping.yml`` (and by hand). It uses ``DATABASE_URL`` and is safe to repeat.
 """
 
 import argparse
