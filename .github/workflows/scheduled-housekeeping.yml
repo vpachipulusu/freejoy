@@ -10,11 +10,18 @@
 # requests and nothing requires it. A failed run shows up as a red run on the Actions tab (and in the email
 # GitHub sends to whoever last edited the schedule); it does not block merges.
 #
-# GitHub skips scheduled runs on a repository that has had no activity for 60 days (it disables the schedule and
-# the cron silently stops; re-enable the workflow on the Actions tab). Check by running it by hand with "Run workflow".
+# Credentials live in a GitHub Environment named "housekeeping" (Settings > Environments), not in repository
+# secrets, so a copy of this workflow on another branch cannot read them:
+#   - environment secrets   HOUSEKEEPING_DATABASE_URL (required, ends in ?sslmode=verify-full), SENTRY_DSN (optional)
+#   - environment variable  PUBLIC_SITE_URL (required, https origin: it goes into the link checker's User-Agent)
+#   - deployment branches   "Selected branches" with only "main"
+# A run started from any other branch (a manual dispatch of a modified copy, say) is refused by the environment's
+# branch rule, or, if it ever started, stops at the guard step on the missing secret: by design. See
+# docs/developer/workflow.md, "Owner setup: scheduled housekeeping". No environment variable is introduced in the apps.
 #
-# Secrets (repository secrets, see docs/developer/workflow.md "Owner setup"): HOUSEKEEPING_DATABASE_URL (required)
-# and SENTRY_DSN (optional). No environment variable is introduced in the apps.
+# On a public repository GitHub skips scheduled runs once the repository has had no activity for 60 days (it
+# disables the schedule and the cron silently stops; re-enable the workflow on the Actions tab). Check by running it
+# by hand with "Run workflow".
 #
 # Not scheduled on purpose: commands.import_awin_offers. It has not been verified against the live Awin API yet.
 name: Scheduled housekeeping
@@ -45,13 +52,19 @@ jobs:
   housekeeping:
     name: Housekeeping
     runs-on: ubuntu-latest
+    environment: housekeeping
     # check_offer_health bounds its request phase at 900 s (--max-seconds); expiry, the other two commands, and the
     # dependency install come on top.
     timeout-minutes: 30
     env:
+      # Real, non-secret values. PUBLIC_SITE_URL is an environment variable of "housekeeping" (not a secret):
+      # check_offer_health builds its User-Agent from it ("<Brand>-LinkCheck/1.0 (+<PUBLIC_SITE_URL>)"), so merchants
+      # see the real site, not the localhost default. The release tags Sentry events with the commit that ran.
+      PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+      VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
       # app.core.config builds the full Settings object when a command starts, and with ENVIRONMENT=production
       # (kept so Sentry files these events under "production") it refuses to start without the settings below.
-      # The three commands never read them: they are harmless placeholders, not secrets, and nothing is ever
+      # The three commands never read these: they are harmless placeholders, not secrets, and nothing is ever
       # sent to Upstash, Firebase or a signing endpoint. The real values are only set on the web deployment.
       ENVIRONMENT: production
       UPSTASH_REDIS_REST_URL: https://unused.invalid
@@ -63,31 +76,38 @@ jobs:
       FIREBASE_ADMIN_CLIENT_EMAIL: unused-placeholder@example.invalid
       FIREBASE_ADMIN_PRIVATE_KEY: unused-placeholder
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: '0.8.12'
-          enable-cache: true
-          cache-dependency-glob: fastapi_backend/uv.lock
-
-      - name: Install dependencies
-        working-directory: fastapi_backend
-        run: uv sync --frozen
-
-      # Fails with a clear message instead of a settings validation error from the first command. The secret is
-      # only tested for emptiness, never printed.
-      - name: Require the HOUSEKEEPING_DATABASE_URL secret
+      # First, so a missing secret or variable fails before anything is downloaded or installed. It needs no
+      # checkout. The secret is only tested for emptiness, never printed.
+      - name: Require the environment's secret and variable
         id: guard
         env:
           HOUSEKEEPING_DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
         run: |
           if [ -z "${HOUSEKEEPING_DATABASE_URL}" ]; then
-            echo "::error title=Missing secret::Set the repository secret HOUSEKEEPING_DATABASE_URL (docs/developer/workflow.md, Owner setup)."
+            echo "::error title=Missing secret::Set the secret HOUSEKEEPING_DATABASE_URL in the 'housekeeping' environment (docs/developer/workflow.md, Owner setup)."
             exit 1
           fi
+          if ! [[ "${PUBLIC_SITE_URL}" =~ ^https://[^/?#[:space:]]+/?$ ]]; then
+            echo "::error title=Bad variable::Set the variable PUBLIC_SITE_URL in the 'housekeeping' environment to the site's https origin, e.g. https://example.com (see docs/developer/workflow.md)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No cache: this job holds the production database credential, so it should not restore a cache written by
+      # other runs, and a one-minute install gains little from it.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.8.12'
+          enable-cache: false
+
+      # --no-dev: the interpreter that later holds the credential carries no pytest, ruff or mypy. The command steps
+      # use `uv run --no-sync` so uv cannot install anything again.
+      - name: Install dependencies
+        working-directory: fastapi_backend
+        run: uv sync --frozen --no-dev
 
       # The three commands run in order and each runs even when an earlier one failed (!cancelled()), but only
       # once the guard has passed. Any failed step still fails the job. No retries: every command is safe to
@@ -114,7 +134,7 @@ jobs:
             fi
             args+=(--limit "${LIMIT}")
           fi
-          uv run python -m commands.check_offer_health "${args[@]}"
+          uv run --no-sync python -m commands.check_offer_health "${args[@]}"
 
       - name: prune_click_events (delete click events older than 13 months)
         if: ${{ !cancelled() && steps.guard.conclusion == 'success' }}
@@ -122,7 +142,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: uv run python -m commands.prune_click_events
+        run: uv run --no-sync python -m commands.prune_click_events
 
       - name: purge_subscribers (delete sign-ups past retention)
         if: ${{ !cancelled() && steps.guard.conclusion == 'success' }}
@@ -130,4 +150,4 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: uv run python -m commands.purge_subscribers
+        run: uv run --no-sync python -m commands.purge_subscribers
