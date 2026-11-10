@@ -45,7 +45,14 @@ class FakeAwinClient:
         served = self.pages[index] if index < len(self.pages) else []
         if isinstance(served, AwinError):
             raise served
-        return PromotionsPage(tuple(served), self.total_pages)
+        # a total only comes with the {"data": ..., "pagination": ...} envelope
+        object_envelope = self.total_pages is not None
+        return PromotionsPage(
+            tuple(served),
+            self.total_pages,
+            "object" if object_envelope else "list",
+            object_envelope,
+        )
 
     async def fetch_transactions(
         self, start: datetime, end: datetime, *, page: int, page_size: int

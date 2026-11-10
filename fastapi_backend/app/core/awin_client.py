@@ -42,7 +42,7 @@ import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, get_args
 
 import httpx
 from pydantic import SecretStr
@@ -119,15 +119,27 @@ class AwinError(Exception):
         self.reason = reason
 
 
+# The values Awin documents for the membership filter (help.awin.com/apidocs/promotions).
+Membership = Literal["joined", "notJoined", "all"]
+
+
 @dataclass(frozen=True)
 class PromotionFilters:
-    """The filters the importer sends: joined programmes, vouchers and promotions, active, UK only."""
+    """The filters the importer sends: joined programmes, vouchers and promotions, active, UK only.
+
+    ``membership`` is ``joined`` unless a dry-run probe asks for more; a real run refuses any other value.
+    """
 
     updated_since: date | None = None
+    membership: Membership = "joined"
+
+    def __post_init__(self) -> None:
+        if self.membership not in get_args(Membership):
+            raise ValueError("membership must be one of the values Awin documents")
 
     def to_json(self) -> dict[str, Any]:
         filters: dict[str, Any] = {
-            "membership": "joined",
+            "membership": self.membership,
             "type": "all",
             "status": "active",
             "regionCodes": list(REGION_CODES),
@@ -143,6 +155,8 @@ class PromotionsPage:
 
     items: tuple[Any, ...]
     total_pages: int | None = None
+    envelope: Literal["list", "object"] = "list"  # a bare list, or {"data": [...]}
+    total_pages_present: bool = False  # pagination.totalPages was there (usable or not)
 
 
 @dataclass(frozen=True)
@@ -191,7 +205,12 @@ def _envelope(payload: object) -> tuple[tuple[Any, ...], int | None] | None:
 def parse_promotions(payload: object) -> PromotionsPage | None:
     """A promotions page from a decoded body, or ``None`` when the envelope is unknown."""
     found = _envelope(payload)
-    return PromotionsPage(*found) if found else None
+    if not found:
+        return None
+    pagination = payload.get("pagination") if isinstance(payload, dict) else None
+    present = isinstance(pagination, dict) and "totalPages" in pagination
+    kind: Literal["list", "object"] = "list" if isinstance(payload, list) else "object"
+    return PromotionsPage(*found, kind, present)
 
 
 def parse_transactions(payload: object) -> TransactionsPage | None:
