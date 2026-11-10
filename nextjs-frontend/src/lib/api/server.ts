@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { cookies, headers } from 'next/headers';
 import { BACKEND_NOT_CONFIGURED_CODE } from '@/lib/auth/auth-error-messages';
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session-cookie';
+import { E2E_CLIENT_IP_HEADER, hostnameOf, isLocalE2eBuild } from '@/lib/middleware/local-e2e';
 import { createClient, createConfig, type Client } from './generated/client';
 
 /**
@@ -95,6 +96,15 @@ async function warnNeverTrusted(name: string): Promise<void> {
   });
 }
 
+/** Whether this request is to a local e2e build, the only place `x-e2e-client-ip` may be believed. */
+async function isLocalE2eRequest(): Promise<boolean> {
+  try {
+    return isLocalE2eBuild(hostnameOf((await headers()).get('host')));
+  } catch {
+    return false; // no request scope
+  }
+}
+
 /** The headers whose value may be taken as the visitor's address, in order of preference. */
 async function trustedClientIpHeaders(): Promise<string[]> {
   const names: string[] = [];
@@ -102,7 +112,11 @@ async function trustedClientIpHeaders(): Promise<string[]> {
   // One header the operator vouches for: only set it when the reverse proxy overwrites it on every request.
   const configured = process.env.TRUSTED_CLIENT_IP_HEADER?.trim().toLowerCase();
   if (configured && HEADER_NAME.test(configured)) {
-    if (NEVER_TRUSTED.has(configured)) await warnNeverTrusted(configured);
+    // The e2e test header is client-settable like any other: believed only in a local e2e build.
+    const refused =
+      NEVER_TRUSTED.has(configured) ||
+      (configured === E2E_CLIENT_IP_HEADER && !(await isLocalE2eRequest()));
+    if (refused) await warnNeverTrusted(configured);
     else names.push(configured);
   }
   return names;

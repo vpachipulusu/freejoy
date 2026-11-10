@@ -14,6 +14,7 @@ export { DEFAULT_QUERY, parseCatalogueParams, toCatalogueHref, withQuery } from 
 export { isLive, normaliseQuery } from './query';
 export {
   CATALOGUE_UNAVAILABLE_MESSAGE,
+  CatalogueRateLimitedError,
   CatalogueUnavailableError,
   settle,
   type Loaded,

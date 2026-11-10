@@ -37,6 +37,11 @@ inside it), so you can tell which offer you are about to open.
 Other pointers that do not rely on colour alone:
 
 - The page you are on in the header is highlighted and marked as the current page for screen readers.
+- The heart on a card is a real button that is **pressed** or **not pressed** for screen readers and is named after
+  the freebie ("Save Coffee discovery pack"; the name stays the same and only its pressed state changes). A saved heart is
+  filled and an unsaved one is an outline, so the state is not shown by colour alone. It is at least 44 by 44 pixels
+  and is reached with **Tab** and pressed with **Enter** or **Space**. Its small press animation is switched off when
+  your device asks for reduced motion.
 - A chosen filter shows a filled dot or a tick, as well as a coloured background.
 - Offer type, postage and "card required" are written as words, never only as icons or colours.
 

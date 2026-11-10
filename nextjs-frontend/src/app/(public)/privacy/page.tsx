@@ -39,6 +39,17 @@ export default function PrivacyPage() {
         email address found in a page address, and that single-use code, is removed before an error
         or timing report is sent to our error-monitoring provider.
       </p>
+      <p>
+        If you use the heart on a freebie, the list of freebies you saved stays in your browser, on
+        your device. It is not stored in a database or against an account. The Saved page sends
+        their page names to our server only to look the freebies up; we do not keep that list or
+        link it to you, and we record no analytics event when you save or remove one. Looking them
+        up produces ordinary server log entries, as any page request does: our application keeps its
+        log for 14 days and its error log for 30 days, and how long our hosting service and our
+        backend keep theirs will be added here. If error reporting is switched on, page addresses of
+        freebies you open can appear in error and timing reports. See the cookie notice for the
+        storage name.
+      </p>
       <h2>If you create an account</h2>
       <p>
         If you create an account, we hold your email address, your name if you give one, the times
@@ -93,6 +104,8 @@ export default function PrivacyPage() {
           'Retention periods for confirmation-token, contact and sign-in history data',
           'Named processors (hosting, error monitoring, email sending) and any transfers outside the UK',
           'Right to object to direct marketing, minimum sign-up age and wording of data-subject rights',
+          'Whether the saved-freebies list (kept only in the browser of the visitor, page names only) needs any lawful-basis or retention wording',
+          'Retention of the server logs of the backend and the hosting service for Saved page lookups (the periods for the application itself are stated above), and whether page addresses of freebies a visitor opens in error and timing reports need wording',
           'Complaint route to the ICO and the data protection fee position',
         ]}
       />

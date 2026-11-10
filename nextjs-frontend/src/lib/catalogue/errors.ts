@@ -19,6 +19,17 @@ export class CatalogueUnavailableError extends Error {
   }
 }
 
+/**
+ * The catalogue API answered 429: the backend's per-address budget is spent. A kind of outage (so every page
+ * handles it already), but callers that fan out many reads (the Saved page) stop asking the moment they see it.
+ */
+export class CatalogueRateLimitedError extends CatalogueUnavailableError {
+  constructor() {
+    super();
+    this.name = 'CatalogueRateLimitedError';
+  }
+}
+
 export type Loaded<T> = { ok: true; data: T } | { ok: false };
 
 /**

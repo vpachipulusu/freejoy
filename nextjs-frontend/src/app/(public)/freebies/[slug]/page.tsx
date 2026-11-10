@@ -47,7 +47,7 @@ export async function generateMetadata({ params }: OfferPageProps): Promise<Meta
   if (!lookup.ok) return UNAVAILABLE_METADATA;
 
   const result = lookup.data;
-  if (result.kind === 'not_found') return NOT_FOUND_METADATA;
+  if (result.kind === 'not_found' || result.kind === 'unreadable') return NOT_FOUND_METADATA;
   if (result.kind === 'ended') {
     // More than 30 days after it ended the page is gone: a 404 for now (no real 410, see the SEO doc).
     if (endedOfferState(result.ended, today) === 'gone') return NOT_FOUND_METADATA;
@@ -85,7 +85,7 @@ export default async function OfferPage({ params }: OfferPageProps) {
   if (!lookup.ok) return <CatalogueUnavailablePage heading="This freebie" />;
 
   const result = lookup.data;
-  if (result.kind === 'not_found') notFound();
+  if (result.kind === 'not_found' || result.kind === 'unreadable') notFound();
   if (result.kind === 'ended') {
     if (endedOfferState(result.ended, await getToday()) === 'gone') notFound();
     return <EndedOfferView ended={result.ended} />;

@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
+import { scrubBreadcrumb } from '@/lib/sentry/scrub-breadcrumb';
 import { scrubEvent } from '@/lib/sentry/scrub-event';
 
 Sentry.init({
@@ -9,6 +10,8 @@ Sentry.init({
   // never reach monitoring through a URL (FREEJ-31): scrubEvent filters both, in every URL and query shape.
   beforeSend: (event) => scrubEvent(event),
   beforeSendTransaction: (event) => scrubEvent(event),
+  // A click on a Save heart is named after the offer's title (FREEJ-28): keep it out of breadcrumbs.
+  beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
   environment: process.env.NODE_ENV,
 
   // Performance: low sample rate in production

@@ -204,7 +204,12 @@ describe('once the catalogue is API-backed', () => {
     const cta = within(hero).getByRole('link', { name: /^request this sample$/i });
     expect(cta).toHaveAttribute('href', `/go/${FIXTURE_LIVE.id}`);
     expect(cta).toHaveAttribute('rel', 'sponsored nofollow noopener');
-    expect(within(hero).queryByRole('button')).toBeNull();
+    // No demo dialog button: the heart (FREEJ-28) is the only control besides the link.
+    expect(
+      within(hero)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label'))
+    ).toEqual([`Save ${FIXTURE_LIVE.title}`]);
   });
 });
 
@@ -246,6 +251,16 @@ describe('API offers that have ended', () => {
 
   it('answers not found, with noindex, for an unknown or unpublished offer', async () => {
     mocks.lookup.mockResolvedValue({ kind: 'not_found' });
+
+    expect(await offerMetadata(offerParams)).toMatchObject({
+      title: 'Offer not found',
+      robots: { index: false },
+    });
+    await expect(OfferPage(offerParams)).rejects.toThrow('NEXT_NOT_FOUND');
+  });
+
+  it('treats an offer it cannot read exactly like one that is not found', async () => {
+    mocks.lookup.mockResolvedValue({ kind: 'unreadable' });
 
     expect(await offerMetadata(offerParams)).toMatchObject({
       title: 'Offer not found',

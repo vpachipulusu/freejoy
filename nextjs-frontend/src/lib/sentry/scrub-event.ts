@@ -54,6 +54,11 @@ const QUERY_KEYS = new Set(['query_string', 'query', 'http.query', 'url.query'])
 const ROUTER_STATE_KEYS = new Set(['next-router-state-tree']);
 /** Cookies are never sent. Matched in lower case. */
 const COOKIE_KEYS = new Set(['cookie', 'cookies', 'set-cookie']);
+/**
+ * Span and trace attributes that hold a request body. The Saved page posts the visitor's list of saved offer
+ * slugs, so no request body is ever sent (FREEJ-28); the event's own `request.data` is dropped the same way.
+ */
+const BODY_ATTRIBUTE_KEYS = new Set(['http.request.body.data']);
 /** Sentry's internal bookkeeping (removed before sending): kept by reference, never walked. */
 const PASS_THROUGH_KEY = 'sdkProcessingMetadata';
 
@@ -156,6 +161,13 @@ function redactAddresses(text: string): string {
   return result + text.slice(cursor);
 }
 
+/**
+ * The backend's offer read, `/v1/catalogue/offers/<slug>`: the slug says which freebie a visitor opened or
+ * saved (the Saved page reads each saved offer), so span names and URLs keep `[slug]` instead. The list read,
+ * `/v1/catalogue/offers?...`, has no slug and is left alone.
+ */
+const OFFER_READ_SLUG = /(\/v1\/catalogue\/offers\/)[^\s/?#&"'\\]+/g;
+
 function scrubString(value: string): string {
   const named = value.replace(NAMED_PARAM, `$1$2${FILTERED}`);
   const valued = named.replace(ANY_PARAM, (match, start: string, name: string, text: string) =>
@@ -165,7 +177,7 @@ function scrubString(value: string): string {
     (text, [pattern, replacement]) => text.replace(pattern, replacement),
     valued
   );
-  return redactAddresses(withoutParams);
+  return redactAddresses(withoutParams).replace(OFFER_READ_SLUG, '$1[slug]');
 }
 
 /** A string known to be (part of) a query: anything still holding an address after scrubbing goes whole. */
@@ -194,6 +206,13 @@ function scrubPair(name: string, value: unknown, depth: number, walk: Walk): unk
   return [scrubQueryText(name), scrubbedValue];
 }
 
+/** The event's `request` without its `data` (the body). Anything that is not a plain object passes unchanged. */
+function withoutRequestBody(request: unknown): unknown {
+  if (typeof request !== 'object' || request === null || !isPlainObject(request)) return request;
+  const { data: _body, ...rest } = request;
+  return rest;
+}
+
 function scrubContainer(value: object, depth: number, inQuery: boolean, walk: Walk): unknown {
   if (Array.isArray(value)) {
     // A query string as [name, value] pairs.
@@ -206,13 +225,14 @@ function scrubContainer(value: object, depth: number, inQuery: boolean, walk: Wa
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     const lower = key.toLowerCase();
-    if (COOKIE_KEYS.has(lower)) continue;
+    if (COOKIE_KEYS.has(lower) || BODY_ATTRIBUTE_KEYS.has(lower)) continue;
     if (depth === 0 && key === PASS_THROUGH_KEY) {
       result[key] = item;
     } else if (ROUTER_STATE_KEYS.has(lower) || (inQuery && isSensitiveName(key))) {
       result[key] = FILTERED;
     } else {
-      result[scrubString(key)] = scrub(item, depth + 1, inQuery || QUERY_KEYS.has(key), walk);
+      const child = depth === 0 && key === 'request' ? withoutRequestBody(item) : item;
+      result[scrubString(key)] = scrub(child, depth + 1, inQuery || QUERY_KEYS.has(key), walk);
     }
   }
   return result;

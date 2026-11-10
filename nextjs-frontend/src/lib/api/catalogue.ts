@@ -2,7 +2,7 @@ import 'server-only';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { unstable_cache } from 'next/cache';
-import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
+import { CatalogueRateLimitedError, CatalogueUnavailableError } from '@/lib/catalogue/errors';
 import { isValidSlug } from '@/lib/catalogue/slug';
 import { logger } from '@/lib/logger';
 import { callBackend, readTrustedClientIp, type ApiResult } from './server';
@@ -84,6 +84,7 @@ function timeoutSignal(): AbortSignal {
 /** Logs the failure (never the search text) and throws the typed error callers turn into an error state. */
 function fail(operation: string, result: Extract<ApiResult<unknown>, { success: false }>): never {
   logger.warn('Catalogue read failed', { operation, status: result.status, error: result.error });
+  if (result.status === 429) throw new CatalogueRateLimitedError();
   throw new CatalogueUnavailableError();
 }
 
@@ -131,17 +132,44 @@ function parseEnded(body: unknown): ExpiredOfferData | null {
   return { slug: data.slug, title: data.title, category, ended_at: endedAt };
 }
 
+/** The `code` the backend puts on its own 404 for an unknown or unpublished offer (never branch on the text). */
+const OFFER_NOT_FOUND_CODE = 'offer_not_found';
+
+type ErrorBody = { success?: unknown; code?: unknown; expired?: unknown };
+
+function asErrorBody(body: unknown): ErrorBody | null {
+  return typeof body === 'object' && body !== null ? (body as ErrorBody) : null;
+}
+
+/** The backend's own "no such offer": its error envelope WITH the offer_not_found code. */
+function isOfferNotFound(body: unknown): boolean {
+  const parsed = asErrorBody(body);
+  return parsed?.success === false && parsed.code === OFFER_NOT_FOUND_CODE;
+}
+
+/** The backend's own "this offer has ended": its error envelope with `expired: true`. */
+function isOfferEnded(body: unknown): boolean {
+  const parsed = asErrorBody(body);
+  return parsed?.success === false && parsed.expired === true;
+}
+
 async function loadOffer(slug: string): Promise<OfferReadResult> {
-  // callBackend folds an error body into a message; the 410 stub is the one body we need, so keep it.
-  let goneBody: unknown;
+  // callBackend folds an error body into a message; the 404 and 410 bodies are the ones we need, so keep them.
+  let errorBody: unknown;
   const result = await callBackend(async (client) => {
     const response = await readOffer({ client, path: { slug }, signal: timeoutSignal() });
-    if (response.response?.status === 410) goneBody = response.error;
+    const status = response.response?.status;
+    if (status === 404 || status === 410) errorBody = response.error;
     return response;
   }, backendOptions());
   if (result.success) return { kind: 'found', offer: result.data };
-  if (result.status === 404) return { kind: 'not_found' };
-  if (result.status === 410) return { kind: 'gone', ended: parseEnded(goneBody) };
+  // Only the backend's own answers are definitive, and pruning a saved offer is irreversible: a 404 or 410 from
+  // anything else in the path (a proxy's HTML page, a wrong base URL, the backend's route-level "Not Found")
+  // is an outage.
+  if (result.status === 404 && isOfferNotFound(errorBody)) return { kind: 'not_found' };
+  if (result.status === 410 && isOfferEnded(errorBody)) {
+    return { kind: 'gone', ended: parseEnded(errorBody) };
+  }
   return fail('read_offer', result);
 }
 

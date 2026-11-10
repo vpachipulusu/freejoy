@@ -102,13 +102,15 @@ Phone:
 **No cookie banner is shown**, and that is deliberate: while you only browse the public pages, Freejoy sets no
 cookies and stores nothing in your browser's local storage (the guide's author checked this by opening the home,
 catalogue, offer, alerts and About pages in a fresh browser and listing its cookies and storage: both were empty).
-There is no analytics or advertising script.
+The one exception is the list of freebies you choose to save with the heart, described in the table below; it
+exists only if you press a heart. There is no analytics or advertising script.
 
 What can be stored, and when:
 
 | When | What | Why |
 | --- | --- | --- |
 | Browsing the public pages, searching, filtering, using the alerts form | Nothing | The catalogue state lives in the page address |
+| You press the heart on a freebie | In your browser's local storage, under the name `freejoy.saved.v1`: the page names (slugs) of the freebies you saved, up to 200, and nothing about you. It is not a cookie. It stays until you remove the freebies or clear your browser data. The Saved page sends those names to Freejoy's server only to look the freebies up, and they are not kept | Your saved list, which you asked for |
 | You click an offer's claim button | Nothing on your device. Freejoy counts the click on its own server (offer, minute, referring website name, rough device type). The brand's site may set its own cookies | Click counting |
 | You open the **Log in** or **Sign up** page | The sign-in service prepares storage in your browser, even if you do not sign in | Signing in only |
 | You sign in | A cookie called `session` that keeps you signed in for up to five days | Keeping you signed in |

@@ -36,7 +36,9 @@ export interface EndedOffer {
 export type OfferLookup =
   | { kind: 'found'; offer: Offer }
   | { kind: 'ended'; ended: EndedOffer }
-  | { kind: 'not_found' };
+  | { kind: 'not_found' }
+  /** The API answered, but the record is not one this site can read (an unknown value, a missing date). */
+  | { kind: 'unreadable' };
 
 export function getConfiguredSource(): CatalogueSource {
   const value = process.env.CATALOGUE_SOURCE?.trim().toLowerCase();

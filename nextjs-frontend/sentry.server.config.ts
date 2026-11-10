@@ -13,4 +13,8 @@ Sentry.init({
 
   // Performance: low sample rate in production
   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+
+  // The Saved page posts the visitor's saved offer slugs (FREEJ-28): never capture incoming request bodies.
+  // Spans of incoming requests stay on; only their bodies go (scrubEvent drops any that remain).
+  integrations: [Sentry.httpIntegration({ maxIncomingRequestBodySize: 'none' })],
 });

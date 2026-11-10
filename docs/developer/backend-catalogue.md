@@ -36,7 +36,8 @@ Published, non-expired offers with the total before paging.
 ### `GET /v1/catalogue/offers/{slug}`
 
 - **200** the offer (`{"success": true, "data": <offer>}`).
-- **404** `{"success": false, "error": "Offer not found"}` for an unknown slug **and** for a `DRAFT` or `ARCHIVED`
+- **404** `{"success": false, "error": "Offer not found", "code": "offer_not_found"}` (the code is what the Next.js app
+  prunes a visitor's saved offer on; a route-level 404 has no code and never prunes) for an unknown slug **and** for a `DRAFT` or `ARCHIVED`
   offer, with an identical body, so a visitor cannot probe for unpublished content.
 - **410 Gone** only for an offer that provably was public and has ended: `PUBLISHED` with `end_at <= now`, or `EXPIRED`
   with a `last_verified_at` (see the decision below). A 410 is never answered with 304.

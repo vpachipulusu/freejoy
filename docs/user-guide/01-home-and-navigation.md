@@ -63,8 +63,9 @@ sits at the bottom of the screen.
 
    ![The phone menu panel](images/menu-m.png)
 
-3. Use the **tab bar** at the bottom: **Home**, **Browse** (all freebies), **Categories** and **Alerts**. The tab
-   for the page you are on is underlined and green.
+3. Use the **tab bar** at the bottom: **Home**, **Browse** (all freebies), **Saved** (the freebies you hearted,
+   see [page 2](02-browse-and-search.md#step-9-save-a-freebie-for-later)) and **Alerts**. The tab for the page you
+   are on is underlined and green. The categories are in the **Menu** panel and on the catalogue page.
 
 ## Step 5. Read a freebie card
 
@@ -79,8 +80,12 @@ Each card shows, from top to bottom:
 5. A small clock label, **New today** or **Just added**, when the offer has one. These are labels an editor sets.
    Freejoy does not show urgency labels such as "Ending soon" or "Popular" on real offers.
 6. **View freebie**, which opens the offer page ([page 3](03-offer-details.md)). The whole card is clickable.
+7. A **heart** button in the top-right corner of the picture, which saves the freebie
+   ([page 2](02-browse-and-search.md#step-9-save-a-freebie-for-later)). It is a separate button, so pressing it does
+   not open the offer.
 
 ## What you will not find
 
-There are no saved or favourite offers, no visitor counts and no countdown timers. Browsing does not set cookies
-or store anything in your browser (see [page 5](05-information-pages.md#what-freejoy-stores-in-your-browser)).
+There are no visitor counts and no countdown timers. Browsing does not set cookies. The only thing Freejoy keeps in
+your browser is the list of freebies you choose to save with the heart (see
+[page 5](05-information-pages.md#what-freejoy-stores-in-your-browser)).

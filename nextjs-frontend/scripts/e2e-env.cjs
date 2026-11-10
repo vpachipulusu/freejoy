@@ -116,6 +116,10 @@ function toNextProcessEnv(env) {
     CATALOGUE_SOURCE: env.E2E_LIVE_CATALOGUE === '1' ? 'api' : 'fixture',
     NEXT_DIST_DIR: E2E_DIST_DIR,
     E2E_RATE_LIMIT_TEST_MODE: '1',
+    // Specs give each test its own address (`x-e2e-client-ip`, see helpers/e2e-utils.ts `useDistinctClientIp`), and
+    // the Saved action keys its read budget on the trusted address. The server believes this header only in a
+    // local e2e build (src/lib/middleware/local-e2e.ts); an ordinary build ignores the setting.
+    TRUSTED_CLIENT_IP_HEADER: 'x-e2e-client-ip',
   };
 }
 

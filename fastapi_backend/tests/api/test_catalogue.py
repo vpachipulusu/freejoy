@@ -256,8 +256,23 @@ async def test_detail_of_an_unknown_slug_is_404() -> None:
         response = await http.get("/v1/catalogue/offers/nope")
 
     assert response.status_code == 404
-    assert response.json() == {"success": False, "error": "Offer not found"}
+    assert response.json() == {
+        "success": False,
+        "error": "Offer not found",
+        "code": "offer_not_found",
+    }
     assert "Cache-Control" not in response.headers
+
+
+async def test_a_route_level_404_carries_no_offer_code() -> None:
+    """The Next.js app prunes a saved offer only on ``offer_not_found``; a wrong path must not look like it."""
+    http, _ = build(FakeCatalogueRepository())
+
+    async with http:
+        response = await http.get("/v1/catalogue/no-such-route")
+
+    assert response.status_code == 404
+    assert response.json() == {"success": False, "error": "Not Found"}
 
 
 @pytest.mark.parametrize("status", [OfferStatus.DRAFT, OfferStatus.ARCHIVED])

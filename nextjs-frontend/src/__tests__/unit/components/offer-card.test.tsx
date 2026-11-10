@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { OfferCard, OfferGrid } from '@/components/catalogue/offer-card';
 import { MERCHANTS, OFFERS } from '@/lib/catalogue/fixtures';
-import type { Offer } from '@/lib/catalogue/types';
+import { toCardOffer, type Offer } from '@/lib/catalogue/types';
 
 const offer = OFFERS[0];
 const merchant = MERCHANTS.find((item) => item.slug === offer.merchantSlug)!;
@@ -34,6 +34,61 @@ describe('OfferCard', () => {
 
     expect(screen.getByText('Demo')).toBeInTheDocument();
     expect(container.querySelector('a[href^="http"]')).toBeNull();
+  });
+});
+
+describe('OfferCard layout on narrow cards (M4) and hover groups (M5)', () => {
+  it('lays the art and the demo badge in their own box, with the type badge and heart outside it', () => {
+    const { container } = render(<OfferCard offer={offer} merchant={merchant} />);
+    const art = screen.getByRole('img', { name: offer.image.alt });
+    const artBox = art.parentElement!;
+
+    expect(artBox).toHaveClass('relative');
+    expect(artBox).toContainElement(screen.getByText('Demo'));
+    const outer = artBox.parentElement!;
+    const badge = screen.getByText(/free sample|free trial|cashback|voucher|competition/i);
+    expect(artBox).not.toContainElement(badge);
+    expect(outer).toContainElement(badge);
+    expect(outer).toContainElement(screen.getByRole('button', { name: /^Save / }));
+    expect(container.querySelectorAll('article')).toHaveLength(1);
+  });
+
+  it('keeps the type badge on one line, and drops it below the art under 375px so it cannot meet the heart', () => {
+    render(<OfferCard offer={offer} merchant={merchant} />);
+    const badge = screen.getByText(/free sample|free trial|cashback|voucher|competition/i);
+
+    for (const name of [
+      'absolute',
+      'left-2',
+      'top-2',
+      'whitespace-nowrap',
+      'max-[374px]:static',
+      'max-[374px]:mt-2',
+      'max-[374px]:border',
+      'sm:left-3',
+      'sm:top-3',
+    ]) {
+      expect(badge).toHaveClass(name);
+    }
+  });
+
+  it('uses named hover groups: hovering the heart must not underline "View freebie"', () => {
+    const { container } = render(<OfferCard offer={offer} merchant={merchant} />);
+    const article = container.querySelector('article')!;
+    const label = screen.getByText('View freebie');
+
+    expect(article).toHaveClass('group/card');
+    expect(label).toHaveClass('group-hover/card:underline', 'group-has-[button:hover]/card:no-underline');
+    expect(article.className).not.toMatch(/(^|\s)group(\s|$)/);
+    expect(label.className).not.toMatch(/(^|\s)group-hover:/);
+  });
+
+  it('accepts the card-shaped projection the Saved page sends, not only a whole offer', () => {
+    const projection = toCardOffer(offer);
+
+    render(<OfferCard offer={projection} merchant={merchant} />);
+
+    expect(screen.getByRole('link', { name: offer.title })).toBeInTheDocument();
   });
 });
 
