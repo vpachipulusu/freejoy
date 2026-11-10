@@ -44,6 +44,19 @@ prove two things: that it came from our Next.js server, and which user it acts f
    organisation membership and role, and the platform-admin role for admin endpoints. Email verification is enforced here from the verified token
    claims (`email_verified`), not from a cookie the browser can set.
 
+## Testing-phase exception: API docs in production
+
+Production is still in testing, so the owner decided on 2026-11-09 to serve Swagger on the production backend
+for now. This overrides the default above (no schema or docs UI in production) for the testing phase only.
+
+- The opt-in setting `API_DOCS_ENABLED` (default `false`) serves `/docs`, `/redoc` and the OpenAPI schema in a
+  non-relaxed environment. It relaxes no other production check. The backend logs one warning at startup while it
+  is on in such an environment.
+- The docs UI has no Authorize button: the `X-Internal-Key` header is not in the schema, so "Try it out" on
+  protected routes answers 401. The schema is the same document as `nextjs-frontend/openapi.json`.
+- **Go-live step:** delete `API_DOCS_ENABLED` from the Vercel backend project's environment variables and redeploy
+  the backend. Production then returns 404 for `/docs`, `/redoc` and `/openapi.json` again.
+
 ## Alternatives considered
 
 - **Session cookie only, no service key.** Anyone holding a stolen session cookie could call the backend

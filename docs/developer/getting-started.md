@@ -60,12 +60,15 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 8000 --reload
 | `EMAIL_PROVIDER`, `EMAIL_PROVIDER_API_KEY`, `EMAIL_PROVIDER_LIST_ID`, `EMAIL_FROM`, `EMAIL_FROM_NAME`, `PUBLIC_SITE_URL` | To send alerts email | Backend only ([ADR-012](../adr/0012-email-provider.md), [backend-subscribers.md](backend-subscribers.md)). `EMAIL_PROVIDER` unset: nothing is ever sent, and production refuses sign-ups. `fake` records messages for tests (local/test only). |
 | `AWIN_PUBLISHER_ID`, `AWIN_OAUTH_API_TOKEN` | To run the Awin importer | Backend only, for `commands.import_awin_offers` ([backend-awin-import.md](backend-awin-import.md)). Both empty: the app is unaffected and the command exits 2. The token is sent only in an `Authorization` header. |
 | `SENTRY_DSN` | No | Unset disables Sentry. |
+| `API_DOCS_ENABLED` | No (default `false`) | Testing phase only: `true` serves `/docs`, `/redoc` and the OpenAPI schema outside local/test too, and logs one startup warning. Relaxes no other production check. Remove it at go-live ([ADR-003](../adr/0003-nextjs-to-fastapi-authentication.md)). |
 | `APP_NAME`, `TOTP_ISSUER`, `LOG_LEVEL` | No | Brand (API title), the name shown in the authenticator app (keep equal to `NEXT_PUBLIC_APP_NAME`), and log level. |
 | `STRIPE_*`, `BILLING_RETURN_URL_ORIGINS` | Billing module | See [modules.md](modules.md). |
 
 Check it with `curl http://localhost:8000/health` (`{"status":"ok"}`); `/health/ready` also checks the database and
 pending migrations and returns 503 until `alembic upgrade head` has run. `/docs`, `/redoc` and `/openapi.json`
-exist only when `ENVIRONMENT` is `local` or `test` (or a Vercel preview); in production they return 404.
+exist only when `ENVIRONMENT` is `local` or `test` (or a Vercel preview), or when `API_DOCS_ENABLED=true`
+(testing phase only); otherwise they return 404. `/health` is the public liveness route; `/health/ready` needs the
+`X-Internal-Key` header, so a browser gets 401 there by design.
 
 `./start.sh` runs the API together with `watcher.py`, which regenerates the OpenAPI file on changes (on Windows,
 run it from Git Bash). To regenerate once: `uv run python -m commands.generate_openapi_schema`.
