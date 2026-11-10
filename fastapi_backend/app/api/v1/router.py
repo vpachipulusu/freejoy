@@ -6,6 +6,7 @@ from app.api.v1 import (
     admin_categories,
     admin_merchants,
     admin_offers,
+    admin_partner_keys,
     admin_subscriptions,
     admin_users,
     auth,
@@ -36,6 +37,7 @@ api_router.include_router(admin_analytics.router)
 api_router.include_router(admin_categories.router)
 api_router.include_router(admin_merchants.router)
 api_router.include_router(admin_offers.router)
+api_router.include_router(admin_partner_keys.router)
 api_router.include_router(organizations.router)
 api_router.include_router(settings.router)
 api_router.include_router(catalogue.router)

@@ -19,6 +19,7 @@ from app.services.admin_catalogue_errors import (
     CatalogueError,
     CatalogueNotFound,
     IllegalTransition,
+    KeyNotAllowed,
     OfferChanged,
     PermissionDenied,
     PublishBlocked,
@@ -82,6 +83,7 @@ NOT_FOUND_MESSAGES = {
     "link": "Affiliate link not found",
     "category": "Category not found",
     "merchant": "Merchant not found",
+    "partner_key": "Partner key not found",
 }
 INVALID_MESSAGES = {
     "invalid_url": "Supply a valid https URL",
@@ -93,6 +95,12 @@ INVALID_MESSAGES = {
     "unknown_provider": "The provider is not recognised",
     "destination_not_allowed": "Destination host is not allowed for this provider",
     "review_token_required": "Send the review token from the offer you reviewed",
+    "invalid_label": "Supply a plain label that is not a key",
+}
+KEY_NOT_ALLOWED_MESSAGES = {
+    "merchant_inactive": "Activate the merchant before issuing a key",
+    "merchant_no_website": "Add the merchant's website before issuing a key",
+    "keys_unavailable": "Partner keys cannot be issued in this environment",
 }
 SLUG_TAKEN = "That slug is already in use"
 ILLEGAL_TRANSITION = "Operation not allowed in the current state"
@@ -119,6 +127,11 @@ def catalogue_http_error(exc: CatalogueError) -> HTTPException:
         return CodedHTTPException(409, ILLEGAL_TRANSITION, exc.code)
     if isinstance(exc, OfferChanged):
         return CodedHTTPException(409, OFFER_CHANGED, exc.code)
+    if isinstance(exc, KeyNotAllowed):
+        status = 503 if exc.code == "keys_unavailable" else 409
+        return CodedHTTPException(
+            status, KEY_NOT_ALLOWED_MESSAGES.get(exc.code, "Not allowed"), exc.code
+        )
     if isinstance(exc, PermissionDenied):
         return CodedHTTPException(403, PERMISSION_DENIED, exc.code)
     if isinstance(exc, PublishBlocked):

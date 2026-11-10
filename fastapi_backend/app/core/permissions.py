@@ -25,6 +25,7 @@ ADMIN_PERMISSIONS: frozenset[str] = frozenset(
         "admins.delete",
         "audit.read",
         "categories.write",
+        "merchants.read",
         "merchants.write",
         "notifications.create",
         "offers.publish",

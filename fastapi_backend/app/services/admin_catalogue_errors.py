@@ -2,7 +2,7 @@
 
 Each carries a stable machine-readable ``code`` (the admin UI branches on it, never on the
 message). The routers map them to HTTP: ``CatalogueNotFound`` 404, ``SlugTaken``,
-``IllegalTransition`` and ``OfferChanged`` 409, ``PermissionDenied`` 403, ``InvalidInput`` and ``PublishBlocked`` 422.
+``IllegalTransition``, ``OfferChanged`` and ``KeyNotAllowed`` 409 (503 when keys cannot be issued here), ``PermissionDenied`` 403, ``InvalidInput`` and ``PublishBlocked`` 422.
 """
 
 
@@ -29,7 +29,7 @@ class InvalidInput(CatalogueError):
 
     ``code`` is one of ``invalid_url``, ``invalid_slug``, ``invalid_postage``,
     ``invalid_window``, ``unknown_category``, ``unknown_merchant``, ``unknown_provider``,
-    ``destination_not_allowed`` or ``review_token_required``.
+    ``destination_not_allowed`` or ``review_token_required`` or ``invalid_label``.
     """
 
     def __init__(self, code: str) -> None:
@@ -72,3 +72,14 @@ class PublishBlocked(CatalogueError):
     def __init__(self, reasons: list[str]) -> None:
         super().__init__(",".join(reasons))
         self.reasons = reasons
+
+
+class KeyNotAllowed(CatalogueError):
+    """A partner key cannot be issued to this merchant (409), or in this environment (503).
+
+    ``code`` is ``merchant_inactive``, ``merchant_no_website`` or ``keys_unavailable``.
+    """
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code

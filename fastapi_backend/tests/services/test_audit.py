@@ -222,3 +222,28 @@ async def test_system_action_validates_names_like_an_admin_action():
         await service.record_system_action(
             "cli", action="admin.users.update", resource="users", resource_id="a b"
         )
+
+
+PARTNER_KEY = "fj_test_" + "a1b2c3d4e5f6a7b8c9d0e1f2" + "_" + "0123456789abcdef" * 4
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        PARTNER_KEY,
+        f"the retailer pasted {PARTNER_KEY} into the ticket",
+        f"key_{PARTNER_KEY}",
+        PARTNER_KEY[:40],
+        PARTNER_KEY.upper(),
+    ],
+)
+def test_a_partner_key_pasted_into_free_text_is_redacted(text: str) -> None:
+    assert sanitize({"note": text}) == {"note": REDACTED}
+
+
+def test_ordinary_text_that_mentions_fj_is_kept() -> None:
+    assert sanitize({"note": "fj team"}) == {"note": "fj team"}
+
+
+def test_a_stored_key_hash_is_redacted_by_its_name() -> None:
+    assert sanitize({"key_hash": "0" * 64}) == {"key_hash": REDACTED}

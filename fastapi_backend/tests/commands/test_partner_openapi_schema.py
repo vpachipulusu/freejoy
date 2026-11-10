@@ -72,7 +72,20 @@ def test_the_internal_schema_has_no_partner_path() -> None:
 
 
 def test_the_internal_schema_file_does_not_mention_the_partner_surface() -> None:
-    assert "partner" not in INTERNAL_SCHEMA.read_text(encoding="utf-8").lower()
+    """The partner surface (its prefix, its header, its sub-app) is not in the internal schema. The only
+    "partner" paths are the admin ones that issue keys (FREEJ-57): they live under the merchants."""
+    text = INTERNAL_SCHEMA.read_text(encoding="utf-8")
+    paths = json.loads(text)["paths"]
+
+    assert "/partner/v1" not in text
+    assert "x-freejoy-surface" not in text.lower()
+    assert "Freejoy Partner API" not in text
+    partner_paths = [p for p in paths if "partner" in p.lower()]
+    assert partner_paths
+    assert all(
+        p.startswith("/v1/admin/merchants/{merchant_id}/partner-keys")
+        for p in partner_paths
+    )
 
 
 def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -> None:

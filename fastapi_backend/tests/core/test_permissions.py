@@ -101,6 +101,7 @@ CATALOGUE_PERMISSIONS = [
     "offers.write",
     "offers.publish",
     "categories.write",
+    "merchants.read",
     "merchants.write",
     "subscribers.read",
 ]
