@@ -34,6 +34,12 @@
       }
     },
     {
+      "source": "/partner/v1/(.*)",
+      "destination": {
+        "service": "fastapi_backend"
+      }
+    },
+    {
       "source": "/(.*)",
       "destination": {
         "service": "nextjs-frontend"
