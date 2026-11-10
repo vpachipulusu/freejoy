@@ -101,7 +101,9 @@ else). Contract: [backend-catalogue.md](backend-catalogue.md).
   tries again, and a stale entry keeps being served while a background refresh fails. A 404 becomes
   `not_found` and a 410 becomes `gone` with the stub (title, category, end date); those are real answers
   and may be cached. A 404 counts as `not_found` only when its body is the backend's own envelope
-  (`success: false`); a 404 from anything else in the path (a proxy's HTML page) throws. A 429 throws
+  with `code: "offer_not_found"` (`CodedHTTPException` in `fastapi_backend/app/api/v1/catalogue.py`), and a 410 as
+  `gone` only when it is the backend envelope with `expired: true`; the same status from anything else in the path
+  (a proxy's HTML page, the backend's route-level "Not Found") throws. Never branch on the error text. A 429 throws
   `CatalogueRateLimitedError`, a subclass of `CatalogueUnavailableError`, so callers that fan out reads (the Saved
   action) can stop at once.
 - **Visitor IP.** The backend rate limit is 120 requests a minute per `X-Client-IP`. `readTrustedClientIp()`
@@ -234,13 +236,20 @@ reads a minute per address (one bucket for every visitor when no trusted client-
 limiter (it covers `/api/` and `/go/`), so the action meters itself:
 
 - 24 slugs a call (`SAVED_OFFERS_REQUEST_LIMIT`), 4 reads at a time;
-- 6 calls a minute per visitor address (`rateLimit` scope `saved`, keyed on `readTrustedClientIp()`, else one
-  shared `unknown` bucket), refused before any read with the curated failure. **On a host with no trusted
-  address header that is 6 calls a minute for all visitors together**; set `TRUSTED_CLIENT_IP_HEADER` (or use
-  Vercel) so the limit is per visitor;
-- the first 429 from the backend (`CatalogueRateLimitedError`), a first full round of 4 reads that all failed, or
-  about 8 seconds overall, stop the call taking new slugs; every remaining slug comes back `unavailable` with no
-  backend call. So a dead backend costs at most about 8 reads, not 24.
+- a budget of backend **reads**, not calls (`rateLimit` with `cost = slugs.length`, charged after validation and
+  de-duplication, before any read or date lookup): a visitor with a trusted address gets **72 reads a minute**
+  (scope `saved`, keyed on the IPv6 /64 or IPv4 address, `IPv4-mapped` as IPv4, as the backend does); with no
+  trusted address everyone shares **60 reads a minute in total** (scope `saved-shared`), so Saved can never take more
+  than half the backend's 120 and degrades softly (the curated failure, nothing pruned) rather than one client
+  locking the page for everyone. A refusal logs a count only (never an address or a slug), and in production the
+  action warns once per process that there is no trusted client address. **Set `TRUSTED_CLIENT_IP_HEADER` in
+  production off Vercel** (the repo's own Dockerfile is such a host; see `.env.example`). The limiter is in
+  memory, per server instance (several instances multiply the budget), and holds at most 50,000 buckets;
+- the first 429 from the backend (`CatalogueRateLimitedError`), 4 `unavailable` results in a row (any answer
+  resets the count), or about 8 seconds overall, stop the call taking new slugs; every remaining slug comes back
+  `unavailable` with no further backend call by this action. That holds for cache misses only: a stale cache entry
+  is served and refreshed in the background by Next.js, which can cost the backend one read of its own. So a dead
+  backend costs about 8 reads or fewer, not 24.
 
 The browser loads **one chunk on demand**: the newest 24 saved slugs, then 24 more each time "Show more" is pressed
 (focus moves to the first new card). 200 saved offers are one call until then. A chunk that comes back with no
@@ -248,11 +257,14 @@ offer and nothing missing marks every slug not yet asked about unavailable and s
 leaves a slug out is treated as unavailable, never as an endless wait. A cold cache therefore costs at most 24
 reads per page view, and a pruning sweep of a long stale list is at most one call per 24 slugs.
 
-**What may prune.** Only a definitive answer: `lookupOffer` says `not_found` (the backend's own 404 envelope) or
-`ended` (410), the answer is for another slug, or the offer is past its end date. `lookupOffer` also has an
-`unreadable` kind (the API has the record but the mapper cannot read it, for example a freshness value this site
-does not know yet): that is `unavailable`, and the offer page treats it like a 404. A 404 whose body is not the
-backend envelope (an HTML page from a proxy) throws `CatalogueUnavailableError` in `lib/api/catalogue.ts`.
+**What may prune.** Only a definitive answer: `lookupOffer` says `not_found` (the backend's 404 with
+`code: "offer_not_found"`) or `ended` (its 410 envelope with `expired: true`), or the offer is past its end date.
+`lookupOffer` also has an `unreadable` kind (the API has the record but the mapper cannot read it, for example a
+freshness value this site does not know yet): that is `unavailable`, and the offer page treats it like a 404. An
+answer for another slug is a fault, so also `unavailable`. A 404 or 410 that is not the backend's own envelope
+throws `CatalogueUnavailableError` in `lib/api/catalogue.ts`. **Deploy order:** the backend that sends
+`offer_not_found` must be live before this frontend; until then a genuinely unknown offer answers the error state
+instead of a 404 (nothing is pruned).
 
 **What leaves the server.** A card-shaped projection (`CardOffer` in `lib/catalogue/types.ts`: id, slug, title,
 offer type, image, postage, freshness, demo, source, merchant), not the whole offer; `OfferCard` and `OfferGrid` take
@@ -331,8 +343,11 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
   corrupt storage, a vanished offer, per-browser isolation; desktop and 390px) runs on the fixture catalogue, like
   `freebies.spec.ts`. Run it with `npm run test:e2e:saved` (`playwright.saved.config.ts`: no login, no backend, no
   `webServer`) against a production build you serve yourself with `CATALOGUE_SOURCE=fixture`,
-  `TRUSTED_CLIENT_IP_HEADER=x-e2e-client-ip` (each test sends its own address, or the 6-a-minute shared bucket
-  refuses later `/saved` loads) and `E2E_BASE_URL`. It also checks the header at 1024, 1280 and 1366px, the card
+  `E2E_BASE_URL`. The Saved action's read budget is keyed on the trusted client address, so each test sends its
+  own (`x-e2e-client-ip`); the server believes that header only in a local e2e build (`NEXT_DIST_DIR=.next-e2e`,
+  `E2E_RATE_LIMIT_TEST_MODE=1`, a local host: `src/lib/middleware/local-e2e.ts`, the same test the edge limiter
+  uses). `scripts/e2e-env.cjs` (`toNextProcessEnv`, used by `e2e-build.mjs`, `e2e-start.mjs` and the Playwright
+  `webServer`) sets all three, so use those scripts; an ordinary build ignores `TRUSTED_CLIENT_IP_HEADER=x-e2e-client-ip`. It also checks the header at 1024, 1280 and 1366px, the card
   badge at 320 to 375px, hover isolation and scroll position. All 20 tests passed that way three times in a row
   when the FREEJ-28 review fixes were made; it has **not** been run through `test:e2e:local` or in CI
   (E2E is not in the gate).
