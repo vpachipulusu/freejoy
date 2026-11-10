@@ -68,9 +68,9 @@ def upgrade() -> None:
         )
     )
     op.alter_column("offers", "commercial_basis", nullable=False)
-    op.create_check_constraint(CHECK_NAME, "offers", CHECK)
+    op.create_check_constraint(op.f(CHECK_NAME), "offers", CHECK)
 
 
 def downgrade() -> None:
-    op.drop_constraint(CHECK_NAME, "offers", type_="check")
+    op.drop_constraint(op.f(CHECK_NAME), "offers", type_="check")
     op.drop_column("offers", "commercial_basis")

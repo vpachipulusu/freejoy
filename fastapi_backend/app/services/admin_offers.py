@@ -27,10 +27,13 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   it leaves the importer's hashes alone (see ``docs/developer/backend-awin-import.md``).
 * ``commercial_basis`` (``EDITORIAL``, ``AFFILIATE`` or ``SPONSORED``) is required on create, has no default
   anywhere and is part of the review token. Publishing (and re-publishing an expired offer) an offer whose only
-  active links are ``direct`` also needs the editor's explicit confirmation of the basis in the publish
-  request; without it the publish is refused as ``commercial_basis_required``, and a confirmation that is not
-  the stored basis is ``OfferChanged``. Link changes on an already published offer never revisit that
-  confirmation: its stored basis stays in force and stays visible to the editor.
+  active links are on no affiliate network (``needs_basis_confirmation``) also needs the editor's explicit
+  confirmation of the basis in the publish request; without it the publish is refused as
+  ``commercial_basis_required``, and a confirmation that is not the stored basis is ``OfferChanged``. A link change
+  that would turn a PUBLISHED offer from "needs no confirmation" into "needs it" is refused the same way (unpublish,
+  change the links, publish again), so a live offer never sits in that state unconfirmed. Changing the basis
+  itself needs the ``review_token`` the editor loaded (``OfferChanged`` otherwise, nothing written), so a stale
+  form cannot overwrite it, and on a PUBLISHED offer also ``offers.publish`` (``PermissionDenied``).
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
@@ -43,11 +46,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 
-from app.core.affiliate_hosts import (
-    DIRECT_PROVIDER,
-    destination_allowed,
-    is_known_provider,
-)
+from app.core.affiliate_hosts import destination_allowed, is_known_provider
 from app.core.config import settings
 from app.core.permissions import AdminContext
 from app.models.platform.offer import CommercialBasis, OfferStatus
@@ -76,6 +75,7 @@ from app.services.admin_catalogue_errors import (
     IllegalTransition,
     InvalidInput,
     OfferChanged,
+    PermissionDenied,
     PublishBlocked,
     SlugTaken,
 )
@@ -83,6 +83,7 @@ from app.services.offer_fingerprint import review_token as compute_review_token
 from app.services.offer_lifecycle import (
     OfferAction,
     PublishFacts,
+    PublishReason,
     next_status,
     publish_blockers,
     require_editable,
@@ -93,6 +94,7 @@ from app.services.offer_rules import (
     URL_FIELDS,
     check_postage,
     check_window,
+    needs_basis_confirmation,
 )
 
 __all__ = ["AdminOfferService", "OfferDetail"]
@@ -213,13 +215,19 @@ class AdminOfferService:
         return detail
 
     async def update_offer(
-        self, actor: AdminContext, offer_id: str, changes: Mapping[str, Any]
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        changes: Mapping[str, Any],
+        review_token: str | None = None,
     ) -> OfferDetail:
+        """Edit an offer. ``review_token`` is needed only when the request changes the commercial basis."""
         if not changes or not changes.keys() <= EDITABLE_FIELDS:
             raise ValueError("Invalid offer fields")
         current = await self._locked(offer_id)
         previous = await self._stored_token(current)
         require_editable(current.status)
+        self._guard_basis_change(actor, current, changes, review_token, previous)
         values = clean_urls(changes, URL_FIELDS)
         merged = replace(current, **values)
         check_postage(asdict(merged))
@@ -280,11 +288,52 @@ class AdminOfferService:
             resource=RESOURCE,
             resource_id=offer_id,
             before={"status": current.status.value},
-            after={"status": target.value},
+            after=self._transition_after(action, target, current),
+            details=(
+                {"basis_confirmed": commercial_basis is not None}
+                if action is OfferAction.PUBLISH
+                else None
+            ),
         )
         detail = await self._detail(updated, previous)
         await self.session.commit()
         return detail
+
+    @staticmethod
+    def _transition_after(
+        action: OfferAction, target: OfferStatus, current: OfferRecord
+    ) -> dict[str, Any]:
+        """The audit ``after`` of a transition: the status, and for publish the basis it went live with."""
+        if action is not OfferAction.PUBLISH:
+            return {"status": target.value}
+        return {
+            "status": target.value,
+            "commercial_basis": current.commercial_basis.value,
+        }
+
+    @staticmethod
+    def _guard_basis_change(
+        actor: AdminContext,
+        current: OfferRecord,
+        changes: Mapping[str, Any],
+        review_token: str | None,
+        stored_token: str,
+    ) -> None:
+        """Changing the commercial basis needs the loaded token, and ``offers.publish`` when the offer is live.
+
+        A form loaded before somebody changed the basis sends every field back, so without the token a stale
+        edit would silently undo a sponsorship. Both refusals happen before anything is written.
+        """
+        wanted = changes.get("commercial_basis")
+        if wanted is None or wanted == current.commercial_basis:
+            return
+        if (
+            current.status is OfferStatus.PUBLISHED
+            and "offers.publish" not in actor.permissions
+        ):
+            raise PermissionDenied()
+        if not review_token or review_token != stored_token:
+            raise OfferChanged()
 
     async def verify(
         self,
@@ -358,6 +407,13 @@ class AdminOfferService:
         await self._require_allowed_destination(
             offer, values["provider"], values["destination_url"]
         )
+        await self._require_confirmation_not_newly_needed(
+            offer,
+            [
+                *await self._provider_pairs(offer_id),
+                (values["provider"], values.get("active", True)),
+            ],
+        )
         link = await self.store.insert_link({**values, "offer_id": offer_id})
         await self.auditor.record(
             actor,
@@ -398,6 +454,20 @@ class AdminOfferService:
             )
         if values.get("active") is False and link.active:
             await self._require_destination_remains(offer)
+        await self._require_confirmation_not_newly_needed(
+            offer,
+            [
+                (
+                    (
+                        values.get("provider", link.provider),
+                        values.get("active", link.active),
+                    )
+                    if item_id == link_id
+                    else (provider, active)
+                )
+                for item_id, provider, active in await self._link_rows(offer_id)
+            ],
+        )
         updated = await self.store.update_link(link_id, values)
         before, after = changed_values(link, values, LINK_AUDITED)
         if (
@@ -483,12 +553,37 @@ class AdminOfferService:
         if await self.store.merchant_active(merchant_id) is None:
             raise InvalidInput("unknown_merchant")
 
+    async def _link_rows(self, offer_id: str) -> list[tuple[str, str, bool]]:
+        return [
+            (item.id, item.provider, item.active)
+            for item in await self.store.list_links(offer_id)
+        ]
+
+    async def _provider_pairs(self, offer_id: str) -> list[tuple[str, bool]]:
+        return [
+            (provider, active)
+            for _id, provider, active in await self._link_rows(offer_id)
+        ]
+
+    async def _require_confirmation_not_newly_needed(
+        self, offer: OfferRecord, after: list[tuple[str, bool]]
+    ) -> None:
+        """A link change may not leave a PUBLISHED offer needing a basis confirmation it never gave.
+
+        Only the change from "needs none" to "needs one" is refused; the editor unpublishes, changes the
+        links and publishes again with the confirmation.
+        """
+        if offer.status is not OfferStatus.PUBLISHED:
+            return
+        before = await self._provider_pairs(offer.id)
+        if not needs_basis_confirmation(before) and needs_basis_confirmation(after):
+            raise PublishBlocked([PublishReason.COMMERCIAL_BASIS_REQUIRED.value])
+
     async def _basis_unconfirmed(self, offer_id: str, *, confirmed: bool) -> bool:
-        """True when every active link is ``direct`` (at least one) and the editor confirmed no basis."""
+        """True when publishing needs a confirmed basis (see ``needs_basis_confirmation``) and none was sent."""
         if confirmed:
             return False
-        active = [item for item in await self.store.list_links(offer_id) if item.active]
-        return bool(active) and all(item.provider == DIRECT_PROVIDER for item in active)
+        return needs_basis_confirmation(await self._provider_pairs(offer_id))
 
     async def _require_publishable(
         self,

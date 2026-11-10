@@ -3426,8 +3426,16 @@ export type UpdateMerchantRequest = {
  * UpdateOfferRequest
  *
  * Partial update: send only the fields to change. The slug and status cannot be changed.
+ *
+ * ``review_token`` is the token of the offer the editor loaded. It is needed only when the request changes
+ * ``commercial_basis`` (409 ``offer_changed`` without it or when it is stale, so an old form cannot undo a
+ * sponsorship); any other edit works without it. It is not a field of the offer.
  */
 export type UpdateOfferRequest = {
+    /**
+     * Review Token
+     */
+    review_token?: string | null;
     /**
      * Title
      */

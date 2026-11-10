@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import CheckConstraint, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+import app.models.platform  # noqa: F401  (registers the tables)
+from app.core.base import Base
 from app.core.database import build_engine
 from app.core.ids import new_id
 
@@ -215,7 +217,7 @@ async def test_the_column_is_required_checked_and_has_no_default(
 
     with pytest.raises(IntegrityError, match="commercial_basis"):
         await insert_with("", "")  # left out: no default to fall back on
-    with pytest.raises(IntegrityError, match="ck_offers_commercial_basis_valid"):
+    with pytest.raises(IntegrityError, match='"ck_offers_commercial_basis_valid"'):
         await insert_with("'PAID',", "commercial_basis,")
     await insert_with("'SPONSORED',", "commercial_basis,")
 
@@ -234,3 +236,28 @@ async def test_downgrade_removes_the_column(
             )
         )
     assert found == 0
+
+
+async def test_the_check_has_the_name_the_model_gives_it_and_the_prefix_is_not_doubled(
+    engine: AsyncEngine, database_url: str
+) -> None:
+    _migrate(database_url, "upgrade", "0006")
+
+    async with engine.connect() as connection:
+        found = {
+            row[0]
+            for row in await connection.execute(
+                text(
+                    "SELECT conname FROM pg_constraint"
+                    " WHERE conrelid = 'offers'::regclass AND contype = 'c'"
+                )
+            )
+        }
+    modelled = {
+        str(constraint.name)
+        for constraint in Base.metadata.tables["offers"].constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name is not None
+    }
+    assert "ck_offers_commercial_basis_valid" in found
+    assert not [name for name in found if name.startswith("ck_offers_ck_")]
+    assert found == modelled

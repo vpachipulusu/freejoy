@@ -102,9 +102,16 @@ class CreateOfferRequest(BaseModel):
 
 
 class UpdateOfferRequest(BaseModel):
-    """Partial update: send only the fields to change. The slug and status cannot be changed."""
+    """Partial update: send only the fields to change. The slug and status cannot be changed.
+
+    ``review_token`` is the token of the offer the editor loaded. It is needed only when the request changes
+    ``commercial_basis`` (409 ``offer_changed`` without it or when it is stale, so an old form cannot undo a
+    sponsorship); any other edit works without it. It is not a field of the offer.
+    """
 
     model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken | None = None
 
     title: Title | None = None
     summary: Summary | None = None
@@ -133,9 +140,10 @@ class UpdateOfferRequest(BaseModel):
 
     @model_validator(mode="after")
     def supply_values(self) -> "UpdateOfferRequest":
-        if not self.model_fields_set:
+        fields = self.model_fields_set - {"review_token"}
+        if not fields:
             raise ValueError("Supply at least one field")
-        for name in self.model_fields_set - NULLABLE_ON_UPDATE:
+        for name in fields - NULLABLE_ON_UPDATE:
             if getattr(self, name) is None:
                 raise ValueError("This field cannot be null")
         return self

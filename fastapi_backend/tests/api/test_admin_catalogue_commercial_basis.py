@@ -59,7 +59,8 @@ async def test_update_changes_the_basis_and_the_write_response_carries_both_toke
     async with harness.client() as client:
         before = (await token_body(client))["review_token"]
         result = await client.patch(
-            "/v1/admin/offers/off1", json={"commercial_basis": "SPONSORED"}
+            "/v1/admin/offers/off1",
+            json={"commercial_basis": "SPONSORED", "review_token": before},
         )
 
     data = result.json()["data"]
@@ -74,9 +75,8 @@ async def test_update_refuses_a_null_or_unknown_basis(harness: Harness, value): 
     harness.offers.offers["off1"] = offer("off1")
 
     async with harness.client() as client:
-        result = await client.patch(
-            "/v1/admin/offers/off1", json={"commercial_basis": value}
-        )
+        body = {**await token_body(client), "commercial_basis": value}
+        result = await client.patch("/v1/admin/offers/off1", json=body)
 
     assert result.status_code == 422
     assert harness.auditor.rows == []
@@ -105,7 +105,11 @@ async def test_the_audit_row_of_a_create_and_an_update_names_the_basis(
         )
         offer_id = created.json()["data"]["id"]
         await client.patch(
-            f"/v1/admin/offers/{offer_id}", json={"commercial_basis": "SPONSORED"}
+            f"/v1/admin/offers/{offer_id}",
+            json={
+                "commercial_basis": "SPONSORED",
+                **await token_body(client, offer_id),
+            },
         )
 
     create_row, update_row = harness.auditor.rows
@@ -172,3 +176,105 @@ async def test_publish_refuses_an_unknown_basis(harness: Harness, value):  # noq
 
     assert result.status_code == 422
     assert harness.auditor.rows == []
+
+
+async def test_changing_the_basis_without_the_loaded_token_is_409_and_writes_nothing(
+    harness: Harness,  # noqa: F811
+):
+    harness.offers.offers["off1"] = offer("off1")
+
+    async with harness.client() as client:
+        result = await client.patch(
+            "/v1/admin/offers/off1", json={"commercial_basis": "SPONSORED"}
+        )
+
+    assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
+    assert harness.offers.offers["off1"].commercial_basis is CommercialBasis.EDITORIAL
+    assert harness.auditor.rows == []
+
+
+async def test_changing_the_basis_with_a_stale_token_is_409(harness: Harness):  # noqa: F811
+    harness.offers.offers["off1"] = offer("off1")
+
+    async with harness.client() as client:
+        stale = (await token_body(client))["review_token"]
+        await client.patch("/v1/admin/offers/off1", json={"summary": "Moved on"})
+        result = await client.patch(
+            "/v1/admin/offers/off1",
+            json={"commercial_basis": "SPONSORED", "review_token": stale},
+        )
+
+    assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
+    assert harness.offers.offers["off1"].commercial_basis is CommercialBasis.EDITORIAL
+
+
+async def test_an_edit_that_leaves_the_basis_alone_needs_no_token(harness: Harness):  # noqa: F811
+    harness.offers.offers["off1"] = offer("off1")
+
+    async with harness.client() as client:
+        result = await client.patch("/v1/admin/offers/off1", json={"summary": "New"})
+
+    assert result.status_code == 200
+
+
+async def test_a_token_alone_is_not_an_edit(harness: Harness):  # noqa: F811
+    harness.offers.offers["off1"] = offer("off1")
+
+    async with harness.client() as client:
+        result = await client.patch(
+            "/v1/admin/offers/off1", json=await token_body(client)
+        )
+
+    assert result.status_code == 422
+    assert harness.auditor.rows == []
+
+
+async def test_a_writer_without_publish_cannot_change_the_basis_of_a_published_offer(
+    harness: Harness,  # noqa: F811
+):
+    harness.grants["writer"] = ["offers.read", "offers.write"]
+    harness.offers.offers["off1"] = ready(
+        status=OfferStatus.PUBLISHED,
+        source_url="https://shop.example.com",
+        commercial_basis=CommercialBasis.SPONSORED,
+    )
+
+    async with harness.client("writer") as client:
+        body = {**await token_body(client), "commercial_basis": "EDITORIAL"}
+        result = await client.patch("/v1/admin/offers/off1", json=body)
+
+    assert result.status_code == 403
+    assert result.json()["code"] == "permission_denied"
+    assert harness.offers.offers["off1"].commercial_basis is CommercialBasis.SPONSORED
+    assert harness.auditor.rows == []
+
+
+async def test_the_same_writer_can_change_the_basis_of_a_draft(harness: Harness):  # noqa: F811
+    harness.grants["writer"] = ["offers.read", "offers.write"]
+    harness.offers.offers["off1"] = offer("off1")
+
+    async with harness.client("writer") as client:
+        body = {**await token_body(client), "commercial_basis": "SPONSORED"}
+        result = await client.patch("/v1/admin/offers/off1", json=body)
+
+    assert result.status_code == 200
+
+
+async def test_taking_the_last_network_link_off_a_published_offer_is_422_with_a_code(
+    harness: Harness,  # noqa: F811
+):
+    harness.offers.offers["off1"] = ready(
+        status=OfferStatus.PUBLISHED, commercial_basis=CommercialBasis.AFFILIATE
+    )
+    harness.offers.links["l1"] = link("l1", provider="awin")
+    harness.offers.links["l2"] = link("l2", provider="direct")
+
+    async with harness.client() as client:
+        result = await client.patch(
+            "/v1/admin/offers/off1/links/l1", json={"active": False}
+        )
+
+    assert result.status_code == 422
+    assert result.json()["code"] == "publish_blocked"
+    assert "its commercial basis has not been confirmed" in result.json()["error"]
+    assert harness.offers.links["l1"].active is True

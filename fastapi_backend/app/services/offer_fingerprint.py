@@ -1,6 +1,7 @@
 """Two hashes of an offer: the importer's edit fingerprint and the admin's review token.
 
-``fingerprint`` hashes every field an editor can change on an offer, its status and verification date,
+``fingerprint`` hashes every field an editor can change on an offer except ``commercial_basis`` (the importer
+writes that once, as AFFILIATE, and never refreshes it; see ``FINGERPRINT_FIELDS``), its status and verification date,
 and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids, slugs,
 timestamps of the row or click counters). The Awin importer stores it as ``applied_content_hash`` each
 time it writes an offer; a later mismatch means a person changed the offer, so it is no longer an untouched

@@ -300,7 +300,8 @@ async def test_publish_succeeds_when_every_rule_holds_and_audits_the_transition(
     (row,) = auditor.rows
     assert row["action"] == "admin.offers.publish"
     assert row["before"] == {"status": "DRAFT"} and row["after"] == {
-        "status": "PUBLISHED"
+        "status": "PUBLISHED",
+        "commercial_basis": "EDITORIAL",
     }
     assert session.commits == 1 and store.locked == ["off1"]
 

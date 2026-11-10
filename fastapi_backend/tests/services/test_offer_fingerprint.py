@@ -110,6 +110,13 @@ def test_the_fingerprint_is_a_stable_sha256_of_the_offer_and_its_links() -> None
     assert len(first) == 64 and int(first, 16) >= 0
 
 
+def test_the_fingerprint_fields_are_the_editable_ones_minus_the_basis() -> None:
+    assert set(FINGERPRINT_FIELDS) == (EDITABLE_FIELDS - {"commercial_basis"}) | {
+        "status",
+        "last_verified_at",
+    }
+
+
 @pytest.mark.parametrize("field", FINGERPRINT_FIELDS)
 def test_any_field_an_editor_can_change_changes_the_fingerprint(field: str) -> None:
     changed: dict[str, Any] = {

@@ -1,9 +1,10 @@
 """Content rules for offers that the schema cannot express on its own."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
+from app.core.affiliate_hosts import PROVIDER_HOSTS
 from app.models.platform.offer import PostageKind
 from app.services.admin_catalogue_errors import InvalidInput
 
@@ -55,6 +56,17 @@ AUDITED_FIELDS = frozenset(
         "freshness",
     }
 )
+
+
+def needs_basis_confirmation(links: Iterable[tuple[str, bool]]) -> bool:
+    """Whether publishing needs the editor's confirmed commercial basis, from ``(provider, active)`` pairs.
+
+    True when there is at least one active link and none of the active links is on an affiliate network
+    (``PROVIDER_HOSTS``, the same list the migration backfill used): nothing then says how the listing is
+    paid for. No active link at all is False: nothing can be followed, so there is nothing to confirm.
+    """
+    providers = [provider for provider, active in links if active]
+    return bool(providers) and not any(name in PROVIDER_HOSTS for name in providers)
 
 
 def check_postage(values: Mapping[str, Any]) -> None:

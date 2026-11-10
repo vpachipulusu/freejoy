@@ -575,6 +575,10 @@ async def test_a_creation_is_audited_by_the_command_without_urls_copy_or_codes()
     flat = json.dumps(db.committed.audits, default=str)
     for forbidden in ("https://", "awinaffid", CODE, "10% off", "Save 10%", "terms"):
         assert forbidden not in flat
+    offer_audit = next(
+        a for a in db.committed.audits if a["action"] == "admin.offers.create"
+    )
+    assert offer_audit["after"]["commercial_basis"] == "AFFILIATE"
     link_audit = db.committed.audits[-1]
     assert link_audit["details"]["destination_host"] == "www.awin1.com"
     assert link_audit["after"] == {"provider": "awin", "active": True}

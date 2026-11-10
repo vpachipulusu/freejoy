@@ -148,9 +148,8 @@ async def admin_update_offer(
 ) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.update_offer(
-            admin, offer_id, body.model_dump(exclude_unset=True)
-        )
+        changes = body.model_dump(exclude_unset=True, exclude={"review_token"})
+        detail = await service.update_offer(admin, offer_id, changes, body.review_token)
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
     return OfferWriteResponse(data=offer_write_out(detail))

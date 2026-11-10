@@ -18730,6 +18730,20 @@
       },
       "UpdateOfferRequest": {
         "properties": {
+          "review_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Token"
+          },
           "title": {
             "anyOf": [
               {
@@ -19045,7 +19059,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "UpdateOfferRequest",
-        "description": "Partial update: send only the fields to change. The slug and status cannot be changed."
+        "description": "Partial update: send only the fields to change. The slug and status cannot be changed.\n\n``review_token`` is the token of the offer the editor loaded. It is needed only when the request changes\n``commercial_basis`` (409 ``offer_changed`` without it or when it is stale, so an old form cannot undo a\nsponsorship); any other edit works without it. It is not a field of the offer."
       },
       "UpdateRequest": {
         "properties": {
