@@ -74,6 +74,23 @@ def _pairs(query: str) -> dict[str, list[str]] | None:
     return found
 
 
+def passive_values(url: str) -> frozenset[str]:
+    """Every non-empty value of ``clickref`` and ``clickref2`` to ``clickref6`` in the URL's query.
+
+    The network report ingest matches a reported click reference against these. A query that is not
+    strictly well formed (see ``_pairs``) has none: this never guesses at a malformed link.
+    """
+    params = _pairs(urlsplit(url).query)
+    if params is None:
+        return frozenset()
+    return frozenset(
+        value
+        for name in PASSIVE_NAMES & params.keys()
+        for value in params[name]
+        if value
+    )
+
+
 def _names_and_passives_ok(params: dict[str, list[str]], shape: _Shape) -> bool:
     allowed = {shape.advertiser, shape.publisher} | DEEP_LINK_NAMES | PASSIVE_NAMES
     if not params.keys() <= allowed:

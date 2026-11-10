@@ -241,3 +241,34 @@ def test_the_module_function_returns_none_without_url_and_without_deep_link() ->
         )
         == "tracking_destination_mismatch"
     )
+
+
+# --- passive_values (the network report ingest matches a reported click reference against these) ---
+
+
+def test_passive_values_lists_every_clickref_value_in_the_query() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = (
+        "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242"
+        "&clickref=a1&clickref2=b2&clickref6=f6&clickref3="
+    )
+
+    assert passive_values(url) == {"a1", "b2", "f6"}
+
+
+def test_passive_values_ignores_ids_deep_links_and_unknown_names() -> None:
+    from app.services.awin_tracking import passive_values
+
+    url = "https://www.awin1.com/cread.php?awinmid=77&awinaffid=424242&ued=x&other=y"
+
+    assert passive_values(url) == frozenset()
+
+
+def test_passive_values_of_a_malformed_query_is_empty() -> None:
+    from app.services.awin_tracking import passive_values
+
+    assert passive_values("https://www.awin1.com/cread.php?clickref=a;clickref2=b") == (
+        frozenset()
+    )
+    assert passive_values("https://www.awin1.com/cread.php?clickref") == frozenset()
