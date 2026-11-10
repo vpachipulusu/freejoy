@@ -34,7 +34,7 @@ import sys
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, date, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, get_args
 
 from pydantic import SecretStr, ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -70,7 +70,7 @@ PROG = "import-awin-offers"
 FAILURE_MESSAGE = "Awin offers import run failed"
 EVENT_CONTEXT = "awin_import"
 MIN_VALUE = 1
-MEMBERSHIPS: tuple[Membership, ...] = ("joined", "notJoined", "all")
+MEMBERSHIPS = get_args(Membership)
 PROBE_HINT = (
     "no promotion matched these filters; to see what Awin returns for programmes you have not "
     "joined, run it again with --dry-run --membership all --show-shape"
