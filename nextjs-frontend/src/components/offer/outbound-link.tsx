@@ -60,12 +60,16 @@ export function AffiliateCta({
   conditions = null,
 }: AffiliateCtaProps) {
   const conditionsId = useId();
+  const sponsoredId = useId();
+  const describedBy = [conditions ? conditionsId : null, sponsored ? sponsoredId : null]
+    .filter(Boolean)
+    .join(' ');
   return (
     <div>
       <p className="mb-2 px-3 text-xs font-bold uppercase tracking-wider text-foreground">Ad</p>
       <OutboundLink
         offerId={offerId}
-        aria-describedby={conditions ? conditionsId : undefined}
+        aria-describedby={describedBy || undefined}
         className={cn(
           buttonVariants({ variant: 'accent' }),
           'h-14 w-full justify-between rounded-pill px-7 text-base font-bold shadow-sm'
@@ -79,13 +83,14 @@ export function AffiliateCta({
           {conditions}
         </p>
       )}
-      <p className="mt-3 px-3 text-xs text-muted-foreground">
-        Freejoy is paid a commission by the brand if you take up this offer through this link.
-      </p>
-      {sponsored && (
-        <p className="mt-1 px-3 text-xs font-semibold text-foreground">
+      {sponsored ? (
+        <p id={sponsoredId} className="mt-3 px-3 text-xs text-muted-foreground">
           This is a sponsored listing: the brand pays Freejoy, or gives it a benefit, for it to
-          appear here.
+          appear here. Freejoy may also earn a commission if you use this link.
+        </p>
+      ) : (
+        <p className="mt-3 px-3 text-xs text-muted-foreground">
+          Freejoy is paid a commission by the brand if you take up this offer through this link.
         </p>
       )}
       <p className="mt-1 px-3 text-xs text-muted-foreground">

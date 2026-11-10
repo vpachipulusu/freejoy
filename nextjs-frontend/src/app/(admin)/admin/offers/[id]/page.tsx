@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { hasOnlyDirectLinks, offerToFormValues } from '@/lib/admin-catalogue/offer-view';
+import { offerToFormValues } from '@/lib/admin-catalogue/offer-view';
 import { catalogueErrorMessage, OFFER_NOT_FOUND_MESSAGE } from '@/lib/api/admin-catalogue-errors';
 import { fetchAdminOffer, toOfferDetail } from '@/lib/api/admin-offers';
 import { logCatalogueFailure } from '@/lib/api/admin-catalogue-log';
@@ -102,7 +102,7 @@ export default async function EditOfferPage({ params }: { params: Params }) {
               status={offer.status}
               reviewToken={offer.reviewToken}
               commercialBasis={offer.commercialBasis}
-              confirmBasisToPublish={hasOnlyDirectLinks(offer.links)}
+              confirmBasisToPublish={offer.needsBasisConfirmation}
             />
           </div>
 

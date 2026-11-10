@@ -219,6 +219,7 @@ describe('offerToFormValues', () => {
     publisherNotes: null,
     createdAt: '2026-01-01T00:00:00Z',
     links: [],
+    needsBasisConfirmation: false,
   };
 
   it('maps an offer to form values with blanks for nulls', () => {

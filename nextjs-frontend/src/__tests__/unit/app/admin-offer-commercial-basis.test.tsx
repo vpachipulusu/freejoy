@@ -141,7 +141,7 @@ describe('the card preview and the basis', SLOW, () => {
     expect(preview.queryByRole('note')).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: /Sponsored/ }));
-    expect(preview.getByRole('note', { name: 'Sponsored listing' })).toBeInTheDocument();
+    expect(preview.getByRole('note')).toHaveTextContent('Sponsored listing');
 
     await user.click(screen.getByRole('radio', { name: /Affiliate/ }));
     expect(preview.queryByRole('note')).toBeNull();
@@ -177,7 +177,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
     expect(
       screen.getByRole('checkbox', { name: /commercial basis is Sponsored/ })
     ).not.toBeChecked();
-    expect(screen.getByRole('status')).toHaveTextContent('Confirm the commercial basis above');
+    expect(screen.getByRole('status')).toHaveTextContent('Tick the confirmation to publish.');
   });
 
   it('does not publish while the confirmation is missing', async () => {
@@ -255,5 +255,167 @@ describe('confirming the basis before publishing a direct-only offer', () => {
     render(lifecycle({ commercialBasis: 'SOMETHING_NEW' }));
 
     expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+});
+
+describe('accessible names and descriptions of the basis controls', SLOW, () => {
+  it('names each radio by its option alone and describes it by its help line, read once', () => {
+    createForm();
+
+    for (const value of ['Editorial', 'Affiliate', 'Sponsored']) {
+      const radio = screen.getByRole('radio', { name: value });
+      expect(radio).toHaveAccessibleDescription(COMMERCIAL_BASIS_HELP[value.toUpperCase()]);
+    }
+  });
+
+  it('adds the group error to the description of every radio while there is one', async () => {
+    const user = userEvent.setup();
+    createForm(filled);
+
+    await user.click(screen.getByRole('button', { name: 'Create draft' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: 'Editorial' })).toHaveAccessibleDescription(
+        /Choose the commercial basis\./
+      )
+    );
+    for (const radio of screen.getAllByRole('radio')) {
+      expect(radio).toHaveAccessibleDescription(/Choose the commercial basis\./);
+    }
+  });
+
+  it('names the confirmation checkbox exactly and describes it by the help and the reason', () => {
+    render(lifecycle());
+
+    const box = screen.getByRole('checkbox', {
+      name: "I confirm this listing's commercial basis is Sponsored",
+    });
+    expect(box).toHaveAccessibleDescription(/only active links/);
+    expect(box).toHaveAccessibleDescription(/Visitors see a "Sponsored" label/);
+  });
+});
+
+describe('the publish control while it waits for the confirmation', () => {
+  it('describes the held Publish button by the status text, which mentions the confirmation', () => {
+    render(lifecycle());
+
+    expect(screen.getByRole('button', { name: 'Publish' })).toHaveAccessibleDescription(
+      /Tick the confirmation to publish\./
+    );
+  });
+
+  it('puts the confirmation before the status buttons in the reading order', () => {
+    render(lifecycle());
+
+    const box = screen.getByRole('checkbox');
+    const publish = screen.getByRole('button', { name: 'Publish' });
+    expect(box.compareDocumentPosition(publish) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('moves focus to the confirmation when the held Publish is pressed', async () => {
+    const user = userEvent.setup();
+    render(lifecycle());
+
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+
+    expect(screen.getByRole('checkbox')).toHaveFocus();
+    expect(mocks.offerLifecycleAction).not.toHaveBeenCalled();
+  });
+
+  it('does not describe Publish by the status once it is ticked and free to go', async () => {
+    const user = userEvent.setup();
+    render(lifecycle());
+
+    await user.click(screen.getByRole('checkbox'));
+
+    expect(screen.getByRole('button', { name: 'Publish' })).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('holds Publish, and says what to do, when the saved basis is one this page does not know', async () => {
+    const user = userEvent.setup();
+    render(lifecycle({ commercialBasis: 'SOMETHING_NEW' }));
+    const publish = screen.getByRole('button', { name: 'Publish' });
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(publish).toHaveAttribute('aria-disabled', 'true');
+    expect(publish).toHaveAccessibleDescription(
+      'Choose the commercial basis in the form and save first.'
+    );
+    await user.click(publish);
+    expect(mocks.offerLifecycleAction).not.toHaveBeenCalled();
+  });
+
+  it('keeps the confirmation ticked after a refusal that leaves the review token as it was', async () => {
+    const user = userEvent.setup();
+    mocks.offerLifecycleAction.mockResolvedValue({
+      success: false,
+      error: 'This offer cannot be published yet: it has not been verified.',
+    });
+    render(lifecycle());
+    await user.click(screen.getByRole('checkbox'));
+
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+
+    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('checkbox')).toBeChecked();
+  });
+});
+
+function editForm(values: Partial<OfferFormValues> = {}) {
+  return (
+    <OfferForm
+      mode="edit"
+      offerId="o1"
+      status="DRAFT"
+      initialValues={{
+        ...filled,
+        slug: 'free-coffee-sample',
+        commercialBasis: 'EDITORIAL',
+        ...values,
+      }}
+      categories={categories}
+      merchants={merchants}
+    />
+  );
+}
+
+describe('editing the basis of a saved offer', SLOW, () => {
+  it('follows the saved basis when the page reloads with a new one and the field is untouched', () => {
+    const { rerender } = render(editForm());
+    expect(screen.getByRole('radio', { name: 'Editorial' })).toBeChecked();
+
+    rerender(editForm({ commercialBasis: 'SPONSORED' }));
+
+    expect(screen.getByRole('radio', { name: 'Sponsored' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Editorial' })).not.toBeChecked();
+  });
+
+  it('keeps the choice the editor made when the page reloads with another basis', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editForm());
+    await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
+
+    rerender(editForm({ commercialBasis: 'SPONSORED' }));
+
+    expect(screen.getByRole('radio', { name: 'Affiliate' })).toBeChecked();
+  });
+
+  it('puts the error of a refused basis on its field and focuses the first radio', async () => {
+    const user = userEvent.setup();
+    mocks.updateOfferAction.mockResolvedValue({
+      success: false,
+      error: 'Check the highlighted fields and try again.',
+      fieldErrors: { commercialBasis: 'Choose the commercial basis.' },
+    });
+    render(editForm());
+    await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Editorial' })).toHaveFocus());
+    expect(screen.getByRole('radiogroup', { name: /Commercial basis/ })).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    );
   });
 });

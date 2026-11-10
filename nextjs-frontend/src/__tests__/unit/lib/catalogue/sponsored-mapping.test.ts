@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({ warn: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: mocks.warn } }));
 
 import type { ApiOffer } from '@/lib/api/catalogue';
-import { mapOffer } from '@/lib/catalogue/api-mapper';
+import { mapOffer, mapOffers } from '@/lib/catalogue/api-mapper';
+import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
 import { toCardOffer } from '@/lib/catalogue/types';
 
 const apiOffer = (patch: Record<string, unknown> = {}): ApiOffer =>
@@ -54,5 +55,30 @@ describe('sponsored in the API mapper', () => {
 
     expect(card.sponsored).toBe(true);
     expect(Object.keys(card)).not.toContain('commercialBasis');
+  });
+});
+
+describe('mapOffers when records are dropped', () => {
+  it('answers an empty list for an empty page, which is a real empty catalogue', () => {
+    expect(mapOffers([])).toEqual([]);
+  });
+
+  it('drops one bad record among good ones and keeps the rest', () => {
+    const offers = mapOffers([
+      apiOffer({ slug: 'good-one' }),
+      apiOffer({ slug: 'bad-one', sponsored: undefined }),
+      apiOffer({ slug: 'good-two', sponsored: true }),
+    ]);
+
+    expect(offers.map((offer) => offer.slug)).toEqual(['good-one', 'good-two']);
+  });
+
+  it('throws the outage error when a non-empty page maps to nothing, instead of looking like an empty catalogue', () => {
+    expect(() =>
+      mapOffers([apiOffer({ sponsored: undefined }), apiOffer({ slug: 'two', sponsored: null })])
+    ).toThrow(CatalogueUnavailableError);
+    expect(mocks.warn).toHaveBeenCalledWith('Catalogue: every offer on a page was dropped', {
+      count: 2,
+    });
   });
 });

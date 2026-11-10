@@ -22,21 +22,47 @@ function hero(offer: Offer) {
 }
 
 describe('SponsoredBadge', () => {
-  it('says "Sponsored" in words and has an accessible name a screen reader announces', () => {
+  it('reads "Sponsored listing": the word is visible text and " listing" completes it for a screen reader', () => {
     render(<SponsoredBadge />);
 
-    const badge = screen.getByRole('note', { name: 'Sponsored listing' });
-    expect(badge).toHaveTextContent('Sponsored');
+    const badge = screen.getByRole('note');
+    expect(badge).toHaveTextContent('Sponsored listing');
+    expect(badge).not.toHaveAttribute('aria-label');
     expect(badge).not.toHaveAttribute('aria-hidden');
     expect(badge.closest('[aria-hidden="true"]')).toBeNull();
+    expect(badge.firstChild?.textContent).toBe('Sponsored');
+    expect(badge.querySelector('.sr-only')?.textContent).toBe(' listing');
   });
 
-  it('is a bordered pill, not a colour on its own, and has no rule that hides it on a narrow screen', () => {
-    render(<SponsoredBadge />);
+  it('takes an id so a link can be described by it', () => {
+    render(<SponsoredBadge id="badge-1" />);
 
-    const classes = screen.getByRole('note').className.split(/\s+/);
-    expect(classes).toContain('border');
-    expect(classes.filter((name) => /hidden|invisible|sr-only/.test(name))).toEqual([]);
+    expect(screen.getByRole('note')).toHaveAttribute('id', 'badge-1');
+  });
+});
+
+// jsdom does no layout, so these only check the class names of the badge element itself (the inner sr-only span is
+// meant to be visually hidden). They are not a check that the badge fits at 320px; that is not browser verified.
+const HIDING_OR_CLIPPING =
+  /(^|:)(hidden|invisible|truncate|overflow-hidden|absolute|w-0|opacity-0)$|line-clamp|(^|:)max-w-|(^|:)max-h-/;
+
+function expectNoHidingClasses(badge: HTMLElement) {
+  const classes = badge.className.split(/\s+/);
+  expect(classes).toContain('border');
+  expect(classes.filter((name) => HIDING_OR_CLIPPING.test(name))).toEqual([]);
+}
+
+describe('the badge as rendered by the card and the page', () => {
+  it('has no class that hides, clips or shrinks it on a card', () => {
+    render(<OfferCard offer={sponsored} merchant={merchant} />);
+
+    expectNoHidingClasses(screen.getByRole('note'));
+  });
+
+  it('has no class that hides, clips or shrinks it on the detail page', () => {
+    hero(sponsored);
+
+    expectNoHidingClasses(screen.getByRole('note'));
   });
 });
 
@@ -44,12 +70,44 @@ describe('OfferCard sponsored label', () => {
   it('shows the label on a sponsored offer, outside the art, next to the merchant', () => {
     render(<OfferCard offer={sponsored} merchant={merchant} />);
 
-    const badge = screen.getByRole('note', { name: 'Sponsored listing' });
+    const badge = screen.getByRole('note');
+    expect(badge).toHaveTextContent('Sponsored listing');
     expect(badge).toBeVisible();
     expect(badge.closest('article')).not.toBeNull();
     expect(
       within(screen.getByRole('img', { name: base.image.alt }).parentElement!).queryByRole('note')
     ).toBeNull();
+  });
+
+  it('describes the card link with the badge, so link and heading navigation hear "Sponsored listing"', () => {
+    render(<OfferCard offer={sponsored} merchant={merchant} />);
+
+    const link = screen.getByRole('link', { name: base.title });
+    expect(link).toHaveAccessibleDescription('Sponsored listing');
+    expect(link.getAttribute('aria-describedby')).toBe(screen.getByRole('note').id);
+  });
+
+  it('gives each card its own badge id, so two sponsored cards never share a description', () => {
+    render(
+      <>
+        <OfferCard offer={sponsored} merchant={merchant} />
+        <OfferCard
+          offer={{ ...sponsored, slug: 'other', title: 'Other offer' }}
+          merchant={merchant}
+        />
+      </>
+    );
+
+    const ids = screen.getAllByRole('note').map((note) => note.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('gives the link of an offer that is not sponsored no description', () => {
+    render(<OfferCard offer={{ ...base, sponsored: false }} merchant={merchant} />);
+
+    const link = screen.getByRole('link', { name: base.title });
+    expect(link).not.toHaveAttribute('aria-describedby');
+    expect(link).toHaveAccessibleDescription('');
   });
 
   it('shows nothing for an offer that is not sponsored', () => {
@@ -70,7 +128,7 @@ describe('detail page hero sponsored label', () => {
   it('shows the label beside the merchant and category of a sponsored offer', () => {
     hero(sponsored);
 
-    expect(screen.getByRole('note', { name: 'Sponsored listing' })).toBeVisible();
+    expect(screen.getByRole('note')).toHaveTextContent('Sponsored listing');
   });
 
   it('shows nothing for an offer that is not sponsored', () => {
@@ -89,6 +147,46 @@ describe('the call to action of a sponsored offer', () => {
       'rel',
       'sponsored nofollow noopener'
     );
+  });
+
+  it('describes the outbound link with that sentence, and with the conditions line when there is one', () => {
+    render(
+      <OfferCta
+        offerType="free_sample"
+        demo={false}
+        offerId="offer-9"
+        sponsored
+        conditions="Postage: free"
+      />
+    );
+
+    const link = screen.getByRole('link', { name: /request this sample/i });
+    expect(link).toHaveAccessibleDescription(/Postage: free.*sponsored listing/i);
+    expect(link.getAttribute('aria-describedby')?.split(' ')).toHaveLength(2);
+  });
+
+  it('describes the link with the sponsored sentence alone when there are no conditions', () => {
+    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" sponsored />);
+
+    expect(screen.getByRole('link', { name: /request this sample/i })).toHaveAccessibleDescription(
+      /sponsored listing/i
+    );
+  });
+
+  it('does not state as fact that a commission is paid on a sponsored offer: it says it may be', () => {
+    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" sponsored />);
+
+    expect(screen.queryByText(/is paid a commission by the brand/i)).toBeNull();
+    expect(
+      screen.getByText(/may also earn a commission if you use this link/i)
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the commission sentence for an offer that is not sponsored', () => {
+    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" />);
+
+    expect(screen.getByText(/is paid a commission by the brand/i)).toBeInTheDocument();
+    expect(screen.queryByText(/may also earn/i)).toBeNull();
   });
 
   it('does not add that sentence when the offer is not sponsored', () => {

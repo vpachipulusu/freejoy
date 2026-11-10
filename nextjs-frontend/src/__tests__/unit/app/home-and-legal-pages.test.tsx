@@ -208,17 +208,51 @@ describe('affiliate disclosure page: sponsored listings', () => {
     expect(container.textContent).toMatch(/marked as a paid link for search engines/i);
   });
 
-  it('explains both labels and says a sponsored listing with an affiliate link shows both', () => {
+  it('explains both labels, and says the Ad label is shown today even where no commission is earned', () => {
     const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
 
     expect(screen.getByRole('heading', { name: 'Two labels, two meanings' })).toBeInTheDocument();
-    expect(container.textContent).toMatch(
+    expect(text).toMatch(
       /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled “Sponsored”/i
     );
-    expect(container.textContent).toMatch(
-      /links that earn Freejoy a commission through an affiliate network carry an “Ad” label/i
+    expect(text).toMatch(
+      /“Ad”: shown before the button on every offer page that links to a brand, including links that earn Freejoy no commission/i
     );
-    expect(container.textContent).toMatch(/also has an affiliate link shows both labels/i);
+    expect(text).toMatch(/also has an affiliate link shows both labels/i);
+    expect(text).not.toMatch(
+      /links that earn freejoy a commission through an affiliate network carry/i
+    );
+  });
+
+  it('does not call every link an affiliate link: some go straight to the brand and pay nothing', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).not.toMatch(
+      /where an offer has a link to a brand, that link is an affiliate link/i
+    );
+    expect(text).toMatch(/most links to brands are affiliate links/i);
+    expect(text).toMatch(/go straight to the brand.s own website and pay Freejoy no commission/i);
+  });
+
+  it('commits to labelling every paid listing instead of claiming an unlabelled one is not sponsored', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(
+      /we label every listing that a brand pays for, or gives Freejoy any other benefit for/i
+    );
+    expect(text).not.toMatch(/without the .Sponsored. label is not sponsored/i);
+  });
+
+  it('says where the Sponsored label shows, and that sponsorship does not reorder search results', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(/labelled on its card in every list and on its own page/i);
+    expect(text).not.toMatch(/wherever it appears/i);
+    expect(text).toMatch(/sponsorship does not change the order of search results/i);
   });
 
   it('no longer says paid placements are not planned, and claims nothing about sponsors being held to other standards', () => {

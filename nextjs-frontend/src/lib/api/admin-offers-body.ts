@@ -66,7 +66,14 @@ export function toCreateOfferBody(values: OfferFormValues): CreateOfferRequest {
   };
 }
 
-/** An edit sends every editable field. The slug and status are not editable and are never sent. */
-export function toUpdateOfferBody(values: OfferFormValues): UpdateOfferRequest {
-  return editableFields(values);
+/**
+ * An edit sends every editable field. The slug and status are not editable and are never sent. The review token
+ * of the version the form shows goes with it: the API needs it when the commercial basis changes, so a form that
+ * was loaded before somebody else changed the basis cannot undo that change.
+ */
+export function toUpdateOfferBody(
+  values: OfferFormValues,
+  reviewToken?: string
+): UpdateOfferRequest {
+  return { ...editableFields(values), ...(reviewToken ? { review_token: reviewToken } : {}) };
 }

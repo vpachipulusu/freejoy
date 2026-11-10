@@ -12,12 +12,7 @@ import {
   offerFormSchema,
   type OfferFormValues,
 } from '@/lib/admin-catalogue/offer-schema';
-import {
-  hasOnlyDirectLinks,
-  offerToFormValues,
-  type OfferDetailView,
-  type OfferLinkView,
-} from '@/lib/admin-catalogue/offer-view';
+import { offerToFormValues, type OfferDetailView } from '@/lib/admin-catalogue/offer-view';
 
 function valid(overrides: Partial<OfferFormValues> = {}): OfferFormValues {
   return {
@@ -97,27 +92,6 @@ describe('commercial basis labels and help', () => {
   });
 });
 
-const link = (provider: string, active = true): OfferLinkView => ({
-  id: `l-${provider}-${active}`,
-  provider,
-  destinationUrl: 'https://shop.example/x',
-  active,
-});
-
-describe('hasOnlyDirectLinks', () => {
-  it.each([
-    ['one direct link', [link('direct')], true],
-    ['two direct links', [link('direct'), link('direct', true)], true],
-    ['direct and an inactive network link', [link('direct'), link('awin', false)], true],
-    ['a network link', [link('awin')], false],
-    ['direct and a network link', [link('direct'), link('awin')], false],
-    ['only inactive links', [link('direct', false)], false],
-    ['no links', [], false],
-  ])('%s', (_name, links, expected) => {
-    expect(hasOnlyDirectLinks(links)).toBe(expected);
-  });
-});
-
 describe('offerToFormValues and the basis', () => {
   const detail = (commercialBasis: string): OfferDetailView =>
     ({
@@ -156,6 +130,7 @@ describe('offerToFormValues and the basis', () => {
       publisherNotes: null,
       createdAt: '2026-01-01T00:00:00Z',
       links: [],
+      needsBasisConfirmation: false,
     }) as OfferDetailView;
 
   it.each(COMMERCIAL_BASIS_VALUES)('selects the saved basis %s', (basis) => {

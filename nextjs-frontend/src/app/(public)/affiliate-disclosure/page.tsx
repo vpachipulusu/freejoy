@@ -16,10 +16,11 @@ export default function AffiliateDisclosurePage() {
     >
       <h2>How Freejoy earns money</h2>
       <p>
-        Where an offer has a link to a brand, that link is an affiliate link. If you take up the
-        offer through it, the brand pays Freejoy a commission. The commission is paid by the brand,
-        not by you. Listings that are marked as a demo or sample are illustrations and do not link
-        to a brand, so they earn nothing.
+        Most links to brands are affiliate links. If you take up an offer through one, the brand
+        pays Freejoy a commission. The commission is paid by the brand, not by you. Some links go
+        straight to the brand&apos;s own website and pay Freejoy no commission. Listings that are
+        marked as a demo or sample are illustrations and do not link to a brand, so they earn
+        nothing.
       </p>
       <h2>How the links work</h2>
       <ul>
@@ -30,9 +31,11 @@ export default function AffiliateDisclosurePage() {
         </li>
         <li>These links are marked as a paid link for search engines.</li>
         <li>
-          Each offer with an affiliate link carries an &ldquo;Ad&rdquo; label before the button,
-          with a plain sentence saying the brand pays Freejoy a commission if you take up the offer
-          through that link. This page is the longer explanation, not a replacement for the label.
+          Every offer page with a button that leads to a brand shows an &ldquo;Ad&rdquo; label
+          before the button, with a plain sentence about commission. Today that label and sentence
+          appear for every such button, including a link that goes straight to the brand and earns
+          Freejoy nothing. We aim to show them only where a commission can be earned. This page is
+          the longer explanation, not a replacement for the label.
         </li>
       </ul>
       <h2>What a click records</h2>
@@ -58,8 +61,8 @@ export default function AffiliateDisclosurePage() {
       <p>
         A sponsored listing may link to the brand through an affiliate link, or straight to the
         brand&apos;s own website. Either way its link is marked as a paid link for search engines,
-        like every other link to a brand. A listing without the &ldquo;Sponsored&rdquo; label is not
-        sponsored.
+        like every other link to a brand. We label every listing that a brand pays for, or gives
+        Freejoy any other benefit for.
       </p>
       <h2>Two labels, two meanings</h2>
       <ul>
@@ -68,8 +71,8 @@ export default function AffiliateDisclosurePage() {
           benefit for, is labelled &ldquo;Sponsored&rdquo;.
         </li>
         <li>
-          &ldquo;Ad&rdquo;: links that earn Freejoy a commission through an affiliate network carry
-          an &ldquo;Ad&rdquo; label.
+          &ldquo;Ad&rdquo;: shown before the button on every offer page that links to a brand,
+          including links that earn Freejoy no commission (see above).
         </li>
       </ul>
       <p>
@@ -78,7 +81,8 @@ export default function AffiliateDisclosurePage() {
       <h2>What we aim to keep separate</h2>
       <p>
         We do not plan to let commission change the terms, price or postage shown for an offer. A
-        sponsored listing can be featured on the home page, and it is labelled wherever it appears.
+        sponsored listing can be featured on the home page. It is labelled on its card in every list
+        and on its own page. Sponsorship does not change the order of search results.
       </p>
       <ReviewerChecklist
         items={[

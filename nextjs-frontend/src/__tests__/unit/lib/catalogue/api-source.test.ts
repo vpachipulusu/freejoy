@@ -195,6 +195,17 @@ describe('searchOffers', () => {
     expect(mocks.warn).toHaveBeenCalledTimes(1);
   });
 
+  it('lets an outage through when every offer on a non-empty page is unreadable, never an empty page', async () => {
+    mocks.fetchOffers.mockResolvedValue({
+      items: [apiOffer('one', { sponsored: undefined }), apiOffer('two', { sponsored: undefined })],
+      total: 2,
+      limit: 12,
+      offset: 0,
+    });
+
+    await expect(apiSource.searchOffers(query())).rejects.toBeInstanceOf(CatalogueUnavailableError);
+  });
+
   it('answers an empty page for a category that is not a slug, without asking the API', async () => {
     const page = await apiSource.searchOffers(query({ category: 'Not A Slug' }));
 
@@ -223,6 +234,19 @@ describe('featured and live offers', () => {
       offset: 0,
     });
     expect(mocks.fetchOffers.mock.calls[1][0].limit).toBe(50);
+  });
+
+  it('lets an outage through when every featured or live offer on a page is unreadable', async () => {
+    const unreadable = {
+      items: [apiOffer('one', { sponsored: undefined })],
+      total: 1,
+      limit: 12,
+      offset: 0,
+    };
+    mocks.fetchOffers.mockResolvedValue(unreadable);
+
+    await expect(apiSource.getFeaturedOffers(4)).rejects.toBeInstanceOf(CatalogueUnavailableError);
+    await expect(apiSource.getLiveOffers()).rejects.toBeInstanceOf(CatalogueUnavailableError);
   });
 
   it('asks for nothing when the limit is zero or negative', async () => {

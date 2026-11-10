@@ -329,6 +329,47 @@ describe('offer actions', () => {
     }
   );
 
+  it('sends the loaded review token with an edit so a stale basis change is refused', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok(OFFER));
+
+    await updateOfferAction('o1', offerInput, TOKEN);
+    await updateOfferAction('o1', offerInput);
+    await updateOfferAction('o1', offerInput, '../not a token');
+
+    expect(mocks.patchAdminOffer.mock.calls.map((call) => call[1].review_token)).toEqual([
+      TOKEN,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('turns a 409 offer_changed on an edit into the curated message and refreshes the page', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(fail(409, 'offer_changed'));
+
+    const result = await updateOfferAction('o1', offerInput, TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error: OFFER_CHANGED_MESSAGE,
+      reason: 'offer_changed',
+    });
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers/o1');
+    expect(mocks.revalidateCatalogue).not.toHaveBeenCalled();
+  });
+
+  it('explains that changing the basis of a published offer needs the publish permission', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(fail(403, 'permission_denied'));
+
+    const result = await updateOfferAction('o1', offerInput, TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Changing the commercial basis of a published offer needs permission to publish. Ask an editor who can publish.',
+    });
+  });
+
   it('sends the confirmed commercial basis with publish only, and only a known one', async () => {
     mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
 
@@ -359,7 +400,7 @@ describe('offer actions', () => {
     expect(result).toEqual({
       success: false,
       error:
-        'This offer cannot be published yet: its commercial basis has not been confirmed (open the offer and confirm it before publishing).',
+        'This offer cannot be published yet: its commercial basis has not been confirmed (confirm it on the offer page; for a live offer, unpublish it, change its links, then publish again).',
     });
   });
 

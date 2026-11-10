@@ -85,18 +85,32 @@ export async function createOfferAction(
   });
 }
 
+/**
+ * Saves an edit. `reviewToken` is the token of the version the form shows: the API needs it when the commercial
+ * basis changes and answers 409 `offer_changed` when it is missing or stale (nothing is written). That refusal
+ * gets the curated "review it again" message and refreshes the page so it shows the current version.
+ */
 export async function updateOfferAction(
   offerId: string,
-  input: unknown
+  input: unknown,
+  reviewToken?: string
 ): Promise<CatalogueActionResult<OfferWrittenData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     const parsed = offerFormSchema.safeParse(input);
     if (!parsed.success) return invalidForm(parsed.error);
 
-    const result = await patchAdminOffer(offerId, toUpdateOfferBody(parsed.data));
-    if (!result.success)
-      return failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
+    const token = reviewTokenSchema.safeParse(reviewToken);
+    const result = await patchAdminOffer(
+      offerId,
+      toUpdateOfferBody(parsed.data, token.success ? token.data : undefined)
+    );
+    if (!result.success) {
+      const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
+      if (result.code !== 'offer_changed') return refusal;
+      refreshAdminPages(offerId);
+      return { ...refusal, reason: 'offer_changed' };
+    }
 
     refreshAdminPages(offerId);
     const { id, slug, status } = result.data;

@@ -96,7 +96,9 @@ export function OfferForm({
     clearSaved();
     review.beginWrite();
     const outcome = await settleAction(() =>
-      mode === 'create' || !offerId ? createOfferAction(values) : updateOfferAction(offerId, values)
+      mode === 'create' || !offerId
+        ? createOfferAction(values)
+        : updateOfferAction(offerId, values, review.currentToken())
     );
     if (!outcome.success) {
       review.recordFailure(outcome.reason);

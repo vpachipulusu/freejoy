@@ -247,6 +247,7 @@ export function toOfferDetail(offer: OfferOut): OfferDetailView {
     publisherNotes: offer.publisher_notes,
     createdAt: offer.created_at,
     links: offer.links.map(toOfferLink),
+    needsBasisConfirmation: offer.needs_basis_confirmation,
     provenance: toProvenance(offer.provenance),
   };
 }

@@ -27,7 +27,7 @@ export type PickOption = { id: string; name: string };
 type SectionProps = { form: UseFormReturn<OfferFormValues> };
 
 const CHECK_ROW = 'flex min-h-11 items-center gap-3 text-sm font-medium';
-const CHECK_BOX = 'size-5 shrink-0 accent-[hsl(var(--primary))]';
+export const CHECK_BOX = 'size-5 shrink-0 accent-[hsl(var(--primary))]';
 
 export function BasicsFields({ form, slugEditable }: SectionProps & { slugEditable: boolean }) {
   const { register, formState } = form;
@@ -177,12 +177,17 @@ export function CommercialBasisFields({ form }: SectionProps) {
               type="radio"
               value={value}
               className={`${CHECK_BOX} mt-0.5`}
-              aria-describedby={`offer-basis-${value}-help`}
+              aria-labelledby={`offer-basis-${value}-name`}
+              aria-describedby={
+                error ? `offer-basis-${value}-hint ${BASIS_ERROR_ID}` : `offer-basis-${value}-hint`
+              }
               {...register('commercialBasis')}
             />
             <span>
-              <span className="block font-medium">{COMMERCIAL_BASIS_LABELS[value]}</span>
-              <span id={`offer-basis-${value}-help`} className="block text-muted-foreground">
+              <span id={`offer-basis-${value}-name`} className="block font-medium">
+                {COMMERCIAL_BASIS_LABELS[value]}
+              </span>
+              <span id={`offer-basis-${value}-hint`} className="block text-muted-foreground">
                 {COMMERCIAL_BASIS_HELP[value]}
               </span>
             </span>

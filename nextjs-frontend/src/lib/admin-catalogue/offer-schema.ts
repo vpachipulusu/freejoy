@@ -126,7 +126,7 @@ const offerFieldsSchema = z.object({
   merchantId: z.string().regex(ID_PATTERN, 'Choose a merchant.'),
   offerType: z.enum(OFFER_TYPE_VALUES, 'Choose an offer type.'),
   // '' until the editor chooses: the form starts with nothing selected, and an empty choice is refused.
-  commercialBasis: z.enum(['', ...COMMERCIAL_BASIS_VALUES]),
+  commercialBasis: z.enum(['', ...COMMERCIAL_BASIS_VALUES], 'Choose the commercial basis.'),
   featured: z.boolean(),
   imageTint: z.enum(TINT_VALUES, 'Choose a tint.'),
   imageLabel: requiredLine('the picture label', 40),

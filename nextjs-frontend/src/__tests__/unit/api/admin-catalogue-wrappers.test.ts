@@ -80,6 +80,7 @@ const OFFER_OUT = {
   ...OFFER_SUMMARY,
   provenance: null,
   review_token: 'a1b2c3-review-token',
+  needs_basis_confirmation: true,
   summary: 'A sachet.',
   description: ['One'],
   image_tint: 'mint',
@@ -404,6 +405,21 @@ describe('admin catalogue wrappers', () => {
       expect(
         toOfferDetail({ ...OFFER_OUT, commercial_basis: 'AFFILIATE' } as never).commercialBasis
       ).toBe('AFFILIATE');
+    });
+
+    it('says whether publishing needs the basis confirmation, as the API worked it out', () => {
+      expect(toOfferDetail(OFFER_OUT as never).needsBasisConfirmation).toBe(true);
+      expect(
+        toOfferDetail({ ...OFFER_OUT, needs_basis_confirmation: false } as never)
+          .needsBasisConfirmation
+      ).toBe(false);
+    });
+
+    it('sends the review token of the shown version with an update, and none when there is none', () => {
+      const values = offerForm();
+      expect(toUpdateOfferBody(values, 'tok-1').review_token).toBe('tok-1');
+      expect('review_token' in toUpdateOfferBody(values)).toBe(false);
+      expect('review_token' in toCreateOfferBody(values)).toBe(false);
     });
 
     it('sends the basis on create and on update', () => {

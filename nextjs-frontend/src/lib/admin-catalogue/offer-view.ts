@@ -63,20 +63,13 @@ export interface OfferDetailView extends OfferRowView {
   publisherNotes: string | null;
   createdAt: string;
   links: OfferLinkView[];
+  /**
+   * True when publishing needs the editor to confirm the commercial basis (at least one active link and none on an
+   * affiliate network). The API works it out; this page does not hold its own copy of the rule.
+   */
+  needsBasisConfirmation: boolean;
   /** Null for an offer made by hand. */
   provenance: OfferProvenanceView | null;
-}
-
-const DIRECT_PROVIDER = 'direct';
-
-/**
- * True when the offer has active links and every one of them goes straight to the merchant (`direct`). Publishing
- * such an offer needs the editor to confirm its commercial basis (no network is involved, so nothing implies it).
- * A hint for the page: the API applies the rule itself.
- */
-export function hasOnlyDirectLinks(links: readonly OfferLinkView[]): boolean {
-  const active = links.filter((link) => link.active);
-  return active.length > 0 && active.every((link) => link.provider === DIRECT_PROVIDER);
 }
 
 const LOCAL_DATE_TIME_LENGTH = 19;

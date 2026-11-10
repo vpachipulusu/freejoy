@@ -5,6 +5,7 @@
  */
 import type { ApiCategory, ApiEndedOffer, ApiOffer } from '@/lib/api/catalogue';
 import { logger } from '@/lib/logger';
+import { CatalogueUnavailableError } from './errors';
 import { isValidSlug } from './slug';
 import { toLondonDate } from './today';
 import type { EndedOffer } from './source';
@@ -184,7 +185,15 @@ export function mapOffer(api: ApiOffer): Offer | null {
 }
 
 export function mapOffers(items: readonly ApiOffer[]): Offer[] {
-  return items.flatMap((item) => mapOffer(item) ?? []);
+  const offers = items.flatMap((item) => mapOffer(item) ?? []);
+  // A whole non-empty page that cannot be read is this site being out of step with the API (a field it needs is
+  // missing), not an empty catalogue: say so instead of showing "no freebies". One bad record among good ones is
+  // still just dropped.
+  if (items.length > 0 && offers.length === 0) {
+    logger.warn('Catalogue: every offer on a page was dropped', { count: items.length });
+    throw new CatalogueUnavailableError();
+  }
+  return offers;
 }
 
 /** One API category as a `Category`, or null (logged) for an unsafe slug. */

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { COMMERCIAL_BASIS_HELP, commercialBasisLabel } from '@/lib/admin-catalogue/offer-labels';
 import { isCommercialBasis } from '@/lib/admin-catalogue/offer-schema';
@@ -10,6 +10,7 @@ import {
   type OfferAction,
   type OfferRowStatus,
 } from '@/lib/admin-catalogue/offer-status';
+import { CHECK_BOX } from './offer-form-fields';
 import { useFormBusy, useFormDirty } from '../../_components/dirty-form-context';
 import { ArchiveDialog } from './archive-dialog';
 import { ARIA_DISABLED_STYLE } from './disabled-style';
@@ -23,12 +24,12 @@ type OfferLifecycleButtonsProps = {
   /** The review token of the offer as this page loaded it: Publish and Mark verified send it back. */
   reviewToken: string;
   /** The commercial basis as saved. Publish sends it back when the editor has to confirm it. */
-  commercialBasis?: string;
+  commercialBasis: string;
   /**
-   * True when the offer's only active links go straight to the merchant: the API then refuses to publish until the
-   * editor confirms the basis, so this page asks for that confirmation (a hint; the API applies the rule).
+   * True when the API says publishing needs the editor to confirm the commercial basis (see
+   * `needsBasisConfirmation` on the offer view). This page then asks for that confirmation; the API applies the rule.
    */
-  confirmBasisToPublish?: boolean;
+  confirmBasisToPublish: boolean;
 };
 
 const CHANGED_NOTICE =
@@ -49,7 +50,7 @@ export function OfferLifecycleButtons({
   status,
   reviewToken,
   commercialBasis,
-  confirmBasisToPublish = false,
+  confirmBasisToPublish,
 }: OfferLifecycleButtonsProps) {
   const { run, isPending } = useOfferAction();
   const dirty = useFormDirty();
@@ -68,6 +69,11 @@ export function OfferLifecycleButtons({
   const basisToConfirm =
     confirmBasisToPublish && isCommercialBasis(commercialBasis) ? commercialBasis : null;
   const awaitingBasis = basisToConfirm !== null && confirmedFor !== reviewToken;
+  // The API wants a confirmation but the saved basis is one this page cannot send: the editor chooses one first.
+  const basisUnknown = confirmBasisToPublish && basisToConfirm === null;
+  const statusId = useId();
+  const confirmId = useId();
+  const confirmRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!keepFocusHere.current) return;
@@ -109,18 +115,62 @@ export function OfferLifecycleButtons({
   }
 
   function isHeld(action: OfferAction): boolean {
-    return blocked || (action === 'publish' && awaitingBasis);
+    return blocked || (action === 'publish' && (awaitingBasis || basisUnknown));
   }
 
   function choose(action: OfferAction): void {
+    if (blocked) return;
+    if (action === 'publish' && awaitingBasis) {
+      // Held for the confirmation: take the editor to it instead of doing nothing.
+      confirmRef.current?.focus();
+      return;
+    }
     if (isHeld(action)) return;
     if (action === 'archive') setConfirmingArchive(true);
     else start(action);
   }
 
+  const confirmation =
+    basisToConfirm !== null && actions.includes('publish') ? (
+      <label className="flex min-h-11 items-start gap-3 text-sm">
+        <input
+          ref={confirmRef}
+          type="checkbox"
+          className={`${CHECK_BOX} mt-0.5`}
+          checked={!awaitingBasis}
+          aria-labelledby={`${confirmId}-name`}
+          aria-describedby={`${confirmId}-hint`}
+          onChange={(event) => setConfirmedFor(event.target.checked ? reviewToken : null)}
+        />
+        <span>
+          <span id={`${confirmId}-name`} className="block font-medium">
+            I confirm this listing&apos;s commercial basis is {commercialBasisLabel(basisToConfirm)}
+          </span>
+          <span id={`${confirmId}-hint`} className="block text-muted-foreground">
+            {COMMERCIAL_BASIS_HELP[basisToConfirm]} Its only active links go straight to the
+            merchant, so nothing else says how it is paid for. If this is wrong, change it in the
+            form below and save first.
+          </span>
+        </span>
+      </label>
+    ) : null;
+
+  const statusText = isPending
+    ? `Updating ${offerTitle}`
+    : dirty
+      ? 'Save or discard your changes first: these steps use the saved version of the offer.'
+      : reloading
+        ? 'Loading the saved version of the offer.'
+        : basisUnknown && actions.includes('publish')
+          ? 'Choose the commercial basis in the form and save first.'
+          : awaitingBasis && actions.includes('publish')
+            ? 'Tick the confirmation to publish.'
+            : '';
+
   return (
     <>
       {notice}
+      {confirmation}
       <div
         ref={groupRef}
         role="group"
@@ -142,43 +192,15 @@ export function OfferLifecycleButtons({
             variant={action === 'publish' ? 'default' : 'outline'}
             className={ARIA_DISABLED_STYLE}
             aria-disabled={isHeld(action) || undefined}
+            aria-describedby={isHeld(action) ? statusId : undefined}
             onClick={() => choose(action)}
           >
             {OFFER_ACTION_LABELS[action]}
           </Button>
         ))}
       </div>
-      {basisToConfirm !== null && actions.includes('publish') ? (
-        <label className="flex min-h-11 items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5 size-5 shrink-0 accent-[hsl(var(--primary))]"
-            checked={!awaitingBasis}
-            onChange={(event) => setConfirmedFor(event.target.checked ? reviewToken : null)}
-          />
-          <span>
-            <span className="block font-medium">
-              I confirm this listing&apos;s commercial basis is{' '}
-              {commercialBasisLabel(basisToConfirm)}
-            </span>
-            <span className="block text-muted-foreground">
-              {COMMERCIAL_BASIS_HELP[basisToConfirm]} Its only active links go straight to the
-              merchant, so nothing else says how it is paid for. If this is wrong, change it in the
-              form below and save first.
-            </span>
-          </span>
-        </label>
-      ) : null}
-      <p className="text-sm text-muted-foreground" role="status">
-        {isPending
-          ? `Updating ${offerTitle}`
-          : dirty
-            ? 'Save or discard your changes first: these steps use the saved version of the offer.'
-            : reloading
-              ? 'Loading the saved version of the offer.'
-              : awaitingBasis && actions.includes('publish')
-                ? 'Confirm the commercial basis above to publish.'
-                : ''}
+      <p id={statusId} className="text-sm text-muted-foreground" role="status">
+        {statusText}
       </p>
       <ArchiveDialog
         open={confirmingArchive}
