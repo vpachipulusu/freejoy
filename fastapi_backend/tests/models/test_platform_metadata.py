@@ -45,6 +45,8 @@ EXPECTED_TABLES = {
     "merchant_imports",
     # network report ingest
     "network_report_rows",
+    # partner API (ADR-013)
+    "partner_api_keys",
 }
 
 BILLING_COLUMNS = {
