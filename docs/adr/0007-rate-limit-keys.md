@@ -2,6 +2,7 @@
 
 - **Status:** Accepted by the product owner, 2026-10-12
 - **Date:** 2026-10-11
+- **Amended by:** [ADR-013](0013-partner-api.md) (partner endpoints get their own policies, keyed by key id)
 
 ## Context
 

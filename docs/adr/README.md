@@ -16,9 +16,10 @@ Write a new ADR when you change a decision below, instead of editing the old one
 | [008](0008-api-client-generation.md) | Typed API client generated from OpenAPI | Accepted |
 | [011](0011-single-vercel-project-with-services.md) | One Vercel project with services | Accepted |
 | [012](0012-email-provider.md) | Email provider for alerts (Brevo) | Proposed |
+| [013](0013-partner-api.md) | Partner API inside the backend | Proposed |
 
 Numbers 002, 005, 009 and 010 belonged to the product this template was extracted from and are not part of
-the template. Start your own records at 013 (or renumber; nothing depends on the numbers).
+the template. Records 012 and 013 are Freejoy's own; start new ones at 014.
 
 ## Statuses
 

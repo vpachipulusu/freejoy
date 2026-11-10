@@ -2,6 +2,7 @@
 
 - **Status:** Accepted by the product owner, 2026-10-12
 - **Date:** 2026-10-11
+- **Amended by:** [ADR-013](0013-partner-api.md) (the partner contract is a separate versioned document)
 
 ## Context
 
