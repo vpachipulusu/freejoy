@@ -136,6 +136,24 @@ def test_main_rejects_unknown_arguments(capsys: pytest.CaptureFixture[str]) -> N
     assert "--dry-run" in capsys.readouterr().out
 
 
+def test_main_database_failure_exits_1_and_prints_only_the_error_type(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def failing_run(dry_run: bool) -> PurgeSummary:
+        raise ConnectionRefusedError("role app_purge at db.internal:5432 hunter2")
+
+    monkeypatch.setattr(command, "_run", failing_run)
+
+    code = command.main([])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "purge-subscribers: failed (ConnectionRefusedError). Check DATABASE_URL.\n"
+    )
+
+
 @pytest.mark.parametrize(
     ("failures", "expected"), [(0, 0), (2, 1)], ids=["clean", "provider-failure"]
 )
