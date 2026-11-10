@@ -57,6 +57,7 @@ const OFFER_SUMMARY = {
   category_id: 'c1',
   merchant_id: 'm1',
   offer_type: 'FREE_SAMPLE',
+  commercial_basis: 'EDITORIAL',
   status: 'PUBLISHED',
   featured: false,
   end_at: null,
@@ -114,6 +115,7 @@ const OFFER_OUT = {
 function offerForm(overrides: Partial<OfferFormValues> = {}): OfferFormValues {
   return {
     ...emptyOfferFormValues(),
+    commercialBasis: 'EDITORIAL',
     title: 'Free coffee',
     summary: 'A sachet.',
     description: 'One.\n\nTwo.',
@@ -248,6 +250,19 @@ describe('admin catalogue wrappers', () => {
       }
     );
 
+    it('sends the commercial basis the editor confirmed with publish, only when there is one', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
+      await runAdminOfferAction('o1', {
+        action: 'publish',
+        reviewToken: 'tok-1',
+        commercialBasis: 'SPONSORED',
+      });
+      expect(await fetchMock.mock.calls[0][0].json()).toEqual({
+        review_token: 'tok-1',
+        commercial_basis: 'SPONSORED',
+      });
+    });
+
     it.each(['unpublish', 'expire', 'archive'] as const)(
       'sends no body with %s: taking an offer off the site needs no review token',
       async (action) => {
@@ -379,6 +394,28 @@ describe('admin catalogue wrappers', () => {
       expect(toOfferRow({ ...OFFER_SUMMARY, status: 'SOMETHING_NEW' } as never).status).toBe(
         'UNKNOWN'
       );
+    });
+  });
+
+  describe('commercial basis', () => {
+    it('carries the basis on a list row and on the offer detail', () => {
+      const row = toOfferRow({ ...OFFER_SUMMARY, commercial_basis: 'SPONSORED' } as never);
+      expect(row.commercialBasis).toBe('SPONSORED');
+      expect(
+        toOfferDetail({ ...OFFER_OUT, commercial_basis: 'AFFILIATE' } as never).commercialBasis
+      ).toBe('AFFILIATE');
+    });
+
+    it('sends the basis on create and on update', () => {
+      const values = offerForm({ commercialBasis: 'SPONSORED' });
+      expect(toCreateOfferBody(values).commercial_basis).toBe('SPONSORED');
+      expect(toUpdateOfferBody(values).commercial_basis).toBe('SPONSORED');
+    });
+
+    it('refuses to build a body for a form that skipped validation and has no basis', () => {
+      const unvalidated = offerForm({ commercialBasis: '' });
+      expect(() => toCreateOfferBody(unvalidated)).toThrow('commercial basis was not chosen');
+      expect(() => toUpdateOfferBody(unvalidated)).toThrow('commercial basis was not chosen');
     });
   });
 

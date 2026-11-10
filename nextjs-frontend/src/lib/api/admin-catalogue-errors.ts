@@ -45,6 +45,8 @@ const PUBLISH_REASONS: Record<string, string> = {
   'it has no active affiliate link or source URL': 'it has no active affiliate link or source URL',
   'its end date has passed': 'its end date has passed',
   'it has not been verified': 'it has not been verified',
+  'its commercial basis has not been confirmed':
+    'its commercial basis has not been confirmed (open the offer and confirm it before publishing)',
 };
 
 const PUBLISH_BLOCKED_PREFIX = 'The offer cannot be published yet: ';

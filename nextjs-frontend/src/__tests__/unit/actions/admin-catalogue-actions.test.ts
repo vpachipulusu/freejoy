@@ -110,6 +110,7 @@ const TOKEN = 'tok-1_ABC';
 
 const offerInput = {
   ...emptyOfferFormValues(),
+  commercialBasis: 'EDITORIAL',
   title: 'Free coffee',
   summary: 'A sachet.',
   categoryId: 'c1',
@@ -327,6 +328,50 @@ describe('offer actions', () => {
       ]);
     }
   );
+
+  it('sends the confirmed commercial basis with publish only, and only a known one', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
+
+    await offerLifecycleAction('o1', 'publish', TOKEN, 'SPONSORED');
+    await offerLifecycleAction('o1', 'publish', TOKEN, 'PAID');
+    await offerLifecycleAction('o1', 'verify', TOKEN, 'SPONSORED');
+    await offerLifecycleAction('o1', 'unpublish', undefined, 'SPONSORED');
+
+    expect(mocks.runAdminOfferAction.mock.calls).toEqual([
+      ['o1', { action: 'publish', reviewToken: TOKEN, commercialBasis: 'SPONSORED' }],
+      ['o1', { action: 'publish', reviewToken: TOKEN }],
+      ['o1', { action: 'verify', reviewToken: TOKEN }],
+      ['o1', { action: 'unpublish' }],
+    ]);
+  });
+
+  it('turns an unconfirmed basis into the curated message, never the backend text', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(
+      fail(
+        422,
+        'publish_blocked',
+        'The offer cannot be published yet: its commercial basis has not been confirmed'
+      )
+    );
+
+    const result = await offerLifecycleAction('o1', 'publish', TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'This offer cannot be published yet: its commercial basis has not been confirmed (open the offer and confirm it before publishing).',
+    });
+  });
+
+  it('refuses a create without a commercial basis, naming the field, and calls nothing', async () => {
+    const result = await createOfferAction({ ...offerInput, commercialBasis: '' });
+
+    expect(result).toMatchObject({
+      success: false,
+      fieldErrors: { commercialBasis: 'Choose the commercial basis.' },
+    });
+    expect(mocks.createAdminOffer).not.toHaveBeenCalled();
+  });
 
   it('rejects an unknown lifecycle action without calling the API', async () => {
     const result = await offerLifecycleAction('o1', 'delete' as never);

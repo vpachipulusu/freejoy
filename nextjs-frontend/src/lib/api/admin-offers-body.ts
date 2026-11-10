@@ -2,6 +2,7 @@ import 'server-only';
 
 import {
   descriptionParagraphs,
+  isCommercialBasis,
   poundsToMinor,
   type OfferFormValues,
 } from '@/lib/admin-catalogue/offer-schema';
@@ -19,6 +20,12 @@ function dateOrNull(value: string): string | null {
   return value === '' ? null : localInputToIso(value);
 }
 
+/** The form schema refuses an empty choice, so this only fails for a caller that skipped validation. */
+function requiredBasis(value: OfferFormValues['commercialBasis']) {
+  if (!isCommercialBasis(value)) throw new Error('The commercial basis was not chosen');
+  return value;
+}
+
 /** The editable fields, in the API's shape. Nullable fields are explicit nulls so an edit can clear them. */
 function editableFields(values: OfferFormValues) {
   const costs = values.postageKind === 'COST';
@@ -30,6 +37,7 @@ function editableFields(values: OfferFormValues) {
     category_id: values.categoryId,
     merchant_id: values.merchantId,
     offer_type: values.offerType,
+    commercial_basis: requiredBasis(values.commercialBasis),
     featured: values.featured,
     image_tint: values.imageTint,
     image_label: values.imageLabel,

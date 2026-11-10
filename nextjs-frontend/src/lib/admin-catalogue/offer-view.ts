@@ -1,4 +1,4 @@
-import { minorToPounds, type OfferFormValues } from './offer-schema';
+import { isCommercialBasis, minorToPounds, type OfferFormValues } from './offer-schema';
 import type { OfferRowStatus } from './offer-status';
 
 /**
@@ -13,6 +13,8 @@ export interface OfferRowView {
   categoryId: string;
   merchantId: string;
   offerType: string;
+  /** EDITORIAL, AFFILIATE or SPONSORED; anything else (a newer API) is kept as sent and never preselected. */
+  commercialBasis: string;
   status: OfferRowStatus;
   featured: boolean;
   endAt: string | null;
@@ -65,6 +67,18 @@ export interface OfferDetailView extends OfferRowView {
   provenance: OfferProvenanceView | null;
 }
 
+const DIRECT_PROVIDER = 'direct';
+
+/**
+ * True when the offer has active links and every one of them goes straight to the merchant (`direct`). Publishing
+ * such an offer needs the editor to confirm its commercial basis (no network is involved, so nothing implies it).
+ * A hint for the page: the API applies the rule itself.
+ */
+export function hasOnlyDirectLinks(links: readonly OfferLinkView[]): boolean {
+  const active = links.filter((link) => link.active);
+  return active.length > 0 && active.every((link) => link.provider === DIRECT_PROVIDER);
+}
+
 const LOCAL_DATE_TIME_LENGTH = 19;
 
 /** An ISO timestamp as the value of a `datetime-local` input, read as UTC ("2026-03-01T09:30:00"). */
@@ -89,6 +103,7 @@ export function offerToFormValues(offer: OfferDetailView): OfferFormValues {
     categoryId: offer.categoryId,
     merchantId: offer.merchantId,
     offerType: offer.offerType as OfferFormValues['offerType'],
+    commercialBasis: isCommercialBasis(offer.commercialBasis) ? offer.commercialBasis : '',
     featured: offer.featured,
     imageTint: offer.imageTint as OfferFormValues['imageTint'],
     imageLabel: offer.imageLabel,

@@ -47,6 +47,7 @@ const OFFER = {
   category_id: 'c1',
   merchant_id: 'm1',
   offer_type: 'FREE_SAMPLE',
+  commercial_basis: 'SPONSORED',
   status: 'DRAFT',
   featured: false,
   end_at: null,
@@ -101,6 +102,36 @@ describe('edit offer page', () => {
       props: { offerId: string; reviewToken: string };
     }[];
     expect(buttons.props).toMatchObject({ offerId: 'o1', reviewToken: 'token-from-this-read' });
+  });
+
+  it('hands the buttons the saved basis, and asks for its confirmation only when every active link is direct', async () => {
+    const direct = {
+      id: 'l1',
+      offer_id: 'o1',
+      provider: 'direct',
+      destination_url: 'https://acme.example/x',
+      tracking_id: null,
+      active: true,
+      created_at: '2026-03-01T10:00:00Z',
+      updated_at: '2026-03-01T10:00:00Z',
+    };
+    const props = async (links: unknown[]) => {
+      mocks.fetchAdminOffer.mockResolvedValue({ success: true, data: { ...OFFER, links } });
+      const page = await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) });
+      const [buttons] = findAll(page as ReactNode, OfferLifecycleButtons) as {
+        props: Record<string, unknown>;
+      }[];
+      return buttons.props;
+    };
+
+    expect(await props([direct])).toMatchObject({
+      commercialBasis: 'SPONSORED',
+      confirmBasisToPublish: true,
+    });
+    expect(await props([direct, { ...direct, id: 'l2', provider: 'awin' }])).toMatchObject({
+      confirmBasisToPublish: false,
+    });
+    expect(await props([])).toMatchObject({ confirmBasisToPublish: false });
   });
 
   it('shows the provenance panel of an imported offer, with the token it read and the status', async () => {

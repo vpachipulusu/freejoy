@@ -4,6 +4,7 @@ import type { UseFormReturn } from 'react-hook-form';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  COMMERCIAL_BASIS_VALUES,
   FRESHNESS_VALUES,
   OFFER_TYPE_VALUES,
   POSTAGE_KIND_VALUES,
@@ -11,6 +12,8 @@ import {
   type OfferFormValues,
 } from '@/lib/admin-catalogue/offer-schema';
 import {
+  COMMERCIAL_BASIS_HELP,
+  COMMERCIAL_BASIS_LABELS,
   freshnessLabel,
   offerTypeLabel,
   POSTAGE_KIND_LABELS,
@@ -138,6 +141,59 @@ export function ClassificationFields({
         <input type="checkbox" className={CHECK_BOX} {...register('featured')} />
         Featured on the home page
       </label>
+    </div>
+  );
+}
+
+const BASIS_LABEL_ID = 'offer-basis-label';
+const BASIS_ERROR_ID = 'offer-basis-error';
+
+/**
+ * The commercial basis: a required choice with nothing selected to start with and one line of help under each
+ * option. Radios, so every option and its help is on screen at once; the group is named and carries the error.
+ */
+export function CommercialBasisFields({ form }: SectionProps) {
+  const { register, formState } = form;
+  const error = formState.errors.commercialBasis?.message;
+  return (
+    <div className="space-y-3">
+      <p id={BASIS_LABEL_ID} className="text-sm font-medium leading-none">
+        Commercial basis
+        <span className="ms-1 text-destructive" aria-hidden="true">
+          *
+        </span>
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby={BASIS_LABEL_ID}
+        aria-required="true"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? BASIS_ERROR_ID : undefined}
+        className="space-y-2"
+      >
+        {COMMERCIAL_BASIS_VALUES.map((value) => (
+          <label key={value} className="flex min-h-11 items-start gap-3 text-sm">
+            <input
+              type="radio"
+              value={value}
+              className={`${CHECK_BOX} mt-0.5`}
+              aria-describedby={`offer-basis-${value}-help`}
+              {...register('commercialBasis')}
+            />
+            <span>
+              <span className="block font-medium">{COMMERCIAL_BASIS_LABELS[value]}</span>
+              <span id={`offer-basis-${value}-help`} className="block text-muted-foreground">
+                {COMMERCIAL_BASIS_HELP[value]}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {error ? (
+        <p id={BASIS_ERROR_ID} className="text-sm font-medium text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

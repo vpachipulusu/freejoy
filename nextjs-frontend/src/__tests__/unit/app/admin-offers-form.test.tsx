@@ -56,6 +56,7 @@ const merchants = [{ id: 'm1', name: 'Good Beans' }];
 
 const filled: OfferFormValues = {
   ...emptyOfferFormValues(),
+  commercialBasis: 'EDITORIAL',
   title: 'Free coffee sample',
   summary: 'A free tasting sachet.',
   categoryId: 'c1',

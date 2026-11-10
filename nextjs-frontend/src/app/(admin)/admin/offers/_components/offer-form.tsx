@@ -24,6 +24,7 @@ import { useUnsavedChanges } from '../../_components/use-unsaved-changes';
 import {
   BasicsFields,
   ClassificationFields,
+  CommercialBasisFields,
   PictureFields,
   ScheduleFields,
   TermsFields,
@@ -138,6 +139,9 @@ export function OfferForm({
         </Section>
         <Section title="Category and merchant">
           <ClassificationFields form={form} categories={categories} merchants={merchants} />
+        </Section>
+        <Section title="How it is paid for">
+          <CommercialBasisFields form={form} />
         </Section>
         <Section title="Picture">
           <PictureFields form={form} />
