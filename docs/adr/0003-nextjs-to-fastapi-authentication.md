@@ -35,8 +35,9 @@ prove two things: that it came from our Next.js server, and which user it acts f
    The Firebase Admin credentials then live only in the backend.
 5. **Endpoints not called by Next.js** (provider webhooks such as Stripe) do not use the service key; each
    verifies its provider's signature instead. `/health` (liveness, no database) is also public and returns no internal detail; `/health/ready` queries the
-   database, so it requires the service key. The backend has no public URL of its own (ADR-011): only
-   `/webhooks/stripe` and, since ADR-013, `/partner/v1/...` are rewritten to it. The OpenAPI document and docs UI are
+   database, so it requires the service key. The backend is meant to have no public URL of its own (ADR-011): only
+   `/webhooks/stripe` and, since ADR-013, `/partner/v1/...` are rewritten to it. That a request cannot reach it by
+   another route is **unverified** (ADR-013 lists what is not known about Vercel Services). The OpenAPI document and docs UI are
    still switched off in production, so a request that reaches the backend by another route finds no schema.
 6. **The client IP** for unauthenticated endpoints is forwarded by Next.js in an `X-Client-IP` header, and is
    trusted only on requests that carry a valid service key ([ADR-007](0007-rate-limit-keys.md)). Next.js takes

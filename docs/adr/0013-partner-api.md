@@ -3,8 +3,9 @@
 - **Status:** Proposed (the decisions below were made by the product owner; this record awaits sign-off)
 - **Date:** 2026-11-10
 - **Deciders:** product owner (pending)
-- **Amends:** [ADR-003](0003-nextjs-to-fastapi-authentication.md), [ADR-007](0007-rate-limit-keys.md),
-  [ADR-008](0008-api-client-generation.md), [ADR-011](0011-single-vercel-project-with-services.md)
+- **Amends:** [ADR-003](0003-nextjs-to-fastapi-authentication.md), [ADR-004](0004-backend-layering.md),
+  [ADR-007](0007-rate-limit-keys.md), [ADR-008](0008-api-client-generation.md),
+  [ADR-011](0011-single-vercel-project-with-services.md)
 
 ## Context
 
@@ -28,8 +29,15 @@ no retailer-facing endpoint, no key, no authentication, no database role and no 
 ### The mechanism
 
 - **A mounted sub-app at a fixed prefix.** The partner API is a second FastAPI app, mounted once at
-  `/partner/v1` (`app/partner/`, mounted in `app/main.py`). Nothing else in the backend is served under
-  `/partner`, in any letter case. The version is part of the prefix; the partner contract is versioned on its own.
+  `/partner/v1` (`app/partner/`, installed by `install_partner_surface` in `app/main.py`). Nothing else in the
+  backend is served under `/partner`, in any letter case. The version is part of the prefix; the partner contract
+  is versioned on its own.
+- **The mount is the first route and matches by string comparison** (`PartnerMount`). Starlette's own mount
+  matches a regular expression in which `.` does not match a newline, so `/partner/v1/a%0Ab` would leave it and
+  be answered by the main app without the surface headers; it also leaves the bare `/partner/v1` to the router
+  (a 307). The string match takes both, and compares the full path as well as the path below a `root_path`, so a
+  runtime that serves the app under `root_path=/partner/v1` cannot slide `/partner/v1/health` into a main-app
+  route. Being first, no main-app pattern such as `/{a}/v1/{b}` or `/{rest:path}` is tried before it.
 - **Authentication attached at the sub-app, not per route** (planned, FREEJ-57/58). A route added to the
   sub-app cannot forget it.
 - **A credential and a store distinct from `X-Internal-Key`** (planned). A partner key is never accepted by an
@@ -39,15 +47,23 @@ no retailer-facing endpoint, no key, no authentication, no database role and no 
   (`docs/partner/openapi.json`), not a served one. A retailer calls from a server, so no browser origin is allowed.
 - **`Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `X-Freejoy-Surface: partner`** on
   every partner response, errors and 404s included. Never `Set-Cookie`.
-- **The shared error envelope with no echo.** Errors use `{"success": false, "error": "<message>"}`
-  (ADR-008). The message is fixed text; no part of the request is repeated back.
-- **A body-size cap, enforced as the body streams** (256 KiB, `app/partner/surface.py`), by the declared
-  `Content-Length` and again by counting the bytes actually received. A missing or false length is not trusted and
-  the body is not buffered.
-- **A switch, `PARTNER_API_ENABLED`, default off.** While it is off every path under `/partner/v1` answers
-  the same 404, with the same body and headers, as an unknown path does while it is on.
-- **The bare prefix is part of the surface.** `/partner/v1` (no trailing slash) is matched by the same mount
-  (`PartnerMount`); a plain Starlette mount would answer it with a 307 from the main app instead.
+- **The shared error envelope, with fixed messages.** Errors use `{"success": false, "error": "<message>"}`
+  (ADR-008). Not repeating the request back is a **convention, not something enforced**: the shared handler
+  (`app/core/errors.py`) passes a string `detail` and the exception's `headers` through unchanged, so code that
+  puts request text in a message or a header would echo it, and a 405 carries an `Allow` header. The surface
+  tests check the fixed messages of the cases that exist today (404, 413, 422, 500); a reviewer has to check new
+  handlers.
+- **A body-size cap that the surface owns** (256 KiB, `app/partner/surface.py`), by the declared `Content-Length`
+  and again by counting the bytes actually received. A missing or false length is not trusted and the surface
+  does not buffer the body. Crossing the cap raises a private `BaseException` from `receive`, so application code
+  and the sub-app's error middleware cannot swallow, log or convert it; whatever the application then does, the
+  client gets the 413 (the application's first message is replaced by it). After a response has started `receive`
+  reports a disconnect instead. So there is no rule to follow about where the body may be read: a route, a
+  dependency or middleware in the sub-app all get the same 413.
+- **A switch, `PARTNER_API_ENABLED`, default off.** While it is off every request under `/partner/v1` answers
+  the same 404, with the same body and headers, as an unknown path does while it is on, and that check comes
+  before the body-size check, so no header (a large `Content-Length` included) changes the answer. A blank value
+  means off; any other value that is not a boolean stops startup.
 
 The surface headers, the body cap and the switch are applied by a pure ASGI wrapper (`PartnerSurface`) placed
 *around* the sub-app, not as middleware inside it. A FastAPI app's error middleware sits outside its own
@@ -58,7 +74,7 @@ middleware, so a 500 would otherwise skip the headers.
 | Layer | What it alone stops |
 | --- | --- |
 | Root `vercel.json`: one extra rewrite, `/partner/v1/(.*)` to the backend, before the catch-all | A request to the public domain reaching any backend path other than `/webhooks/stripe` and the partner prefix. `/partner/v1` itself, `/partner/v2/...`, `/partnerx/...`, `/v1/...`, `/docs` and `/openapi.json` go to the frontend. |
-| One mount, no main-app route under `/partner` | A request under the prefix being dispatched to an internal handler. The app never normalises `..`, `%2e%2e` or `//`; they stay inside the prefix and meet the sub-app's 404. |
+| One mount, first in the route table, matching by string; no main-app route under `/partner` or able to match it | A request under the prefix being dispatched to an internal handler. The app never normalises `..`, `%2e%2e`, `%0A` or `//`; they stay inside the prefix and meet the sub-app's 404. |
 | `require_internal_key` on every main-app route (or an explicit allowlist) | A caller who reaches a main-app route by some other path, because a rewrite was widened or a hostname falls through, and has no internal key. |
 | A distinct credential, checked at the sub-app (planned) | A partner key doing anything on an internal route, and a stolen internal key doing anything as a partner. |
 | The surface wrapper | Cookies, CORS, caching, docs and oversized bodies on the partner surface; a switched-off surface answering anything but 404. |
@@ -70,16 +86,29 @@ middleware, so a 500 would otherwise skip the headers.
 All run in the normal `pytest` run, so `scripts/gate.sh` and CI carry them:
 
 - `tests/core/test_vercel_routing.py` parses the real `vercel.json`. The backend sources are exactly the Stripe
-  path and the partner prefix. Listed paths reach the backend or the frontend as described above.
-- `tests/api/test_route_confinement.py` walks every route of the application, mounts included: exactly one
-  mount at `/partner/v1`; every main-app route has `require_internal_key` in its dependency tree or is on the
-  allowlist (`/health`, `/webhooks/stripe`, and the docs routes only while enabled); no main-app route starts with
-  `/partner` in any case; no main-app route except Stripe is matched by a backend rewrite. Throwaway apps prove
-  the walker fails on an unauthenticated route, a route under the prefix, a second mount and a route a
-  backend rewrite would reach.
-- `tests/api/partner/test_partner_surface.py` sends adversarial paths as raw ASGI scopes (an HTTP client would
-  normalise them away) and checks the same 404, the headers on every response, no CORS on `OPTIONS`, the body cap
-  and the switch. It also pins the main app's middleware list (see the residual risks).
+  path and the partner prefix. Listed paths reach the backend or the frontend as described above. Every rewrite
+  has exactly the keys `source` and `destination` and one of the two known destinations; the file's top-level keys
+  and the keys of the backend service are exactly the current ones; the backend service's own `vercel.json` has
+  no routing key. In CI a missing root `vercel.json` fails instead of skipping.
+- `tests/api/test_route_confinement.py` (walker in `tests/confinement_walker.py`) walks every route of the
+  application, mounts and low-priority routes included: exactly one mount at `/partner/v1`, a `PartnerMount`
+  around a `PartnerSurface`, first in the table; every main-app route has `require_internal_key` in its dependency
+  tree or is on the allowlist (`/health`, `/webhooks/stripe`, and the docs routes only while enabled); no main-app
+  route starts with `/partner` in any case, and no main-app route's own path pattern can match `/partner/v1`,
+  `/partner/v1/`, `/partner/v1/x` or `/partner/v1/x/y` (so `/{a}/v1/{b}` and `/{rest:path}` fail), nor
+  `/webhooks/stripe` unless it is the Stripe route; no main-app route except Stripe is matched by a backend
+  rewrite; no dependency overrides; every route inside the mount has an endpoint defined in `app.partner`, shared
+  with no main-app route, without the internal key. A behavioural test calls every non-allowlisted main-app route
+  with no key and expects 401. Throwaway apps prove the walker fails on each rule.
+- `tests/api/partner/test_partner_surface.py`, `test_partner_mount.py` and `test_partner_body_cap.py` send
+  adversarial paths (newline, dot segments, encoded slashes, `//`, a `root_path` of the prefix) as raw ASGI scopes
+  (an HTTP client would normalise them away) and check the same 404, the exact header set on every response, no
+  CORS on `OPTIONS`, the switch, the body cap (including application code that swallows the overflow, and
+  middleware or streaming responses that read or ignore the body) and one error log per failing request. The
+  surface test also pins the main app's middleware list (see the residual risks).
+- `tests/api/partner/test_partner_isolation.py` reads the source of every module in `app/partner/` and fails on any
+  import from `app` other than `app.core` and `app.partner`, on dynamic imports, and on a relative import that
+  climbs out of the package; and checks the mounted sub-app has the same routes the schema is generated from.
 - `tests/commands/test_partner_openapi_schema.py` and `commands/check_partner_openapi_schema.py` (pre-commit and
   `scripts/gate.sh`): every path of the partner schema starts with `/partner/v1/`; the internal schema has no
   `/partner` path; the committed partner schema is current.
@@ -94,6 +123,15 @@ file read could expose them, whatever the layers above say. The restricted datab
 separate service was decided against. It is managed by keeping the partner surface small, validating every input
 at the boundary, and the triggers below.
 
+**Unauthenticated traffic reaches the backend function even while the surface is off.** The rewrite sends every
+`/partner/v1/...` request to the backend, which answers 404 itself. That costs function time and concurrency shared
+with the internal API, and nothing rate-limits it (the partner rate-limit policies come with FREEJ-57/58). The first
+mitigation is a Vercel Firewall rate rule on `/partner/v1/` (a launch precondition below).
+
+**The body is buffered by Vercel before the cap runs.** The surface does not buffer it, but the platform may hold the
+whole request before the ASGI app sees it, so "never buffered" is true of the surface only, and the 256 KiB cap is
+a defence for the function, not for the platform's own limits.
+
 **Middleware of the main app wraps the surface from outside.** Anything added to the main app (a CORS or session
 middleware, a response hook) also runs on partner responses and the surface cannot undo it. So the list of main-app
 middleware is pinned by a test; adding to it has to be a decision that also deals with `/partner/v1`.
@@ -104,6 +142,8 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
    is set, `/docs`, `/redoc` and `/openapi.json` serve the whole internal schema with no key.
 2. **Turn on Deployment Protection for preview deployments.** A preview that has `PARTNER_API_ENABLED=true` must
    not be reachable by the public.
+   **Add a Vercel Firewall rate rule on `/partner/v1/`**, so unauthenticated traffic to the surface is limited
+   at the edge, whether the surface is on or off.
 3. **Run the post-deploy smoke against the real domain** (`scripts/smoke-partner-surface.sh`, the
    `partner-surface` job in `.github/workflows/post-deploy-smoke.yml`). It needs no secret and passes while the
    surface is off. It fails if the backend answers a request under or around the prefix without the
@@ -119,6 +159,9 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   the partner surface has its own credential, described under *Planned design*. Section 5 of ADR-003 said the
   backend URL is public. After ADR-011 it is not: only `/webhooks/stripe` and now `/partner/v1/...` are rewritten
   to it.
+- **ADR-004.** The layering gains `app/partner/`, a package that imports only `app.core` and itself (checked by a
+  test). The lint rule ADR-004 described (`TID251`) was not configured when this record was written; FREEJ-56
+  configured it, and ADR-004's text now says exactly what it bans.
 - **ADR-007.** Partner endpoints get their own rate-limit policies, keyed by key id (and, where relevant,
   merchant), not by user or organisation. None exist yet (FREEJ-57/58).
 - **ADR-008.** The partner contract is a separate, versioned document (`docs/partner/openapi.json`,

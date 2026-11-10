@@ -2,6 +2,7 @@
 
 - **Status:** Accepted by the product owner, 2026-10-12
 - **Date:** 2026-10-11
+- **Amended by:** [ADR-013](0013-partner-api.md) (the `partner/` package, and the engine-ban lint rule now configured)
 
 ## Context
 
@@ -26,8 +27,10 @@ Rules:
 - Routers call services; services call repositories; repositories receive an `AsyncSession` and never create
   one.
 - Engines are built only in `app/core/database.py`. A lint rule (ruff `TID251`, configured in
-  `fastapi_backend/pyproject.toml`) bans `create_engine`, `create_async_engine` and `build_engine` everywhere else.
-  Session makers are not banned: commands and tests receive one from that module.
+  `fastapi_backend/pyproject.toml`) bans the SQLAlchemy engine factories (`create_engine`, `create_async_engine`, `engine_from_config` and
+  `async_engine_from_config`, under their `sqlalchemy.engine` and `sqlalchemy.ext.asyncio.engine` paths too) and
+  `app.core.database.build_engine` everywhere else (`app/core/database.py`, `alembic_migrations/env.py` and tests
+  are exempt). Session makers are not banned: commands and tests receive one from that module.
 - Services raise domain errors (`core/errors`). One exception handler turns them into the
   `{ success, data?, error? }` envelope ([ADR-008](0008-api-client-generation.md)) with the right HTTP status,
   with no stack traces or internal details.
