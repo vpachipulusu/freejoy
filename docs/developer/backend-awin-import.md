@@ -12,7 +12,8 @@ uv run python -m commands.import_awin_offers --limit 100 --max-pages 2 --updated
 
 Code: `commands/import_awin_offers.py` (arguments, output, exit codes, Sentry), `app/services/awin_import_run.py` (the
 paging loop), `app/services/awin_offer_import.py` (create, refresh, edit protection, audit),
-`app/services/awin_promotions.py` (one item as untrusted input), `app/services/awin_offer_mapping.py` (item to rows,
+`app/services/awin_promotions.py` (one item as untrusted input), `app/services/awin_shape_report.py` (the names-only
+shape report of `--show-shape`), `app/services/awin_offer_mapping.py` (item to rows,
 slugs, the edit fingerprint), `app/repositories/awin_import.py` (SQL), `app/core/awin_client.py` (the HTTP client),
 `app/core/call_limiter.py` (the 20-per-minute limiter), `app/core/plain_text.py` (HTML and control-character
 removal), `app/models/platform/catalogue_import.py` and migration `0004` (provenance tables).
@@ -58,12 +59,14 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | `--max-pages N` | 10 (1 to 50) | Most pages fetched. Awin allows 20 calls a minute, so 50 pages take about 2 minutes (20, 20 and 10 calls). |
 | `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1; stderr says "already committed and kept (at least)" because a batch cancelled inside its own commit may be committed and not counted) and what was committed stays; a rerun carries on. |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
+| `--membership {joined,notJoined,all}` | `joined` | Which programmes to ask Awin for. **Dry run only**: with any value but `joined` and no `--dry-run` the command exits 2. See [the probe](#the-dry-run-probe-membership-and-show-shape). |
+| `--show-shape` | off | After the counts, print the names (never the values) of what Awin returned. **Dry run only**: without `--dry-run` the command exits 2. |
 
 | Exit | Meaning |
 | --- | --- |
 | `0` | The run completed. Skipped items and a stop at a limit do **not** change this. |
 | `1` | The run failed. stderr names the stage and a reason code or error **type** (never text) and how much had been committed; those batches stay committed and a rerun carries on. One Sentry event is sent (below). |
-| `2` | Bad arguments (out of range, unknown flag, a malformed date) or missing `AWIN_*` settings. |
+| `2` | Bad arguments (out of range, unknown flag or `--membership` value, a malformed date, `--membership` other than `joined` or `--show-shape` without `--dry-run`) or missing `AWIN_*` settings. Checked before the settings are read and before any client or database unit is built. |
 
 stdout is counts only:
 
@@ -72,6 +75,10 @@ import-awin-offers: fetched 45 promotion(s) in 1 page(s); 41 valid, 4 skipped.
 import-awin-offers: created 30, updated 5, unchanged 5, source changed and not applied 1, skipped 4.
 import-awin-offers: skipped by reason: not_joined 2, tracking_host_not_allowed 2.
 ```
+
+A dry run adds a line naming the filters sent (for example `filters sent: membership=joined, type=all, status=active,
+regionCodes=GB`), so a result of 0 explains itself; with `membership=joined` and nothing returned it also points at the
+probe below. A real run prints no filters line.
 
 "Valid" counts items that passed validation; an item skipped later as `slug_unavailable` is counted in both
 "valid" and "skipped".
@@ -84,7 +91,10 @@ Skip reasons (`SkipReason`): `invalid_item`, `invalid_id`, `unsupported_type`, `
 ## How a run works
 
 1. Request page 1 (`POST /publisher/{id}/promotions`, filters `membership=joined`, `type=all`, `status=active`,
-   `regionCodes=["GB"]`, optional `updatedSince`, `pagination {page, pageSize}`).
+   `regionCodes=["GB"]`, optional `updatedSince`, `pagination {page, pageSize}`). `membership` is another value only
+   in a dry run (see the probe below); `run_import` refuses a run that writes with any value but `joined` before the
+   first fetch (`membership_not_joined`: nothing fetched, nothing written), so importing programmes you have not
+   joined is impossible, not only unreachable from the command line.
 2. Treat every item as untrusted (`parse_promotion`, below), drop duplicates, then write the valid ones in
    **batches of 50**, each in its own database transaction that commits once. A failure stops the run; earlier batches
    stay. A rerun is idempotent, so it carries on.
@@ -272,6 +282,12 @@ retries included, passes through it**. The limit is per Awin user, so another to
 
 ## Unverified assumptions the first dry-run confirms or breaks
 
+> **2026-11-10: the first real dry run** (`--dry-run --limit 20 --max-pages 1`) exited 0 with `fetched 0 promotion(s) in
+> 1 page(s); 0 valid, 0 skipped`. That confirmed the token, the publisher id and the envelope (assumption 1, at least for
+> an empty page), and that the account has **no joined programme** with an active UK promotion. It returned no item, so
+> assumptions 2 to 11 are **still unverified**. The probe below exists to look at items from programmes that are not
+> joined.
+
 Awin's page does not document these. Each is handled defensively; the **first dry-run** shows which are true.
 
 1. **Response envelope.** The parser accepts a bare JSON list, or an object whose `data` is a list with an optional
@@ -304,15 +320,56 @@ Awin's page does not document these. Each is handled defensively; the **first dr
     links differ, or carry a parameter that is not listed, the item is skipped as `tracking_shape_unrecognised` and shows
     in the dry-run report. See [the tracking link](#the-tracking-link-is-pinned).
 
+### The dry-run probe (`--membership` and `--show-shape`)
+
+`--dry-run --membership all --show-shape` asks Awin for the promotions of **all** programmes, joined or not, and
+describes the shape of what comes back. Nothing is written, no database is opened, and the flags are refused without
+`--dry-run` (exit 2, before the settings are read); the service also refuses a real run for any membership but
+`joined`, because a tracking link only works for a joined programme.
+
+`membership` takes the three values Awin's [promotions documentation](https://help.awin.com/apidocs/promotions) lists
+(read 2026-11-10): `joined`, `notJoined` and `all`. The importer itself sends `joined`, the default.
+
+The shape report prints **names only**: never the token, the publisher id, a full URL, a query value, a voucher code or
+any title, description or terms. It prints, after the counts:
+
+- the envelope (a bare list, or an object with `data`) and on how many pages `pagination.totalPages` was present;
+- the item keys, and the keys one level under `advertiser`, `voucher` and `regions`;
+- the hosts of `urlTracking` and of `url`, and for `urlTracking` the paths and the query parameter names;
+- how many items are not objects, how many `urlTracking` / `url` values are missing or not a URL, and how many items have
+  `advertiser.joined` true, false, or missing or not a boolean.
+
+Because it prints data from outside, each set holds at most 40 names (`MAX_ENTRIES`, then `(+N more)`), each name at most
+60 characters (`MAX_NAME_LENGTH`), only printable ASCII (anything else is shown as `?`), and every set is sorted. A
+query parameter is listed only when it has a name and an `=`. Code: `app/services/awin_shape_report.py` (pure functions);
+the command only formats and prints.
+
 ### The owner's first run (a real token is an owner step)
 
 1. Put `AWIN_PUBLISHER_ID` and `AWIN_OAUTH_API_TOKEN` in `fastapi_backend/.env` (never commit it).
-2. `uv run python -m commands.import_awin_offers --dry-run --limit 20 --max-pages 1`. It touches no database.
-3. Read the counts. Exit 0 with mostly `valid` means 1, 3 and 4 held. `unrecognised_response` breaks 1;
+2. `uv run python -m commands.import_awin_offers --dry-run --limit 20 --max-pages 1`. It touches no database. The output
+   names the filters sent; `fetched 0` with `membership=joined` means the account has no joined programme with an
+   active UK promotion (this is what the 2026-11-10 run returned).
+3. **The probe, when step 2 returns nothing:**
+   `uv run python -m commands.import_awin_offers --dry-run --membership all --show-shape --limit 20 --max-pages 1`.
+   Read the shape lines against the numbered assumptions below:
+   - `envelope` and `pagination.totalPages` check assumption 1 (and, with the number of items, 2);
+   - `item keys` and `advertiser.joined: true/false/missing` check 4 (an `advertiser.joined` of `false` is expected for
+     programmes you have not joined, so this probe cannot show a `true`);
+   - `voucher keys` check 8, `regions keys` the region shape in 4;
+   - `urlTracking hosts` check 6 (compare with `PROVIDER_HOSTS`), and `urlTracking paths` with
+     `urlTracking query parameters` check 11 (the paths `/cread.php` or `/awclick.php`, and only the parameters in the
+     allowed list);
+   - `url hosts` check 7 (a merchant host, not a tracking host).
+
+   Values are not shown, so 4's date and id formats, 5, 9 and 10 stay unverified until a joined programme returns items,
+   and the dry-run skip counts (`invalid_date`, `invalid_id`, `ended`) are what check them. Items of programmes you have not joined should
+   be skipped as `not_joined`, so expect `0 valid`.
+4. With joined programmes, read the counts. Exit 0 with mostly `valid` means 1, 3 and 4 held. `unrecognised_response` breaks 1;
    `invalid_date` or `invalid_id` breaks 4; `tracking_host_not_allowed` breaks 6; `tracking_shape_unrecognised`,
    `tracking_owner_mismatch` or `tracking_destination_mismatch` in numbers break 11 (or the publisher id is wrong);
    `auth_failed` is the token or publisher id.
-4. Only then run it without `--dry-run` against a database you own, then open the admin offers list: the drafts are in
+5. Only then run it without `--dry-run` against a database you own, then open the admin offers list: the drafts are in
    "Imported (uncategorised)".
 
 ## Known limits
@@ -390,8 +447,11 @@ envelope, deadlines, `trust_env`), `test_call_limiter.py` (never more than 20 in
 `test_plain_text.py`; `tests/services/test_awin_promotions.py` (every rejection, look-alike hosts, dates, lengths),
 `test_awin_offer_mapping.py`, `test_offer_fingerprint.py` (the fingerprint per editable field, its pinned field list and a pinned digest) and `test_awin_offer_import.py` (create, idempotency, refresh,
 the protection cases, merchants, slugs, audit), `test_awin_import_run.py` (paging, limits, batching, failure accounting,
-dry run); `tests/commands/test_import_awin_offers.py` (flags, output, exit codes, settings, Sentry content and
-ordering); `tests/commands/test_import_awin_offers_e2e.py` against Postgres (migration and constraints, cascades,
+dry run), `test_awin_import_run_membership.py` (a real run with another membership is refused before the first fetch),
+`test_awin_shape_report.py` (content, bounds, sanitising, no value ever printed); `tests/core/test_awin_client_membership.py`
+(the filter JSON per membership, the default request body unchanged, the envelope facts);
+`tests/commands/test_import_awin_offers.py` (flags, output, exit codes, settings, Sentry content and
+ordering), `test_import_awin_offers_probe.py` (the probe flags, their usage errors, the filters line, the printed report); `tests/commands/test_import_awin_offers_e2e.py` against Postgres (migration and constraints, cascades,
 downgrade, upserts, audit rows, the real admin edit and publish paths, an importer refresh making an editor's review token stale, simultaneous runs, a failing batch, a held row
 lock, and subprocess runs of the CLI with a fake client in a process whose non-loopback connections are blocked,
 `tests/commands/awin_cli_runner.py`). The e2e file runs only with `TEST_DATABASE_URL` set to a local `*_test` database.
