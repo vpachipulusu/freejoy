@@ -37,7 +37,7 @@ server starts) once an email provider is configured. The page has no catalogue d
 | any of the above, **while the page shows its outage state** | unchanged (`noindex`) | unchanged: the normal robots for that URL |
 | `/alerts` | `noindex` | `noindex` until the form is live |
 | `/saved` | `noindex, follow` | `noindex, follow` always: the list lives in the visitor's browser, so the page is the same empty shell for a crawler. Not in the sitemap; not disallowed in `robots.txt`, so the `noindex` can be read |
-| `/partners` | `noindex` | `noindex` while it carries the draft banner (`NOINDEX_ROBOTS` in `src/app/(public)/partners/page.tsx`; drop the banner and switch to `INDEXABLE_ROBOTS` together). Always listed in the sitemap, with no `lastModified` |
+| `/partners` | `noindex` | `noindex` while it carries the draft banner. Not in the sitemap while draft. When `LegalPage` stops showing the draft banner for this page (needs a `LegalPage` change, the banner is unconditional today), switch to `INDEXABLE_ROBOTS` and add `entry('/partners', undefined)` to `lib/seo/sitemap.ts` in the same change |
 | Legal pages | not part of this story | not part of this story |
 
 Every refined view canonicalises to its base path (`/freebies`, `/category/<slug>`), so the filter
@@ -130,7 +130,7 @@ preview keeps rendering.
 
 `/sitemap.xml` (`src/app/sitemap.ts`, built by `lib/seo/sitemap.ts`) lists:
 
-- `/`, `/freebies` and `/partners` (FREEJ-55, no `lastmod`), always;
+- `/` and `/freebies`, always;
 - each enabled category, only when the catalogue is API-backed;
 - each indexable offer (published, live, API-sourced, not demo), through the facade (`getLiveOffers()` walks
   the API 50 offers at a time, up to 2000, each page cached for a minute).
@@ -142,8 +142,8 @@ uses the wall clock, and an entry without a date simply has no `lastmod`.
 The sitemap renders per request (`dynamic = 'force-dynamic'`), so it tracks the catalogue within the
 cache minute and an outage is never baked into it.
 
-**While `CATALOGUE_SOURCE=fixture` the sitemap lists only `/`, `/freebies` and `/partners`**, and all of those answer
-`noindex`. `/partners` is `noindex` in every mode while it carries the draft banner. Search Console would flag "submitted URL marked noindex" if the sitemap were submitted from a
+**While `CATALOGUE_SOURCE=fixture` the sitemap lists only `/` and `/freebies`**, and both of those answer
+`noindex`. Search Console would flag "submitted URL marked noindex" if the sitemap were submitted from a
 fixture-backed deployment. Submit it only from an API-backed one.
 
 Sitemap URLs are built with each path segment percent-encoded, so a slug containing a space, `?` or

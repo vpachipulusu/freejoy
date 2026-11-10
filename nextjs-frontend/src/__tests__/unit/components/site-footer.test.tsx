@@ -9,7 +9,7 @@ describe('site footer links', () => {
     render(<SiteFooter />);
 
     const nav = screen.getByRole('navigation', { name: 'Legal and about' });
-    expect(within(nav).getByRole('link', { name: 'List your free sample' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'For retailers' })).toHaveAttribute(
       'href',
       '/partners'
     );

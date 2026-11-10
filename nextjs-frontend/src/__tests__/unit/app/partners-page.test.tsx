@@ -4,7 +4,10 @@ import { render, screen, within } from '@testing-library/react';
 vi.mock('@/app/globals.css', () => ({}));
 
 import PartnersPage, { metadata as partnersMetadata } from '@/app/(public)/partners/page';
+import sitemap from '@/app/sitemap';
 import { DRAFT_BANNER_TEXT } from '@/components/legal/legal-page';
+import { CATEGORIES, FIXTURE_TODAY, OFFERS } from '@/lib/catalogue/fixtures';
+import { buildSitemapEntries } from '@/lib/seo/sitemap';
 
 /** Same shape as the compliance guard in home-and-legal-pages.test.tsx. */
 const COMPLIANCE_CLAIMS =
@@ -42,14 +45,10 @@ describe('partners page (FREEJ-55)', () => {
   });
 
   it('lists what a listing must state as a real list', () => {
-    const { container } = render(<PartnersPage />);
+    render(<PartnersPage />);
 
-    const heading = screen.getByRole('heading', { name: 'What a listing must state' });
-    const list = heading.nextElementSibling?.matches('ul')
-      ? heading.nextElementSibling
-      : heading.nextElementSibling?.nextElementSibling;
-    expect(list?.tagName).toBe('UL');
-    const items = within(list as HTMLElement)
+    const list = screen.getByRole('list');
+    const items = within(list)
       .getAllByRole('listitem')
       .map((item) => item.textContent ?? '');
     expect(items).toHaveLength(5);
@@ -58,7 +57,9 @@ describe('partners page (FREEJ-55)', () => {
     expect(items[2]).toMatch(/subscription/i);
     expect(items[3]).toMatch(/eligible/i);
     expect(items[4]).toMatch(/how long.*how many|how many.*how long/i);
-    expect(container.querySelectorAll('ul')).toHaveLength(1);
+    expect(list.previousElementSibling?.previousElementSibling).toHaveTextContent(
+      'What a listing must state'
+    );
   });
 
   it('says every listing is checked and written by editors, re-checked, and never published by a retailer', () => {
@@ -71,17 +72,31 @@ describe('partners page (FREEJ-55)', () => {
     expect(text).toMatch(/ends when the sample runs out/i);
   });
 
-  it('states the Sponsored policy without describing where a label appears or any interface', () => {
+  it('states the Sponsored and Ad policy without describing where a label appears or any interface', () => {
     const { container } = render(<PartnersPage />);
     const text = pageText(container);
 
-    expect(text).toMatch(/paid for or otherwise rewarded[^.]*labelled .Sponsored./i);
+    expect(text).toMatch(
+      /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled .Sponsored./i
+    );
+    expect(text).toMatch(
+      /links that earn Freejoy a commission through an affiliate network carry an .Ad. label instead/i
+    );
     expect(text).toMatch(/payment does not change the checks/i);
+    expect(text).not.toMatch(/otherwise rewarded/i);
     // FREEJ-53 builds the label; this page must not describe it.
     expect(text).not.toMatch(
       /badge|pill|banner|ribbon|corner|top of|next to the|above the|below the/i
     );
     expect(text).not.toMatch(/appears|is shown|are shown|displayed/i);
+  });
+
+  it('does not contradict itself about what it costs to claim an offer', () => {
+    const { container } = render(<PartnersPage />);
+    const text = pageText(container);
+
+    expect(text).toMatch(/if it costs anything, such as postage, the listing says so/i);
+    expect(text).not.toMatch(/has to be free to the person who claims it/i);
   });
 
   it('says Freejoy does not collect visitors’ names or addresses for a retailer', () => {
@@ -105,7 +120,7 @@ describe('partners page (FREEJ-55)', () => {
   it('has no external links, no address or email, and no phone number', () => {
     const { container } = render(<PartnersPage />);
 
-    expect(container.querySelectorAll('a[href^="http"]')).toHaveLength(0);
+    expect(container.querySelectorAll('a[href^="http"], a[href^="//"]')).toHaveLength(0);
     expect(container.querySelectorAll('a[href^="mailto:"], a[href^="tel:"]')).toHaveLength(0);
     expect(container.textContent).not.toMatch(/@[a-z0-9-]+\.[a-z]{2,}/i);
   });
@@ -118,6 +133,32 @@ describe('partners page (FREEJ-55)', () => {
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.querySelector('select')).toBeNull();
     expect(container.querySelector('button')).toBeNull();
+    expect(
+      container.querySelector(
+        'iframe, [contenteditable], [role="textbox"], [role="button"], [role="combobox"], [role="checkbox"], [role="radio"]'
+      )
+    ).toBeNull();
+  });
+
+  it('points to the contact page only in the future tense, since /contact has no working route yet', () => {
+    const { container } = render(<PartnersPage />);
+    const text = pageText(container);
+
+    expect(text).toMatch(
+      /contact page will show how to reach Freejoy once a contact route is published\. When it does, use it to ask for a listing or to tell us an offer has ended\./i
+    );
+    expect(text).not.toMatch(/shows how to reach/i);
+    expect(text).not.toMatch(/please tell us/i);
+  });
+
+  it('says only that it has no listing form and asks for no details', () => {
+    const { container } = render(<PartnersPage />);
+    const text = pageText(container);
+
+    expect(text).toMatch(
+      /there is no listing form on this page, and it does not ask you for any details/i
+    );
+    expect(text).not.toMatch(/collects no details/i);
   });
 
   it('uses no em dashes or en dashes in its own copy', () => {
@@ -158,5 +199,25 @@ describe('partners page metadata', () => {
 
   it('is kept out of search engines while it is a draft, like the other editorial pages', () => {
     expect(partnersMetadata.robots).toEqual({ index: false });
+  });
+});
+
+describe('partners page and search engines', () => {
+  it('is not in the sitemap while it is a draft, whatever the catalogue source', () => {
+    for (const source of ['api', 'fixture'] as const) {
+      const entries = buildSitemapEntries({
+        offers: OFFERS.map((offer) => ({ ...offer, source: 'api', demo: false })),
+        categories: CATEGORIES,
+        today: FIXTURE_TODAY,
+        source,
+      });
+      expect(entries.map((entry) => entry.url).join(',')).not.toContain('/partners');
+    }
+  });
+
+  it('is not in the generated sitemap file', async () => {
+    const entries = await sitemap();
+
+    expect(entries.map((entry) => entry.url).join(',')).not.toContain('/partners');
   });
 });

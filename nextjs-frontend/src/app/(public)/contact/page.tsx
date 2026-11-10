@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -5,7 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Send } from 'lucide-react';
 import { DraftBanner } from '@/components/legal/legal-page';
-import Link from 'next/link';
 
 type FieldProps = React.ComponentProps<typeof Input> & {
   id: string;

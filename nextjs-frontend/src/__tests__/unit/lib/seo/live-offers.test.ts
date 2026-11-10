@@ -87,11 +87,7 @@ describe('loadCategoriesForSeo', () => {
 });
 
 describe('sitemap when there are no usable live offers', () => {
-  const staticPages = [
-    'http://localhost:3000/',
-    'http://localhost:3000/freebies',
-    'http://localhost:3000/partners',
-  ];
+  const staticPages = ['http://localhost:3000/', 'http://localhost:3000/freebies'];
 
   it('lists only the static pages when the live list is empty', async () => {
     mocks.liveOffers.mockResolvedValue([]);

@@ -21,4 +21,8 @@ describe('proxy /partners', () => {
 
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
+
+  it('leaves the protected areas protected', async () => {
+    expect((await call('/dashboard')).status).toBe(307);
+  });
 });

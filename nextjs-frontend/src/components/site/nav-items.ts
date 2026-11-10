@@ -36,7 +36,7 @@ export const SITE_TAB_ITEMS: ReadonlyArray<SiteTabItem> = [
 export const FOOTER_LINKS: ReadonlyArray<SiteNavItem> = [
   { href: '/about', label: 'About' },
   { href: '/contact', label: 'Contact' },
-  { href: '/partners', label: 'List your free sample' },
+  { href: '/partners', label: 'For retailers' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/cookies', label: 'Cookies' },
   { href: '/terms', label: 'Terms' },

@@ -28,9 +28,8 @@ export default function PartnersPage() {
     >
       <h2>What Freejoy lists</h2>
       <p>
-        Freejoy lists free samples, free trials and similar offers for people who live in the UK.
-        The offer has to be free to the person who claims it. If it costs anything, such as postage,
-        the listing says so.
+        Freejoy lists free samples, free trials and similar offers for people who live in the UK. If
+        it costs anything, such as postage, the listing says so.
       </p>
       <h2>What a listing must state</h2>
       <p>Every listing sets these out before anyone clicks through to your site.</p>
@@ -46,14 +45,13 @@ export default function PartnersPage() {
         Freejoy&apos;s editors check and write every listing before it is published. They check it
         again after it goes live. A retailer cannot publish a listing directly.
       </p>
-      <p>
-        A listing ends when the sample runs out or the offer closes. Please tell us when that
-        happens, so that we can end the listing.
-      </p>
+      <p>A listing ends when the sample runs out or the offer closes.</p>
       <h2>Paid and sponsored listings</h2>
       <p>
-        A listing that is paid for or otherwise rewarded is labelled &ldquo;Sponsored&rdquo;.
-        Payment does not change the checks. Every listing gets the same checks.
+        A listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled
+        &ldquo;Sponsored&rdquo;. Links that earn Freejoy a commission through an affiliate network
+        carry an &ldquo;Ad&rdquo; label instead. Payment does not change the checks. Every listing
+        gets the same checks.
       </p>
       <p>
         The <Link href="/affiliate-disclosure">affiliate disclosure</Link> explains how Freejoy
@@ -66,11 +64,11 @@ export default function PartnersPage() {
       </p>
       <h2>Get in touch</h2>
       <p>
-        The <Link href="/contact">contact page</Link> shows how to reach Freejoy. Use it to ask for
-        a listing or to tell us an offer has ended. Say what the offer is and where its terms are on
-        your own site.
+        The <Link href="/contact">contact page</Link> will show how to reach Freejoy once a contact
+        route is published. When it does, use it to ask for a listing or to tell us an offer has
+        ended. Say what the offer is and where its terms are on your own site.
       </p>
-      <p>This page has no form and collects no details.</p>
+      <p>There is no listing form on this page, and it does not ask you for any details.</p>
     </LegalPage>
   );
 }

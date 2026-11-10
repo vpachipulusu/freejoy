@@ -1,7 +1,7 @@
 /**
  * Sitemap entries. Pure: the caller passes the catalogue data and `today`.
  *
- * Rules: the home page, /freebies and /partners are always listed; an enabled category is listed only when
+ * Rules: the home page and /freebies are always listed; an enabled category is listed only when
  * the catalogue is API-backed; an offer is listed only when it is indexable (API-sourced, not demo,
  * published and not expired). `lastModified` comes from the offer's own dates and is omitted when
  * there is none, never taken from the wall clock.
@@ -63,8 +63,6 @@ export function buildSitemapEntries({
   return [
     entry('/', catalogueModified),
     entry('/freebies', catalogueModified),
-    // Static page: always listed, and never dated from the catalogue.
-    entry('/partners', undefined),
     ...categoryEntries,
     ...offerEntries,
   ];
