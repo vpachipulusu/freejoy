@@ -14322,15 +14322,21 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Review Token"
+          },
+          "source_changed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Source Changed At"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "review_token"
+          "review_token",
+          "source_changed_at"
         ],
         "title": "DismissSourceChangeRequest",
-        "description": "Needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."
+        "description": "Needs the ``review_token`` of the offer the editor loaded and the ``source_changed_at`` it showed.\n\nThe token does not cover the marker, so the marker is sent too: either one stale is 409\n``offer_changed``. ``source_changed_at`` must carry a timezone (``provenance.source_changed_at`` of the\noffer read, sent back unchanged)."
       },
       "DriftData": {
         "properties": {

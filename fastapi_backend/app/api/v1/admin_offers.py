@@ -2,10 +2,13 @@
 
 Permissions: ``offers.read`` for reads, ``offers.write`` for create, update and links,
 ``offers.publish`` for publish, unpublish, expire, archive, verify and dismissing a source
-change (they change what the public sees, the "Last checked" claim or the review queue). The offer read (and every write's response) returns a ``review_token``; ``verify`` and
-``publish`` require the one the editor loaded and answer 409 ``offer_changed`` when the offer or
-its links changed since (the other transitions do not need it). Every write stages its audit row in the same
-transaction (``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.
+change (they change what the public sees, the "Last checked" claim or the review queue).
+The offer read (and every write's response) returns a ``review_token``; ``verify``,
+``publish`` and ``dismiss-source-change`` require the one the editor loaded and answer 409
+``offer_changed`` when the offer or its links changed since (the other transitions do not
+need it; dismissing also sends the ``source_changed_at`` the editor saw, which the token does
+not cover). Every write stages its audit row in the same transaction
+(``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.
 """
 
 from typing import Annotated
@@ -210,7 +213,9 @@ async def admin_dismiss_offer_source_change(
 ) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.dismiss_source_change(admin, offer_id, body.review_token)
+        detail = await service.dismiss_source_change(
+            admin, offer_id, body.review_token, body.source_changed_at
+        )
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
     return OfferWriteResponse(data=offer_write_out(detail))

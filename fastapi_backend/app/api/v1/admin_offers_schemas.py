@@ -146,11 +146,17 @@ class PublishRequest(BaseModel):
 
 
 class DismissSourceChangeRequest(BaseModel):
-    """Needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."""
+    """Needs the ``review_token`` of the offer the editor loaded and the ``source_changed_at`` it showed.
+
+    The token does not cover the marker, so the marker is sent too: either one stale is 409
+    ``offer_changed``. ``source_changed_at`` must carry a timezone (``provenance.source_changed_at`` of the
+    offer read, sent back unchanged).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     review_token: ReviewToken
+    source_changed_at: AwareDatetime
 
 
 class VerifyRequest(BaseModel):
@@ -303,7 +309,7 @@ def _import_fields(provenance: OfferProvenance | None) -> dict[str, Any]:
 
 
 def summary_out(
-    record: OfferRecord, provenance: OfferProvenance | None = None
+    record: OfferRecord, provenance: OfferProvenance | None
 ) -> OfferSummaryOut:
     return OfferSummaryOut(**record.__dict__, **_import_fields(provenance))
 

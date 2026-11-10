@@ -930,13 +930,21 @@ export type DisableRequest = {
 /**
  * DismissSourceChangeRequest
  *
- * Needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+ * Needs the ``review_token`` of the offer the editor loaded and the ``source_changed_at`` it showed.
+ *
+ * The token does not cover the marker, so the marker is sent too: either one stale is 409
+ * ``offer_changed``. ``source_changed_at`` must carry a timezone (``provenance.source_changed_at`` of the
+ * offer read, sent back unchanged).
  */
 export type DismissSourceChangeRequest = {
     /**
      * Review Token
      */
     review_token: string;
+    /**
+     * Source Changed At
+     */
+    source_changed_at: string;
 };
 
 /**

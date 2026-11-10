@@ -21,14 +21,17 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   offer's life), claim nothing was reviewed and need no token.
 * ``dismiss_source_change`` is the review queue's one write: it clears the importer's
   ``source_changed_at`` marker after the same token check and under the same offer lock, so an
-  editor can say "I have seen that the source moved on". It touches nothing else; in particular it
-  leaves the importer's hashes alone (see ``docs/developer/backend-awin-import.md``).
+  editor can say "I have seen that the source moved on". The token does not cover the marker, so the
+  request also carries the marker the editor saw and a different stored one is refused with
+  ``OfferChanged`` (the importer noted a newer change since). It touches nothing else; in particular
+  it leaves the importer's hashes alone (see ``docs/developer/backend-awin-import.md``).
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -291,13 +294,20 @@ class AdminOfferService:
         return detail
 
     async def dismiss_source_change(
-        self, actor: AdminContext, offer_id: str, review_token: str | None
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        review_token: str | None,
+        seen_marker: datetime,
     ) -> OfferDetail:
         """Clear the "source changed" marker of an imported offer, after the editor has seen it.
 
-        Same order as ``verify``: offer row lock, token check (409 ``offer_changed``), then the rule. An
-        archived offer, an offer that was never imported and a marker that is already clear are all "nothing
-        to dismiss" (409 ``illegal_transition``). Only ``source_changed_at`` changes.
+        ``seen_marker`` is the ``source_changed_at`` the editor's page showed. Same order as ``verify``:
+        offer row lock, token check (409 ``offer_changed``), the archived refusal, then the provenance row
+        ``FOR UPDATE``. An archived offer, an offer that was never imported and a marker that is already
+        clear are "nothing to dismiss" (409 ``illegal_transition``); a stored marker other than the one the
+        editor saw (the importer noted a newer change meanwhile) is 409 ``offer_changed``, nothing written.
+        Only ``source_changed_at`` changes.
         """
         current = await self._locked(offer_id)
         previous = await self._require_unchanged(current, review_token)
@@ -305,6 +315,8 @@ class AdminOfferService:
         marked = await self.store.get_provenance(offer_id, lock=True)
         if marked is None or marked.source_changed_at is None:
             raise IllegalTransition(current.status.value, DISMISS_ACTION)
+        if marked.source_changed_at != seen_marker:
+            raise OfferChanged()
         await self.store.clear_source_change(offer_id)
         await self.auditor.record(
             actor,

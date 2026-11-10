@@ -737,8 +737,11 @@ async def dismiss_through_the_service(engine: AsyncEngine, offer_id: str) -> Non
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         service = editor_service(session)
-        token = (await service.get_offer(offer_id)).review_token
-        await service.dismiss_source_change(EDITOR, offer_id, token)
+        detail = await service.get_offer(offer_id)
+        assert detail.provenance is not None
+        await service.dismiss_source_change(
+            EDITOR, offer_id, detail.review_token, detail.provenance.source_changed_at
+        )
 
 
 async def import_state(engine: AsyncEngine) -> Any:

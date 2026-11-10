@@ -15,7 +15,6 @@ from tests.catalogue_e2e_support import (
     as_user,
     audit_rows,
     offer_body,
-    review_token,
     rows,
     seed_admin,
 )
@@ -67,6 +66,15 @@ async def world(engine, client):
     return headers, f"{OFFERS}/{offer_id}", offer_id
 
 
+async def dismiss_body(client, headers, url):
+    """What the admin UI sends: the review token and the marker, both as the offer read just showed them."""
+    data = (await client.get(url, headers=headers)).json()["data"]
+    marker = (data["provenance"] or {}).get(
+        "source_changed_at"
+    ) or "2026-01-01T00:00:00Z"
+    return {"review_token": data["review_token"], "source_changed_at": marker}
+
+
 async def stored(engine):
     return await rows(
         engine,
@@ -79,12 +87,13 @@ async def test_dismissing_clears_only_the_marker_and_audits_before_and_after(
     client, engine, world
 ):
     headers, url, offer_id = world
-    token = await review_token(client, headers, url)
+    body = await dismiss_body(client, headers, url)
+    token = body["review_token"]
     before = (await stored(engine))[0]
     offers_before = await rows(engine, "SELECT * FROM offers")
 
     result = await client.post(
-        f"{url}/dismiss-source-change", json={"review_token": token}, headers=headers
+        f"{url}/dismiss-source-change", json=body, headers=headers
     )
 
     data = result.json()["data"]
@@ -114,7 +123,7 @@ async def test_dismissing_leaves_the_queue_for_a_published_offer(client, engine,
 
     result = await client.post(
         f"{url}/dismiss-source-change",
-        json={"review_token": await review_token(client, headers, url)},
+        json=await dismiss_body(client, headers, url),
         headers=headers,
     )
 
@@ -128,21 +137,19 @@ async def test_a_second_dismiss_and_a_never_imported_offer_are_409_illegal_trans
     client, engine, world
 ):
     headers, url, _ = world
-    token = await review_token(client, headers, url)
-    await client.post(
-        f"{url}/dismiss-source-change", json={"review_token": token}, headers=headers
-    )
+    body = await dismiss_body(client, headers, url)
+    await client.post(f"{url}/dismiss-source-change", json=body, headers=headers)
     category = str((await rows(engine, "SELECT id FROM categories"))[0][0])
     merchant = str((await rows(engine, "SELECT id FROM merchants"))[0][0])
     plain = await make_offer(client, headers, (category, merchant))
 
     again = await client.post(
-        f"{url}/dismiss-source-change", json={"review_token": token}, headers=headers
+        f"{url}/dismiss-source-change", json=body, headers=headers
     )
     plain_url = f"{OFFERS}/{plain}"
     hand_made = await client.post(
         f"{plain_url}/dismiss-source-change",
-        json={"review_token": await review_token(client, headers, plain_url)},
+        json=await dismiss_body(client, headers, plain_url),
         headers=headers,
     )
 
@@ -158,12 +165,12 @@ async def test_a_stale_token_is_409_offer_changed_and_the_marker_stays(
     client, engine, world
 ):
     headers, url, _ = world
-    stale = await review_token(client, headers, url)
+    stale = await dismiss_body(client, headers, url)
     await client.patch(url, json={"summary": "Rewritten by somebody"}, headers=headers)
     before = await stored(engine)
 
     result = await client.post(
-        f"{url}/dismiss-source-change", json={"review_token": stale}, headers=headers
+        f"{url}/dismiss-source-change", json=stale, headers=headers
     )
 
     assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
@@ -171,16 +178,84 @@ async def test_a_stale_token_is_409_offer_changed_and_the_marker_stays(
     assert await audit_rows(engine, "admin.offers.source_change_dismissed") == []
 
 
+async def test_a_newer_marker_than_the_page_showed_is_409_offer_changed_and_stays(
+    client, engine, world
+):
+    headers, url, _ = world
+    body = await dismiss_body(client, headers, url)
+    async with engine.begin() as connection:  # the importer notes another source change
+        await connection.execute(
+            text(
+                "UPDATE offer_imports SET source_changed_at = now() + interval '1 hour'"
+            )
+        )
+    before = await stored(engine)
+
+    result = await client.post(
+        f"{url}/dismiss-source-change", json=body, headers=headers
+    )
+
+    assert (result.status_code, result.json()["code"]) == (409, "offer_changed")
+    assert await stored(engine) == before
+    assert await audit_rows(engine, "admin.offers.source_change_dismissed") == []
+
+
+async def test_the_marker_survives_the_json_round_trip_to_the_database_exactly(
+    client, engine, world
+):
+    headers, url, _ = world
+    async with (
+        engine.begin() as connection
+    ):  # a marker with microseconds, as the importer's clock gives
+        await connection.execute(
+            text(
+                "UPDATE offer_imports SET source_changed_at = '2026-11-09 12:34:56.123457+00'"
+            )
+        )
+    body = await dismiss_body(client, headers, url)
+
+    result = await client.post(
+        f"{url}/dismiss-source-change", json=body, headers=headers
+    )
+
+    assert result.status_code == 200
+    assert (await stored(engine))[0][4] is None
+
+
+async def test_a_dismissal_without_the_marker_or_with_a_naive_one_is_422(
+    client, engine, world
+):
+    headers, url, _ = world
+    body = await dismiss_body(client, headers, url)
+    before = await stored(engine)
+
+    results = [
+        await client.post(
+            f"{url}/dismiss-source-change",
+            json={"review_token": body["review_token"]},
+            headers=headers,
+        ),
+        await client.post(
+            f"{url}/dismiss-source-change",
+            json={**body, "source_changed_at": "2026-02-05T09:00:00"},
+            headers=headers,
+        ),
+    ]
+
+    assert [r.status_code for r in results] == [422, 422]
+    assert await stored(engine) == before
+
+
 async def test_an_admin_without_offers_publish_is_403_and_nothing_changes(
     client, engine, world
 ):
     headers, url, _ = world
-    token = await review_token(client, headers, url)
+    body = await dismiss_body(client, headers, url)
     before = await stored(engine)
 
     result = await client.post(
         f"{url}/dismiss-source-change",
-        json={"review_token": token},
+        json=body,
         headers=as_user("reader"),
     )
 
