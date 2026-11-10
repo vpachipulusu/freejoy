@@ -1,0 +1,133 @@
+# Scheduled housekeeping (FREEJ-50). Once a day it runs the three backend maintenance commands against the
+# production database, from fastapi_backend/:
+#
+#   1. commands.check_offer_health   expires published offers whose end date has passed (one audit row each) and
+#                                    reports unreachable destinations to Sentry (docs/developer/backend-offer-health.md)
+#   2. commands.prune_click_events   deletes click events older than 13 months (docs/developer/freejoy-affiliate.md)
+#   3. commands.purge_subscribers    deletes stale alert sign-ups past retention (docs/developer/backend-subscribers.md)
+#
+# Each command is idempotent and safe to repeat. This workflow is OUTSIDE the CI gate: it does not run on pull
+# requests and nothing requires it. A failed run shows up as a red run on the Actions tab (and in the email
+# GitHub sends to whoever last edited the schedule); it does not block merges.
+#
+# GitHub skips scheduled runs on a repository that has had no activity for 60 days (it disables the schedule and
+# the cron silently stops; re-enable the workflow on the Actions tab). Check by running it by hand with "Run workflow".
+#
+# Secrets (repository secrets, see docs/developer/workflow.md "Owner setup"): HOUSEKEEPING_DATABASE_URL (required)
+# and SENTRY_DSN (optional). No environment variable is introduced in the apps.
+#
+# Not scheduled on purpose: commands.import_awin_offers. It has not been verified against the live Awin API yet.
+name: Scheduled housekeeping
+
+on:
+  schedule:
+    # 03:17 UTC daily: quiet hours for a UK audience, and off the top of the hour, when GitHub's scheduler is busiest.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      skip_reachability:
+        description: Only expire ended offers; make no network request and send no Sentry summary
+        type: boolean
+        default: false
+      limit:
+        description: Most URLs check_offer_health requests in this run (whole number, 1 to 5000; blank keeps the default of 500)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-housekeeping
+  cancel-in-progress: false
+
+jobs:
+  housekeeping:
+    name: Housekeeping
+    runs-on: ubuntu-latest
+    # check_offer_health bounds its request phase at 900 s (--max-seconds); expiry, the other two commands, and the
+    # dependency install come on top.
+    timeout-minutes: 30
+    env:
+      # app.core.config builds the full Settings object when a command starts, and with ENVIRONMENT=production
+      # (kept so Sentry files these events under "production") it refuses to start without the settings below.
+      # The three commands never read them: they are harmless placeholders, not secrets, and nothing is ever
+      # sent to Upstash, Firebase or a signing endpoint. The real values are only set on the web deployment.
+      ENVIRONMENT: production
+      UPSTASH_REDIS_REST_URL: https://unused.invalid
+      UPSTASH_REDIS_REST_TOKEN: unused-placeholder
+      SUBSCRIBER_TOKEN_SECRET: placeholder-unused-by-housekeeping-commands
+      BACKEND_INTERNAL_KEY: placeholder-unused-by-housekeeping-commands
+      RATE_LIMIT_EMAIL_KEY: placeholder-unused-by-housekeeping-commands
+      FIREBASE_ADMIN_PROJECT_ID: unused-placeholder
+      FIREBASE_ADMIN_CLIENT_EMAIL: unused-placeholder@example.invalid
+      FIREBASE_ADMIN_PRIVATE_KEY: unused-placeholder
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.8.12'
+          enable-cache: true
+          cache-dependency-glob: fastapi_backend/uv.lock
+
+      - name: Install dependencies
+        working-directory: fastapi_backend
+        run: uv sync --frozen
+
+      # Fails with a clear message instead of a settings validation error from the first command. The secret is
+      # only tested for emptiness, never printed.
+      - name: Require the HOUSEKEEPING_DATABASE_URL secret
+        id: guard
+        env:
+          HOUSEKEEPING_DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
+        run: |
+          if [ -z "${HOUSEKEEPING_DATABASE_URL}" ]; then
+            echo "::error title=Missing secret::Set the repository secret HOUSEKEEPING_DATABASE_URL (docs/developer/workflow.md, Owner setup)."
+            exit 1
+          fi
+
+      # The three commands run in order and each runs even when an earlier one failed (!cancelled()), but only
+      # once the guard has passed. Any failed step still fails the job. No retries: every command is safe to
+      # re-run by hand.
+      - name: check_offer_health (expire ended offers, report dead destinations)
+        if: ${{ !cancelled() && steps.guard.conclusion == 'success' }}
+        working-directory: fastapi_backend
+        env:
+          DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # Inputs go through the environment, never into the script text. Both are empty on a scheduled run.
+          SKIP_REACHABILITY: ${{ inputs.skip_reachability }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${SKIP_REACHABILITY}" = "true" ]; then
+            args+=(--skip-reachability)
+          fi
+          if [ -n "${LIMIT}" ]; then
+            if ! [[ "${LIMIT}" =~ ^[0-9]+$ ]]; then
+              echo "::error title=Bad input::limit must be a whole number."
+              exit 2
+            fi
+            args+=(--limit "${LIMIT}")
+          fi
+          uv run python -m commands.check_offer_health "${args[@]}"
+
+      - name: prune_click_events (delete click events older than 13 months)
+        if: ${{ !cancelled() && steps.guard.conclusion == 'success' }}
+        working-directory: fastapi_backend
+        env:
+          DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: uv run python -m commands.prune_click_events
+
+      - name: purge_subscribers (delete sign-ups past retention)
+        if: ${{ !cancelled() && steps.guard.conclusion == 'success' }}
+        working-directory: fastapi_backend
+        env:
+          DATABASE_URL: ${{ secrets.HOUSEKEEPING_DATABASE_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: uv run python -m commands.purge_subscribers
