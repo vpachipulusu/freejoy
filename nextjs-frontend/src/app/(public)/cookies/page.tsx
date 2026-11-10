@@ -30,11 +30,12 @@ export default function CookiesPage() {
         nothing about you. It stays until you remove the freebies or clear your browser data, and it
         is not copied to your other devices. It is not stored in a database or against an account.
         The Saved page sends those names to our server only to look the freebies up; we do not keep
-        them, but looking them up produces ordinary, short-lived server log entries, as any page
-        request does. If error reporting is switched on, error reports may include the name of a
-        button you pressed, which for the heart is the name of the freebie. We treat this storage as
-        something you asked for, which is our current reading and is still to be confirmed in
-        review.
+        them, but looking them up produces ordinary server log entries, as any page request does.
+        Our application keeps its log for 14 days and its error log for 30 days; how long our
+        hosting service and our backend keep theirs will be added here. If error reporting is
+        switched on, page addresses of freebies you open can appear in error and timing reports. We
+        treat this storage as something you asked for, which is our current reading and is still to
+        be confirmed in review.
       </p>
       <h2>If you sign in</h2>
       <p>
@@ -54,7 +55,7 @@ export default function CookiesPage() {
           'Final cookie and local-storage list, including strictly necessary items from the framework and sign-in',
           'Whether the conclusion that no banner is needed on the public pages holds',
           'Whether the saved-freebies list in local storage (freejoy.saved.v1) is storage the visitor asked for, so that no consent is needed',
-          'Whether the server log entries made when the Saved page looks freebies up, and error reports that may name a pressed button (the heart is named after the freebie), need wording or retention here',
+          'Retention of the server logs of the backend and the hosting service for Saved page lookups (the periods for the application itself are stated above), and whether page addresses of freebies a visitor opens in error and timing reports need wording',
           'Whether error monitoring needs any wording here or only in the privacy notice',
           'Consent mechanism and wording before any optional cookie, analytics or affiliate pixel is added',
           'Expiry period stated for each item',

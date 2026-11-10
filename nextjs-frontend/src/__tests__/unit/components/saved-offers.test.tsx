@@ -13,6 +13,9 @@ import { toCardOffer, type CardOffer, type Offer } from '@/lib/catalogue/types';
 import { SAVED_OFFERS_REQUEST_LIMIT } from '@/lib/saved/limits';
 import { SAVED_STORAGE_KEY, removeSaved } from '@/lib/saved/saved-store';
 
+// 48 cards with a user-event click each is slow on a busy machine; the default 5 s timed out once.
+vi.setConfig({ testTimeout: 20_000 });
+
 const live = OFFERS.filter(
   (offer) => offer.status === 'published' && (!offer.endAt || offer.endAt >= FIXTURE_TODAY)
 );

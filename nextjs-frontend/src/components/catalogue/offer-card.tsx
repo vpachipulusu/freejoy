@@ -14,6 +14,8 @@ interface OfferCardProps {
   offer: CardOffer;
   merchant: Merchant;
   className?: string;
+  /** Pass `false` to stop the title link prefetching its page. Left undefined, Next.js decides, as before. */
+  prefetch?: boolean;
 }
 
 export function offerHref(offer: Pick<CardOffer, 'slug'>): string {
@@ -26,7 +28,7 @@ export function offerHref(offer: Pick<CardOffer, 'slug'>): string {
  * target; the demo badge is visible on fixture offers. The heart (`SaveButton`, FREEJ-28) is the card's only
  * other control: a client island beside the link, never inside it. The card itself stays a server component.
  */
-export function OfferCard({ offer, merchant, className }: OfferCardProps) {
+export function OfferCard({ offer, merchant, className, prefetch }: OfferCardProps) {
   const href = offerHref(offer);
   const freshness = displayFreshness(offer);
   return (
@@ -58,6 +60,7 @@ export function OfferCard({ offer, merchant, className }: OfferCardProps) {
         {/* Stretched link: its ::after covers the card, so the card draws the one focus outline (the focus-proxy rule in globals.css) and the link draws none. */}
         <Link
           href={href}
+          prefetch={prefetch}
           className="after:absolute after:inset-0 after:rounded-card focus-visible:outline-none"
         >
           {offer.title}
@@ -90,10 +93,12 @@ interface OfferGridProps {
   offers: CardOffer[];
   merchants: Merchant[];
   className?: string;
+  /** Passed to every card; the Saved page turns it off so it does not prefetch the whole list. */
+  prefetch?: boolean;
 }
 
 /** Two columns on phones (10px gap in the design), three at tablet, four on desktop. */
-export function OfferGrid({ offers, merchants, className }: OfferGridProps) {
+export function OfferGrid({ offers, merchants, className, prefetch }: OfferGridProps) {
   const bySlug = new Map(merchants.map((merchant) => [merchant.slug, merchant]));
   return (
     <ul
@@ -109,7 +114,7 @@ export function OfferGrid({ offers, merchants, className }: OfferGridProps) {
           };
         return (
           <li key={offer.id} className="flex">
-            <OfferCard offer={offer} merchant={merchant} className="w-full" />
+            <OfferCard offer={offer} merchant={merchant} className="w-full" prefetch={prefetch} />
           </li>
         );
       })}

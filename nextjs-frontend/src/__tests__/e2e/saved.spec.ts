@@ -16,9 +16,10 @@ test.skip(
   'Fixture specs: the server is on the live catalogue'
 );
 
-// The Saved action allows 6 calls a minute per visitor address, and with no trusted address header every visitor
-// shares one bucket. Start the server with TRUSTED_CLIENT_IP_HEADER=x-e2e-client-ip so each test can have its own
-// address (the same opt-in the other specs use for the rate limiter).
+// The Saved action budgets backend reads per visitor address (72 a minute; 60 a minute shared by everyone when
+// there is no trusted address). Each test sends its own address, which the server believes only in a local e2e
+// build: scripts/e2e-env.cjs (toNextProcessEnv, used by the e2e build and start scripts) sets
+// NEXT_DIST_DIR=.next-e2e, E2E_RATE_LIMIT_TEST_MODE=1 and TRUSTED_CLIENT_IP_HEADER=x-e2e-client-ip.
 test.beforeEach(async ({ page }) => {
   await useDistinctClientIp(page);
 });
@@ -300,10 +301,10 @@ test.describe('Removing a card on /saved', () => {
     await expect(hearts.nth(8)).toBeAttached();
 
     await hearts.nth(8).focus();
-    const y = await page.evaluate(() => {
-      window.scrollTo({ top: 200, behavior: 'instant' });
-      return window.scrollY;
-    });
+    await page.evaluate(() => window.scrollTo({ top: 200, behavior: 'instant' }));
+    // Let late layout (fonts, scroll anchoring) settle, so the baseline is the position the visitor really has.
+    await page.waitForTimeout(500);
+    const y = await page.evaluate(() => window.scrollY);
     expect(y).toBeGreaterThan(0);
     const countBefore = await hearts.count();
     const nextLabel = await hearts.nth(9).getAttribute('aria-label');

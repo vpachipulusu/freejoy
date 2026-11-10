@@ -16,6 +16,7 @@ import {
 } from '@/lib/catalogue';
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from '@/lib/catalogue/slug';
 import { SAVED_OFFERS_REQUEST_LIMIT } from '@/lib/saved/limits';
+import { clientBucket } from '@/lib/middleware/client-bucket';
 import { rateLimit } from '@/lib/middleware/rate-limit';
 
 /**
@@ -32,16 +33,23 @@ import { rateLimit } from '@/lib/middleware/rate-limit';
  * Protecting the backend (this action is public and unauthenticated; the backend allows 120 reads a minute
  * per address, shared by all visitors when no trusted client-IP header is configured):
  * - at most `SAVED_OFFERS_REQUEST_LIMIT` (24) slugs a call and `MAX_CONCURRENT_LOOKUPS` (4) reads at a time;
- * - at most `CALLS_PER_MINUTE` (6) calls a minute per visitor address (one shared bucket when there is no
- *   trusted address header), refused before any read;
- * - the first 429 from the backend, a first full round in which every read failed, or `DEADLINE_MS` (about
- *   8 s) overall stops the call taking new slugs; the rest come back `unavailable` with no backend call.
+ * - a budget of backend READS, not calls: `slugs.length` is charged before any read. A visitor with a trusted
+ *   address gets `KNOWN_READS_PER_MINUTE` (72) a minute (keyed on the IPv6 /64 or IPv4 address, as the backend
+ *   does). With no trusted address everyone shares `SHARED_READS_PER_MINUTE` (60) a minute, so Saved can never
+ *   take more than half the backend's 120 and degrades softly (a curated failure, nothing pruned) instead of
+ *   one client locking the page for all. The limiter is in memory, per server instance;
+ * - the first 429 from the backend, 4 unavailable results in a row (any answer resets the count), or
+ *   `DEADLINE_MS` (about 8 s) overall stops the call taking new slugs; the rest come back `unavailable` with no
+ *   backend call (a stale cache entry may still refresh in the background, which costs the backend one read).
  *
  * Nothing here logs a slug, and backend text never reaches the browser.
  */
 
 const MAX_CONCURRENT_LOOKUPS = 4;
-const CALLS_PER_MINUTE = 6;
+const KNOWN_READS_PER_MINUTE = 72;
+const SHARED_READS_PER_MINUTE = 60;
+const BUDGET_WINDOW_MS = 60_000;
+const MAX_CONSECUTIVE_FAILURES = 4;
 const DEADLINE_MS = 8_000;
 
 const INVALID_REQUEST_MESSAGE = 'We could not check your saved freebies. Please try again.';
@@ -71,17 +79,17 @@ async function resolveSlug(slug: string, today: string): Promise<Resolution> {
   const lookup = await lookupOffer(slug);
   if (lookup.kind === 'not_found' || lookup.kind === 'ended') return { kind: 'missing' };
   if (lookup.kind === 'unreadable') return { kind: 'unavailable' };
-  // The answer must be for the slug asked, and the facade also answers for an expired offer (so its page can
-  // say it ended): a card must not.
-  if (lookup.offer.slug !== slug || !isLive(lookup.offer, today)) return { kind: 'missing' };
+  // An answer for another slug is a fault in the catalogue, not a definitive "no such offer": keep the save.
+  if (lookup.offer.slug !== slug) return { kind: 'unavailable' };
+  // The facade also answers for an expired offer (so its page can say it ended): a card must not.
+  if (!isLive(lookup.offer, today)) return { kind: 'missing' };
   return { kind: 'found', offer: toCardOffer(await withMerchant(lookup.offer)) };
 }
 
-/** Whether to stop taking new slugs: a 429, a whole first round of failures, or too long. */
+/** Whether to stop taking new slugs: a 429, a run of failures with no answer between them, or too long. */
 class Pacing {
   private stopped = false;
-  private completed = 0;
-  private answered = 0;
+  private failuresInARow = 0;
   private readonly deadline = Date.now() + DEADLINE_MS;
 
   get shouldStop(): boolean {
@@ -89,10 +97,9 @@ class Pacing {
   }
 
   record(resolution: Resolution): void {
-    this.completed += 1;
-    if (resolution.kind !== 'unavailable') this.answered += 1;
-    // A full round (as many reads as run at once) with no answer at all: the backend is down.
-    if (this.answered === 0 && this.completed >= MAX_CONCURRENT_LOOKUPS) this.stopped = true;
+    this.failuresInARow = resolution.kind === 'unavailable' ? this.failuresInARow + 1 : 0;
+    // A whole round's worth of failures with nothing answered between them: the backend is down.
+    if (this.failuresInARow >= MAX_CONSECUTIVE_FAILURES) this.stopped = true;
   }
 
   rateLimited(): void {
@@ -132,26 +139,55 @@ async function resolveAll(slugs: readonly string[], today: string): Promise<Reso
   return results;
 }
 
-async function visitorKey(): Promise<string> {
+/** The visitor's rate-limit key (IPv6 grouped by /64, IPv4-mapped as IPv4), or null with no trusted address. */
+async function visitorKey(): Promise<string | null> {
   try {
-    return (await readTrustedClientIp()) ?? 'unknown';
+    const address = await readTrustedClientIp();
+    return address ? clientBucket(address) : null;
   } catch {
-    return 'unknown'; // no request scope
+    return null; // no request scope
   }
+}
+
+let warnedNoClientAddress = false;
+
+/** Takes `reads` from the visitor's budget (or the shared one); false when it does not fit. */
+async function chargeReads(reads: number): Promise<boolean> {
+  const key = await visitorKey();
+  if (key === null && !warnedNoClientAddress && process.env.NODE_ENV === 'production') {
+    warnedNoClientAddress = true;
+    logger.warn(
+      'Saved offers have no trusted client address, so every visitor shares one read budget; set TRUSTED_CLIENT_IP_HEADER (or use Vercel)'
+    );
+  }
+  const allowed =
+    key === null
+      ? rateLimit('all', {
+          scope: 'saved-shared',
+          maxRequests: SHARED_READS_PER_MINUTE,
+          windowMs: BUDGET_WINDOW_MS,
+          cost: reads,
+        })
+      : rateLimit(key, {
+          scope: 'saved',
+          maxRequests: KNOWN_READS_PER_MINUTE,
+          windowMs: BUDGET_WINDOW_MS,
+          cost: reads,
+        });
+  if (!allowed.success) {
+    // Counts only: never an address, never a slug.
+    logger.warn('Saved offers refused: over the read budget', { reads, shared: key === null });
+  }
+  return allowed.success;
 }
 
 export async function loadSavedOffersAction(input: unknown): Promise<SavedOffersResult> {
   const parsed = slugsSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: INVALID_REQUEST_MESSAGE };
 
-  const allowed = rateLimit(await visitorKey(), {
-    scope: 'saved',
-    maxRequests: CALLS_PER_MINUTE,
-    windowMs: 60_000,
-  });
-  if (!allowed.success) return { success: false, error: UNAVAILABLE_MESSAGE };
-
   const slugs = [...new Set(parsed.data)];
+  if (!(await chargeReads(slugs.length))) return { success: false, error: UNAVAILABLE_MESSAGE };
+
   let today: string;
   try {
     today = await getToday();

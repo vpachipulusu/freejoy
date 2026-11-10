@@ -132,11 +132,25 @@ function parseEnded(body: unknown): ExpiredOfferData | null {
   return { slug: data.slug, title: data.title, category, ended_at: endedAt };
 }
 
-/** The FastAPI error envelope: `{ success: false, ... }`. */
-function isBackendEnvelope(body: unknown): boolean {
-  return (
-    typeof body === 'object' && body !== null && (body as { success?: unknown }).success === false
-  );
+/** The `code` the backend puts on its own 404 for an unknown or unpublished offer (never branch on the text). */
+const OFFER_NOT_FOUND_CODE = 'offer_not_found';
+
+type ErrorBody = { success?: unknown; code?: unknown; expired?: unknown };
+
+function asErrorBody(body: unknown): ErrorBody | null {
+  return typeof body === 'object' && body !== null ? (body as ErrorBody) : null;
+}
+
+/** The backend's own "no such offer": its error envelope WITH the offer_not_found code. */
+function isOfferNotFound(body: unknown): boolean {
+  const parsed = asErrorBody(body);
+  return parsed?.success === false && parsed.code === OFFER_NOT_FOUND_CODE;
+}
+
+/** The backend's own "this offer has ended": its error envelope with `expired: true`. */
+function isOfferEnded(body: unknown): boolean {
+  const parsed = asErrorBody(body);
+  return parsed?.success === false && parsed.expired === true;
 }
 
 async function loadOffer(slug: string): Promise<OfferReadResult> {
@@ -149,12 +163,13 @@ async function loadOffer(slug: string): Promise<OfferReadResult> {
     return response;
   }, backendOptions());
   if (result.success) return { kind: 'found', offer: result.data };
-  // Only the backend's own envelope is a definitive "no such offer". A 404 from anything else in the path (a
-  // proxy's HTML page, a wrong base URL) is an outage: the Saved page must never prune on it.
-  if (result.status === 404) {
-    return isBackendEnvelope(errorBody) ? { kind: 'not_found' } : fail('read_offer', result);
+  // Only the backend's own answers are definitive, and pruning a saved offer is irreversible: a 404 or 410 from
+  // anything else in the path (a proxy's HTML page, a wrong base URL, the backend's route-level "Not Found")
+  // is an outage.
+  if (result.status === 404 && isOfferNotFound(errorBody)) return { kind: 'not_found' };
+  if (result.status === 410 && isOfferEnded(errorBody)) {
+    return { kind: 'gone', ended: parseEnded(errorBody) };
   }
-  if (result.status === 410) return { kind: 'gone', ended: parseEnded(errorBody) };
   return fail('read_offer', result);
 }
 

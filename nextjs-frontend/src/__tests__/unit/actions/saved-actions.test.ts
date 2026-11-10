@@ -237,11 +237,11 @@ describe('loadSavedOffersAction: it cannot be used to flood the backend', () => 
     expect(result.offers).toEqual([]);
   });
 
-  it('refuses the 7th call a minute from one address with the curated failure and no reads', async () => {
+  it('budgets backend reads, not calls: a known address gets 72 reads a minute, the next is refused with no lookup', async () => {
     ip.read.mockResolvedValue('203.0.113.7');
     const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
-    for (let call = 0; call < 6; call += 1) {
-      expect((await loadSavedOffersAction(['some-offer'])).success).toBe(true);
+    for (const count of [24, 24, 24]) {
+      expect((await loadSavedOffersAction(manySlugs(count))).success).toBe(true);
     }
     lookup.mockClear();
     const today = vi.spyOn(fixtureSource, 'getToday');
@@ -255,12 +255,143 @@ describe('loadSavedOffersAction: it cannot be used to flood the backend', () => 
     expect((await loadSavedOffersAction(['some-offer'])).success).toBe(true);
   });
 
-  it('shares one bucket when there is no trusted address header', async () => {
-    ip.read.mockRejectedValue(new Error('no request scope'));
-    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
-    for (let call = 0; call < 6; call += 1) await loadSavedOffersAction(['some-offer']);
+  it('with no trusted address, shares 60 reads a minute in total: 60 pass, the 61st is refused with no lookup and no date read', async () => {
+    const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (const count of [24, 24, 12]) {
+      expect((await loadSavedOffersAction(manySlugs(count))).success).toBe(true);
+    }
+    lookup.mockClear();
+    const today = vi.spyOn(fixtureSource, 'getToday');
 
-    expect((await loadSavedOffersAction(['some-offer'])).success).toBe(false);
+    const refused = await loadSavedOffersAction(['one-more']);
+
+    expect(refused).toEqual({ success: false, error: expect.any(String) });
+    expect(lookup).not.toHaveBeenCalled();
+    expect(today).not.toHaveBeenCalled();
+  });
+
+  it('refuses a call that does not fit the shared budget as a whole, and charges it nothing', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (const count of [24, 24]) await loadSavedOffersAction(manySlugs(count));
+
+    expect((await loadSavedOffersAction(manySlugs(13))).success).toBe(false);
+    expect((await loadSavedOffersAction(manySlugs(12))).success).toBe(true);
+  });
+
+  it('charges one read for a one-slug call, so it does not use up a 24-slug allowance', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    expect((await loadSavedOffersAction(['one'])).success).toBe(true);
+    expect((await loadSavedOffersAction(manySlugs(24))).success).toBe(true);
+    expect((await loadSavedOffersAction(manySlugs(24))).success).toBe(true);
+    // 1 + 24 + 24 = 49 so far: 11 reads are left of the 60.
+    expect((await loadSavedOffersAction(manySlugs(11))).success).toBe(true);
+    expect((await loadSavedOffersAction(['one'])).success).toBe(false);
+  });
+
+  it('charges the deduplicated slugs, not the list as sent', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (let call = 0; call < 10; call += 1) {
+      expect((await loadSavedOffersAction(Array(24).fill('same-offer'))).success).toBe(true);
+    }
+  });
+
+  it('leaves a known address untouched when the shared bucket is spent', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (const count of [24, 24, 12]) await loadSavedOffersAction(manySlugs(count));
+    expect((await loadSavedOffersAction(['x'])).success).toBe(false);
+
+    ip.read.mockResolvedValue('203.0.113.7');
+
+    expect((await loadSavedOffersAction(manySlugs(24))).success).toBe(true);
+  });
+
+  it('puts two addresses of one IPv6 /64 in one bucket, and an IPv4-mapped address with its IPv4 one', async () => {
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+
+    ip.read.mockResolvedValue('2001:db8:1:2::1');
+    for (const count of [24, 24, 24]) await loadSavedOffersAction(manySlugs(count));
+    ip.read.mockResolvedValue('2001:db8:1:2:ffff:ffff:ffff:ffff');
+    expect((await loadSavedOffersAction(['x'])).success).toBe(false);
+    ip.read.mockResolvedValue('2001:db8:1:3::1');
+    expect((await loadSavedOffersAction(['x'])).success).toBe(true);
+
+    ip.read.mockResolvedValue('203.0.113.7');
+    for (const count of [24, 24, 24]) await loadSavedOffersAction(manySlugs(count));
+    ip.read.mockResolvedValue('::ffff:203.0.113.7');
+    expect((await loadSavedOffersAction(['x'])).success).toBe(false);
+  });
+
+  it('warns once per process, in production, that it has no client address, and never names one', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    vi.resetModules();
+    const { loadSavedOffersAction: fresh } = await import('@/app/actions/saved-actions');
+
+    await fresh(['one']);
+    await fresh(['two']);
+
+    const unknownWarnings = logger.warn.mock.calls.filter(([message]) =>
+      /client address/i.test(String(message))
+    );
+    expect(unknownWarnings).toHaveLength(1);
+    vi.unstubAllEnvs();
+  });
+
+  it('does not warn about a missing client address outside production, or when there is one', async () => {
+    await loadSavedOffersAction(['one']);
+    ip.read.mockResolvedValue('203.0.113.7');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const { loadSavedOffersAction: fresh } = await import('@/app/actions/saved-actions');
+    await fresh(['one']);
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it('logs a count-only warning for a refusal: no address, no slug', async () => {
+    ip.read.mockResolvedValue('203.0.113.7');
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'not_found' });
+    for (const count of [24, 24, 24]) await loadSavedOffersAction(manySlugs(count));
+    logger.warn.mockClear();
+
+    await loadSavedOffersAction(['very-private-slug']);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(logger.warn.mock.calls);
+    expect(logged).toMatch(/reads/);
+    expect(logged).not.toContain('203.0.113.7');
+    expect(logged).not.toContain('very-private-slug');
+  });
+
+  it('stops after 4 unavailable results in a row, however many answers came earlier', async () => {
+    let calls = 0;
+    const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) return { kind: 'found', offer: live[0] };
+      throw new CatalogueUnavailableError();
+    });
+
+    const result = dataOf(await loadSavedOffersAction(manySlugs(24)));
+
+    // One answer, then the backend fell over: at most 1 + 7 reads, not 24.
+    expect(lookup.mock.calls.length).toBeLessThanOrEqual(8);
+    expect(result.unavailable.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it('keeps reading when failures are scattered among answers', async () => {
+    let calls = 0;
+    const lookup = vi.spyOn(fixtureSource, 'lookupOffer').mockImplementation(async () => {
+      calls += 1;
+      if (calls % 3 === 0) throw new CatalogueUnavailableError();
+      return { kind: 'not_found' };
+    });
+
+    const result = dataOf(await loadSavedOffersAction(manySlugs(24)));
+
+    expect(lookup).toHaveBeenCalledTimes(24);
+    expect(result.unavailable).toHaveLength(8);
+    expect(result.missing).toHaveLength(16);
   });
 
   it('with every read failing, 24 slugs cost at most 8 reads', async () => {
@@ -301,13 +432,23 @@ describe('loadSavedOffersAction: what counts as gone', () => {
     expect(result.missing).toEqual([]);
   });
 
-  it('calls an answer for a different slug missing, not a card for the wrong offer', async () => {
+  it('calls an answer for a different slug unavailable (a fault, not a definitive no), never a card for the wrong offer', async () => {
     vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'found', offer: live[0] });
 
     const result = dataOf(await loadSavedOffersAction(['some-other-slug']));
 
     expect(result.offers).toEqual([]);
-    expect(result.missing).toEqual(['some-other-slug']);
+    expect(result.unavailable).toEqual(['some-other-slug']);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('still calls a found offer that is no longer live missing: that is a definitive answer', async () => {
+    const pastEnd = { ...live[0], endAt: '2026-10-01' };
+    vi.spyOn(fixtureSource, 'lookupOffer').mockResolvedValue({ kind: 'found', offer: pastEnd });
+
+    const result = dataOf(await loadSavedOffersAction([pastEnd.slug]));
+
+    expect(result.missing).toEqual([pastEnd.slug]);
   });
 });
 

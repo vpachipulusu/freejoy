@@ -233,7 +233,7 @@ export function SavedOffers() {
         )}
         <div ref={listRef} onClickCapture={markRemoval}>
           <h2 className="sr-only">Your saved freebies</h2>
-          <OfferGrid offers={[...state.offers]} merchants={[]} />
+          <OfferGrid offers={[...state.offers]} merchants={[]} prefetch={false} />
         </div>
         {(state.hasMore || loadingMore) && (
           <ShowMoreButton loading={loadingMore} onClick={markShowMore} />

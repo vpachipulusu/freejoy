@@ -168,6 +168,44 @@ describe('the visitor address', () => {
     expect(sentRequest().headers.get('X-Client-IP')).toBe('203.0.113.20');
   });
 
+  it('refuses the e2e test header in an ordinary build, even when it is configured', async () => {
+    vi.stubEnv('TRUSTED_CLIENT_IP_HEADER', 'x-e2e-client-ip');
+    mocks.headerValues.set('x-e2e-client-ip', '10.1.2.3');
+    mocks.headerValues.set('host', 'localhost:3000');
+
+    await fetchOffers();
+
+    expect(sentRequest().headers.get('X-Client-IP')).toBeNull();
+  });
+
+  it.each([
+    ['the mode switch is off', { E2E_RATE_LIMIT_TEST_MODE: '0', NEXT_DIST_DIR: '.next-e2e' }, 'localhost:3000'],
+    ['the build is not the e2e folder', { E2E_RATE_LIMIT_TEST_MODE: '1', NEXT_DIST_DIR: '.next' }, 'localhost:3000'],
+    ['it runs on Vercel', { E2E_RATE_LIMIT_TEST_MODE: '1', NEXT_DIST_DIR: '.next-e2e', VERCEL_ENV: 'preview' }, 'localhost:3000'],
+    ['the host is not local', { E2E_RATE_LIMIT_TEST_MODE: '1', NEXT_DIST_DIR: '.next-e2e' }, 'freejoy.example'],
+  ])('refuses the e2e test header when %s', async (_name, env, host) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    vi.stubEnv('TRUSTED_CLIENT_IP_HEADER', 'x-e2e-client-ip');
+    mocks.headerValues.set('x-e2e-client-ip', '10.1.2.3');
+    mocks.headerValues.set('host', host);
+
+    await fetchOffers();
+
+    expect(sentRequest().headers.get('X-Client-IP')).toBeNull();
+  });
+
+  it('accepts the e2e test header only in a local e2e build, the same test the edge limiter uses', async () => {
+    vi.stubEnv('E2E_RATE_LIMIT_TEST_MODE', '1');
+    vi.stubEnv('NEXT_DIST_DIR', '.next-e2e');
+    vi.stubEnv('TRUSTED_CLIENT_IP_HEADER', 'x-e2e-client-ip');
+    mocks.headerValues.set('x-e2e-client-ip', '10.1.2.3');
+    mocks.headerValues.set('host', 'localhost:3000');
+
+    await fetchOffers();
+
+    expect(sentRequest().headers.get('X-Client-IP')).toBe('10.1.2.3');
+  });
+
   it('prefers the Vercel header, then falls back to the configured one', async () => {
     vi.stubEnv('VERCEL', '1');
     vi.stubEnv('TRUSTED_CLIENT_IP_HEADER', 'x-real-ip');

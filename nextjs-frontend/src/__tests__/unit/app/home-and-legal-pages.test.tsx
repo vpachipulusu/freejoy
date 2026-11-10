@@ -396,36 +396,43 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     expect(container.textContent).toMatch(/draft/i);
   });
 
-  it('the cookie notice is honest that the Saved page looks freebies up on the server, and shows the key as code', () => {
+  it('the cookie notice says what the lookups leave behind, with the real periods, and shows the key as code', () => {
     const { container } = render(<CookiesPage />);
+    const text = container.textContent ?? '';
 
-    expect(container.textContent).toMatch(/not stored in a database or against an account/i);
-    expect(container.textContent).toMatch(/ordinary, short-lived server log entries/i);
-    expect(container.textContent).toMatch(/error reports may include the name of a button/i);
+    expect(text).toMatch(/not stored in a database or against an account/i);
+    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(/14 days/);
+    expect(text).toMatch(/30 days/);
+    expect(text).not.toMatch(/short-lived/i);
+    expect(text).not.toMatch(/name of a button/i);
     expect(container.querySelector('code')).toHaveTextContent('freejoy.saved.v1');
-    expect(container.textContent).not.toContain('`freejoy.saved.v1`');
+    expect(text).not.toContain('`freejoy.saved.v1`');
   });
 
-  it('both drafts ask the reviewer about the server logs and the error reports', () => {
+  it('the privacy notice says the same, and asks the reviewer about backend and host log retention', () => {
+    const { container } = render(<PrivacyPage />);
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(/list of freebies you saved stays in your browser/i);
+    expect(text).toMatch(/no analytics event when you save or remove/i);
+    expect(text).toMatch(/not stored in a database or against an account/i);
+    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(/14 days/);
+    expect(text).not.toMatch(/short-lived/i);
+    expect(text).not.toMatch(/name of a button/i);
+    expect(text).toMatch(/draft/i);
+  });
+
+  it('both drafts leave backend and host log retention to the reviewer', () => {
     for (const Page of [CookiesPage, PrivacyPage]) {
       const { container, unmount } = render(<Page />);
-      const checklist = container.textContent ?? '';
 
-      expect(checklist).toMatch(/server log entries.*saved|saved.*server log entries/is);
-      expect(checklist).toMatch(/error report.*button|button.*error report/is);
+      expect(container.textContent).toMatch(
+        /retention of the server logs of the backend and the hosting service/i
+      );
       unmount();
     }
-  });
-
-  it('the privacy notice says the saved list stays on the device and records no event', () => {
-    const { container } = render(<PrivacyPage />);
-
-    expect(container.textContent).toMatch(/list of freebies you saved stays in your browser/i);
-    expect(container.textContent).toMatch(/no analytics event when you save or remove/i);
-    expect(container.textContent).toMatch(/not stored in a database or against an account/i);
-    expect(container.textContent).toMatch(/ordinary, short-lived server log entries/i);
-    expect(container.textContent).toMatch(/error reports may include the name of a button/i);
-    expect(container.textContent).toMatch(/draft/i);
   });
 });
 
