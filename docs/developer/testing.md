@@ -12,7 +12,7 @@ npm run test:coverage      # enforces the coverage ratchet (see below)
 ```
 
 - Config: `vitest.config.ts`. Environment is jsdom, setup file is `vitest.setup.ts`.
-- **Coverage ratchet.** The thresholds in `vitest.config.ts` are a ratchet: CI fails when coverage drops below them. They are set about 2 points under the measured coverage (statements 87, branches 86, functions 85, lines 88 against 89.4 / 88.3 / 87.1 / 90.3 measured); the project minimum is 80%. Raise them when measured coverage rises and never lower them, except after a tooling change that alters how coverage is measured. To raise them to the current values in one step, run `COVERAGE_RATCHET=1 npm run test:coverage`, then `npx prettier --write vitest.config.ts`, lower each number by about 2 points to leave a margin, and commit the config.
+- **Coverage ratchet.** The thresholds in `vitest.config.ts` are a ratchet: CI fails when coverage drops below them. They are set about 2 points under the measured coverage (statements 90, branches 88, functions 88, lines 91 against 91.5 / 90.3 / 89.7 / 92.3 measured); the project minimum is 80%. Raise them when measured coverage rises and never lower them, except after a tooling change that alters how coverage is measured. To raise them to the current values in one step, run `COVERAGE_RATCHET=1 npm run test:coverage`, then `npx prettier --write vitest.config.ts`, lower each number by about 2 points to leave a margin, and commit the config.
 - Coverage counts `src/lib/**`, `src/components/**` and `src/app/actions/**`.
 - Vitest excludes `e2e/` and `*.spec.ts`.
 

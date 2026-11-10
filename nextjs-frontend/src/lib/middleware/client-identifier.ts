@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import type { NextRequest } from 'next/server';
+import { isLocalE2eBuild } from './local-e2e';
 
 function validIp(value: string | null): string | null {
   const ip = value?.trim();
@@ -14,15 +15,8 @@ export function getClientIdentifier(request: NextRequest): string {
     return validIp(request.headers.get('x-vercel-forwarded-for')) ?? 'unknown';
   }
 
-  // next.config.ts bakes this flag off in ordinary builds. The runtime restrictions also
-  // reject an E2E artifact deployed to Vercel, including preview and development deployments.
-  const localE2e =
-    process.env.E2E_RATE_LIMIT_TEST_MODE === '1' &&
-    ['.next-e2e', '.next-e2e-dev'].includes(process.env.NEXT_DIST_DIR ?? '') &&
-    !process.env.VERCEL &&
-    !process.env.VERCEL_ENV &&
-    ['localhost', '127.0.0.1', '[::1]'].includes(request.nextUrl.hostname);
-  if (localE2e) {
+  // The same test as the trusted-header reader in lib/api/server.ts (see local-e2e.ts).
+  if (isLocalE2eBuild(request.nextUrl.hostname)) {
     const testIp = validIp(request.headers.get('x-e2e-client-ip'));
     if (testIp) return `e2e:${testIp}`;
   }

@@ -44,7 +44,7 @@ import {
   fetchOffer,
   fetchOffers,
 } from '@/lib/api/catalogue';
-import { CatalogueUnavailableError } from '@/lib/catalogue/errors';
+import { CatalogueRateLimitedError, CatalogueUnavailableError } from '@/lib/catalogue/errors';
 
 // Captured at import, before any mockClear, because the caches are created once at module load.
 const cacheCalls = [...mocks.cacheCalls];
@@ -255,10 +255,45 @@ describe('fetchOffer', () => {
   });
 
   it('maps a 404 to not found, a result the cache may keep', async () => {
-    mocks.readOffer.mockResolvedValue(failed(404, { success: false, error: 'Offer not found' }));
+    mocks.readOffer.mockResolvedValue(
+      failed(404, { success: false, error: 'Offer not found', code: 'offer_not_found' })
+    );
 
     await expect(fetchOffer('nope')).resolves.toEqual({ kind: 'not_found' });
     expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it('throws for a 404 whose body is not the backend envelope (an HTML page from a proxy, say)', async () => {
+    mocks.readOffer.mockResolvedValue(failed(404, '<html>Not Found</html>'));
+
+    await expect(fetchOffer('nope')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['the route-level "Not Found" with no code', { success: false, error: 'Not Found' }],
+    ['the offer message without the code', { success: false, error: 'Offer not found' }],
+    ['another code', { success: false, error: 'x', code: 'something_else' }],
+    ['the right code without the envelope', { code: 'offer_not_found' }],
+  ])('throws for a 404 with %s: never branch on the text', async (_name, body) => {
+    mocks.readOffer.mockResolvedValue(failed(404, body));
+
+    await expect(fetchOffer('nope')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+  });
+
+  it('throws for a 404 with no body at all', async () => {
+    mocks.readOffer.mockResolvedValue({ response: { ok: false, status: 404 } });
+
+    await expect(fetchOffer('nope')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+  });
+
+  it('throws a rate-limited error, still an unavailable error, for a 429', async () => {
+    mocks.readOffer.mockResolvedValue(failed(429, { success: false, error: 'slow down' }));
+
+    const error = await fetchOffer('free-tea').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CatalogueRateLimitedError);
+    expect(error).toBeInstanceOf(CatalogueUnavailableError);
   });
 
   it('maps a 410 to the ended stub', async () => {
@@ -291,14 +326,31 @@ describe('fetchOffer', () => {
 
   it.each([
     ['no data', { success: false, expired: true }],
-    ['no title', { data: { slug: 'x', category: { slug: 'a', name: 'A' } } }],
-    ['no category', { data: { slug: 'x', title: 'X' } }],
-    ['a category without a name', { data: { slug: 'x', title: 'X', category: { slug: 'a' } } }],
-    ['no body', undefined],
-  ])('treats a 410 with %s as ended with an unknown stub', async (_name, body) => {
-    mocks.readOffer.mockResolvedValue({ error: body ?? '', response: { ok: false, status: 410 } });
+    ['no title', { success: false, expired: true, data: { slug: 'x', category: { slug: 'a', name: 'A' } } }],
+    ['no category', { success: false, expired: true, data: { slug: 'x', title: 'X' } }],
+    [
+      'a category without a name',
+      { success: false, expired: true, data: { slug: 'x', title: 'X', category: { slug: 'a' } } },
+    ],
+  ])('treats a backend 410 with %s as ended with an unknown stub', async (_name, body) => {
+    mocks.readOffer.mockResolvedValue({ error: body, response: { ok: false, status: 410 } });
 
     await expect(fetchOffer('x')).resolves.toEqual({ kind: 'gone', ended: null });
+  });
+
+  it.each([
+    ['an HTML page', '<html>Gone</html>'],
+    ['an empty body', ''],
+    ['no body', undefined],
+    ['an empty object', {}],
+    ['an envelope that does not say expired', { success: false, error: 'Gone' }],
+    ['expired: false', { success: false, expired: false }],
+    ['an expired flag without the envelope', { expired: true }],
+  ])('throws for a 410 with %s: only the backend ended envelope is an ended offer', async (_name, body) => {
+    mocks.readOffer.mockResolvedValue({ error: body ?? '', response: { ok: false, status: 410 } });
+
+    await expect(fetchOffer('x')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
   });
 
   it.each([

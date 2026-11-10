@@ -25,7 +25,7 @@ export default defineConfig({
         'src/**/__tests__/e2e/**',
       ],
       // Coverage ratchet: the thresholds sit about 2 points under the measured
-      // coverage (FREEJ-36: 89.36 statements, 88.33 branches, 87.06 functions, 90.25 lines),
+      // coverage (FREEJ-28 review fixes: 91.51 statements, 90.27 branches, 89.73 functions, 92.32 lines),
       // so CI fails when coverage drops. Raise them when measured coverage rises and
       // never lower them; the project minimum is 80%. To raise them to the current
       // values in one step, run:
@@ -34,10 +34,10 @@ export default defineConfig({
       // margin of about 2 points under the measured values.)
       thresholds: {
         autoUpdate: process.env.COVERAGE_RATCHET === '1',
-        branches: 86,
-        functions: 85,
-        lines: 88,
-        statements: 87,
+        branches: 88,
+        functions: 88,
+        lines: 91,
+        statements: 90,
       },
     },
   },

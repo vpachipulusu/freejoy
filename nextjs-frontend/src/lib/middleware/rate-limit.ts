@@ -8,9 +8,18 @@
 interface RateLimitStore {
   tokens: number;
   lastRefill: number;
+  /** Kept so a sweep can tell, without the config, when this bucket would be full again. */
+  windowMs: number;
 }
 
 const rateLimitStore = new Map<string, RateLimitStore>();
+
+/**
+ * Most buckets held at once. A key per visitor address would otherwise grow without bound (anyone can send
+ * requests from many addresses); past the cap the least recently used bucket goes. A bucket that is evicted
+ * simply starts full again, which is what it would have done after one idle window anyway.
+ */
+export const RATE_LIMIT_MAX_ENTRIES = 50_000;
 
 export interface RateLimitConfig {
   maxRequests: number;
@@ -18,6 +27,8 @@ export interface RateLimitConfig {
   message?: string;
   /** Names the bucket: the same client has a separate token bucket per scope (auth, api, general). */
   scope?: string;
+  /** Tokens this call takes (default 1). A call that cannot afford it is refused and takes nothing. */
+  cost?: number;
 }
 
 export interface RateLimitResult {
@@ -28,6 +39,60 @@ export interface RateLimitResult {
   message?: string;
 }
 
+/** Whether a bucket last refilled a whole window ago: it is full again and holds no state worth keeping. */
+function isFullAgain(store: RateLimitStore, now: number): boolean {
+  return now - store.lastRefill >= store.windowMs;
+}
+
+/** Evict this many oldest buckets at once when the cap is hit: a Map scans its deleted slots on every restart. */
+const EVICTION_BATCH = 1_000;
+/** How often (at most) full-again buckets are swept from the old end. */
+const SWEEP_EVERY_MS = 1_000;
+let lastSweep = 0;
+
+/** Room for one more bucket: drop full-again ones from the old end now and then, and the oldest at the cap. */
+function makeRoom(now: number): void {
+  if (now - lastSweep >= SWEEP_EVERY_MS || rateLimitStore.size >= RATE_LIMIT_MAX_ENTRIES) {
+    lastSweep = now;
+    for (const [key, store] of rateLimitStore) {
+      if (!isFullAgain(store, now)) break;
+      rateLimitStore.delete(key);
+    }
+  }
+  if (rateLimitStore.size < RATE_LIMIT_MAX_ENTRIES) return;
+  let evicted = 0;
+  for (const key of rateLimitStore.keys()) {
+    rateLimitStore.delete(key);
+    evicted += 1;
+    if (evicted >= EVICTION_BATCH) break;
+  }
+}
+
+/** The bucket for `key`, fresh if there is none or it is full again; most recently used goes last. */
+function takeBucket(
+  key: string,
+  now: number,
+  maxRequests: number,
+  windowMs: number
+): RateLimitStore {
+  const existing = rateLimitStore.get(key);
+  if (existing && !isFullAgain(existing, now)) {
+    rateLimitStore.delete(key);
+    rateLimitStore.set(key, existing);
+    return existing;
+  }
+  rateLimitStore.delete(key);
+  makeRoom(now);
+  const created: RateLimitStore = { tokens: maxRequests, lastRefill: now, windowMs };
+  rateLimitStore.set(key, created);
+  return created;
+}
+
+/** Number of buckets held. For tests and monitoring. */
+export function rateLimitStoreSize(): number {
+  return rateLimitStore.size;
+}
+
 /**
  * Token bucket rate limiter
  * @param identifier - Unique identifier (e.g., IP address, user ID)
@@ -36,19 +101,11 @@ export interface RateLimitResult {
 export function rateLimit(identifier: string, config: RateLimitConfig): RateLimitResult {
   const now = Date.now();
   const { maxRequests, windowMs, message } = config;
+  const cost = config.cost ?? 1;
   // One bucket per scope and client, so traffic to one kind of route cannot spend another's tokens.
   const key = `${config.scope ?? 'default'}:${identifier}`;
 
-  // Get or create store entry
-  let store = rateLimitStore.get(key);
-
-  if (!store) {
-    store = {
-      tokens: maxRequests,
-      lastRefill: now,
-    };
-    rateLimitStore.set(key, store);
-  }
+  const store = takeBucket(key, now, maxRequests, windowMs);
 
   // Calculate tokens to add based on time elapsed
   const timePassed = now - store.lastRefill;
@@ -65,8 +122,8 @@ export function rateLimit(identifier: string, config: RateLimitConfig): RateLimi
   const reset = now + windowMs;
 
   // Check if request is allowed
-  if (store.tokens >= 1) {
-    store.tokens -= 1;
+  if (store.tokens >= cost) {
+    store.tokens -= cost;
     return {
       success: true,
       limit: maxRequests,
@@ -102,6 +159,7 @@ export function cleanupRateLimitStore(maxAge: number = 3600000): void {
 /** Empties every bucket. For tests only: production never calls it. */
 export function resetRateLimitStore(): void {
   rateLimitStore.clear();
+  lastSweep = 0;
 }
 
 /**

@@ -1,6 +1,8 @@
 /**
  * Privacy: the public catalogue pages set no cookies, read no session cookie and store nothing in
- * the browser. The catalogue API call itself is checked in unit/api/catalogue-headers.test.ts.
+ * the browser. The one exception is the visitor's own Saved list (FREEJ-28), which lives in
+ * `lib/saved/saved-store.ts` and nowhere else. The catalogue API call itself is checked in
+ * unit/api/catalogue-headers.test.ts.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -74,5 +76,14 @@ describe('public catalogue pages', () => {
       .map((file) => path.relative(SRC_DIR, file));
 
     expect(offenders).toEqual([]);
+  });
+
+  it('keeps the Saved list store as the only code that touches browser storage', () => {
+    const offenders = sourceFiles(SRC_DIR)
+      .filter((file) => !file.includes(`${path.sep}__tests__${path.sep}`))
+      .filter((file) => /localStorage|sessionStorage|indexedDB/.test(readFileSync(file, 'utf8')))
+      .map((file) => path.relative(SRC_DIR, file).split(path.sep).join('/'));
+
+    expect(offenders).toEqual(['lib/saved/saved-store.ts']);
   });
 });

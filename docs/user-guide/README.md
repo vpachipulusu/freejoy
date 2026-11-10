@@ -73,8 +73,8 @@ wording as final or as legal advice. See [page 5](05-information-pages.md).
 
 ### Things that are not built yet
 
-Said plainly so nobody goes looking for them: the Contact form does not send messages; there are no "saved" or
-favourite offers; the alerts sign-up only sends a confirmation email today (no alert emails go out yet); the
+Said plainly so nobody goes looking for them: the Contact form does not send messages; saved freebies live only in your own browser (there is no account
+sync); the alerts sign-up only sends a confirmation email today (no alert emails go out yet); the
 admin Dashboard and SEO pages are switched off ("Not available yet"); the admin Settings page shows statistics
 only; and creating affiliate links is not in the admin screens.
 

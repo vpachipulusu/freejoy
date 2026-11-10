@@ -108,7 +108,32 @@ Phone:
 
 ![The no-results panel on a phone](images/catalogue-empty-m.png)
 
-## Step 9. When the catalogue cannot be loaded
+## Step 9. Save a freebie for later
+
+Every card, and the top of every offer page, has a **heart** button.
+
+1. Press the heart on a card (or on the offer page). The heart fills in (it is an outline when the freebie is not
+   saved) and a screen reader says it is "pressed". The page does not move, and you are not taken anywhere.
+2. Press it again to take the freebie off your list.
+3. To see your list, choose **Saved**: the heart link in the header on a computer, or the **Saved** tab at the
+   bottom on a phone. The page is headed **Saved freebies** and shows the same cards as the catalogue, newest
+   saved first.
+4. If you have saved nothing yet, the page says **Nothing saved yet** and has a **Browse freebies** button.
+
+**Your list stays on this device.** It is kept in your browser, not in an account. It is not copied to your other
+phones or computers, another browser on the same computer has its own list, and clearing your browser data (or
+using a private window) removes it. Freejoy does not record that you saved or removed a freebie.
+
+If a freebie you saved has ended or been taken down, it quietly disappears from your list and a line says how many
+were removed. If Freejoy cannot load some of your saved freebies right now, they stay saved, and a **Try again**
+button appears.
+
+You can save up to 200 freebies; saving more drops the oldest. The Saved page loads 24 at a time: press **Show
+more** for the next 24.
+
+*The screenshots in this guide were taken before the heart existed, so this step has none.*
+
+## Step 10. When the catalogue cannot be loaded
 
 Rarely, the site cannot reach its catalogue. Instead of the list you see a panel headed **The freebies are not
 loading** with the message "We could not load the freebies just now. Please try again in a moment." and a **Try
@@ -120,7 +145,7 @@ Phone:
 
 ![The catalogue error panel on a phone](images/catalogue-error-m.png)
 
-## Step 10. The phone filter drawer
+## Step 11. The phone filter drawer
 
 1. On a phone, tap **Filter** (next to the heading count).
 2. A panel slides up with **Offer type**, **Availability** (No postage required) and **Sort by**, plus a **Clear
@@ -132,7 +157,7 @@ Phone:
 
 The drawer needs JavaScript. Search, sort (with **Apply**), the category buttons and the page links work without it.
 
-## Step 11. Category pages
+## Step 12. Category pages
 
 Each category also has its own page, for example `/category/food-drink`. Reach it from the home page's **Whatever
 makes you smile** buttons, or from a breadcrumb on an offer page.

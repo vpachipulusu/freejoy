@@ -11,7 +11,7 @@ drafts, archived offers and unknown slugs all answer the same 404.
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel
 
 from app.api.auth import require_internal_key
@@ -30,7 +30,7 @@ from app.api.v1.catalogue_schemas import (
     offer_data,
     offer_list_response,
 )
-from app.core.errors import ErrorResponse
+from app.core.errors import CodedHTTPException, ErrorResponse
 from app.core.rate_limit import PUBLIC_CATALOGUE_POLICY
 from app.models.platform.offer import OfferType
 from app.repositories.catalogue import (
@@ -42,6 +42,9 @@ from app.repositories.catalogue import (
 from app.services.catalogue import CatalogueService, ExpiredOffer
 
 CACHE_CONTROL = "private, max-age=60"
+# The 404 of an unknown or unpublished offer. The Next.js app prunes a visitor's saved offer only on this code,
+# so a route-level "Not Found" (no code) can never be mistaken for it. Never branch on the message.
+OFFER_NOT_FOUND = "offer_not_found"
 DEFAULT_PAGE_SIZE = 12
 MAX_OFFSET = 10_000
 MAX_TEXT_LENGTH = 100
@@ -151,7 +154,7 @@ async def read_offer(
     """A live offer. An ended offer answers 410 with ``expired: true`` and its title."""
     offer = await service.get_offer(slug)
     if offer is None:
-        raise HTTPException(status_code=404, detail="Offer not found")
+        raise CodedHTTPException(404, "Offer not found", OFFER_NOT_FOUND)
     if isinstance(offer, ExpiredOffer):
         return cached_response(expired_response(offer), if_none_match, 410)
     return cached_response(OfferResponse(data=offer_data(offer)), if_none_match)

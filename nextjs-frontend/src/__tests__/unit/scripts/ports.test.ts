@@ -42,6 +42,18 @@ describe('ports', () => {
   });
 });
 
+describe('toNextProcessEnv client address', () => {
+  it('trusts the e2e test header, so the e2e server gives each test its own rate-limit address', () => {
+    expect(toNextProcessEnv({}).TRUSTED_CLIENT_IP_HEADER).toBe('x-e2e-client-ip');
+  });
+
+  it('does not let a developer env file choose a different trusted header for the e2e server', () => {
+    expect(toNextProcessEnv({ TRUSTED_CLIENT_IP_HEADER: 'x-real-ip' }).TRUSTED_CLIENT_IP_HEADER).toBe(
+      'x-e2e-client-ip'
+    );
+  });
+});
+
 describe('toNextProcessEnv ports', () => {
   it('sets PORT from E2E_PORT, not from the dev PORT', () => {
     const env = toNextProcessEnv({ PORT: '3555', E2E_PORT: '3100' });
