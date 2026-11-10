@@ -232,3 +232,33 @@ async def test_categories_are_enabled_only_in_display_order() -> None:
     sql = str(session.executed[0].compile())
     assert "categories.enabled IS true" in sql
     assert "ORDER BY categories.sort_order, categories.name, categories.id" in sql
+
+
+def test_nothing_that_filters_or_orders_the_public_list_uses_the_commercial_basis() -> (
+    None
+):
+    """The public disclosure says sponsorship does not change the order of results: no sort or filter reads it."""
+    from sqlalchemy import select
+
+    from app.models.platform.offer import Offer
+    from app.repositories.catalogue import _filter_conditions, _order_by
+
+    everything = OfferFilters(
+        query="tea",
+        category_slug="beauty",
+        offer_types=(OfferType.FREE_SAMPLE,),
+        free_postage_only=True,
+        featured=True,
+    )
+    clauses = [*_filter_conditions(everything)]
+    for sort in OfferSort:
+        clauses.extend(_order_by(sort))
+
+    sql = str(
+        select(Offer.id)
+        .where(*_filter_conditions(everything))
+        .order_by(*[c for sort in OfferSort for c in _order_by(sort)])
+        .compile(dialect=postgresql.dialect())
+    )
+
+    assert clauses and "commercial_basis" not in sql

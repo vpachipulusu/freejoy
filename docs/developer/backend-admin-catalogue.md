@@ -125,16 +125,28 @@ anywhere (model, migration or code): `POST /v1/admin/offers` requires it (422 wi
 null), and both read models (`OfferSummaryOut`, `OfferOut`) return it. It is audited like the other enum fields: the
 `create` row's `after` carries it and an `update` row has it in `before`/`after` and in `details.fields`.
 
-- **Publishing a direct-only offer needs an explicit basis.** When the offer has at least one active link and every active
-  link is `direct` (no network is involved, so nothing implies how it is paid for), `publish` (and a re-publish of an
-  `EXPIRED` offer) needs `{"commercial_basis": ...}` in the request: without it 422 `publish_blocked`
-  (`commercial_basis_required`); with a value that is not the stored basis 409 `offer_changed` (what the editor saw is not
-  what is stored: reload). A basis sent for any other offer is checked against the stored one the same way. The rule is in
-  `AdminOfferService.transition`, not only the router. "Explicit" means the editor's request says it on this publish; the
-  stored value alone (always present, and backfilled for old rows) does not count.
-- **Links changing under a published offer** do not revisit that confirmation: if the last network link of a published
-  offer is deactivated and only `direct` links remain, the offer stays published with its stored basis (which the editor
-  sees and can change, and which is covered by the token). The confirmation is asked again at the next publish.
+- **When publishing needs the basis confirmed** (`needs_basis_confirmation` in `app/services/offer_rules.py`, the only
+  definition; the admin offer read returns it as `needs_basis_confirmation`): the offer has at least one active link and
+  **no active link is on an affiliate network** (a provider in `PROVIDER_HOSTS`, the same list the migration used). So
+  `direct`, `sample` and unknown providers all need it; a network link, even beside a `direct` one, does not; zero active
+  links does not (nothing can be followed). Then `publish` (and a re-publish of an `EXPIRED` offer) needs
+  `{"commercial_basis": ...}` in the request: without it 422 `publish_blocked` (`commercial_basis_required`); with a value
+  that is not the stored basis 409 `offer_changed`. A basis sent for any other offer is checked against the stored one the
+  same way. The rule is in `AdminOfferService.transition`, not only the router. "Explicit" means the editor's request says
+  it on this publish; the stored value alone (always present, and backfilled for old rows) does not count.
+- **A link change cannot leave a live offer unconfirmed.** `POST` and `PATCH .../links` on a `PUBLISHED` offer are refused
+  with 422 `publish_blocked` (`commercial_basis_required`), nothing written, when the change turns the active link set from
+  "needs no confirmation" into "needs it" (for example deactivating the last network link, or switching it to `direct`, or
+  adding the first `direct` link to a source-URL-only offer). Adding another network link, or a `direct` link beside a
+  network one, stays allowed. The way through: unpublish the offer, change its links, publish again with the confirmation.
+  A draft or expired offer is never refused for this.
+- **Changing the basis itself** (`PATCH` with a different `commercial_basis`) needs the `review_token` of the version the
+  editor loaded (`review_token` in the body, not a field of the offer): missing or stale is 409 `offer_changed` and nothing
+  is written, so a form loaded before somebody else changed the basis cannot silently undo it. Any PATCH that leaves the
+  basis alone needs no token. On a `PUBLISHED` offer the change also needs `offers.publish` (403 `permission_denied`), as
+  it changes what visitors are told; the same change on a draft needs `offers.write` only.
+- **Audit.** The `publish` row's `after` is `{status, commercial_basis}` and its `details` is `{basis_confirmed}` (whether
+  the request confirmed a basis); the importer's `create` row carries `commercial_basis`.
 - `SPONSORED` can be `featured`. Nothing hides it: the public offer models say `sponsored: true` for it, and for no other
   basis. The three-way value is never public ([backend-catalogue.md](backend-catalogue.md)).
 - **Awin imports** are written as `AFFILIATE` when the draft is created and a refresh never rewrites the basis. The
@@ -292,7 +304,8 @@ suite.
 | 404 | `not_found` | Unknown offer, link, category or merchant |
 | 409 | `slug_taken` | The slug exists |
 | 409 | `illegal_transition` | The status table refuses the action, or the offer is archived and edited, or `dismiss-source-change` finds nothing to dismiss (the offer was never imported, its marker is already clear, or it is archived) |
-| 409 | `offer_changed` | `verify`, `publish` or `dismiss-source-change` carried a `review_token` that no longer matches the offer, its links, its merchant, its category or its commercial basis, or a publish confirmed a basis other than the stored one: nothing was written |
+| 403 | `permission_denied` | A `PATCH` changed the commercial basis of a `PUBLISHED` offer without `offers.publish` (the route permission checks only the permission a route always needs) |
+| 409 | `offer_changed` | A `PATCH` changed the commercial basis without the current `review_token`, or `verify`, `publish` or `dismiss-source-change` carried a `review_token` that no longer matches the offer, its links, its merchant, its category or its commercial basis, or a publish confirmed a basis other than the stored one: nothing was written |
 | 422 | `publish_blocked` | A publish rule is unmet (including `commercial_basis_required`) |
 | 422 | `invalid_url`, `invalid_slug`, `invalid_postage`, `invalid_window`, `unknown_category`, `unknown_merchant` | A value the service rejects |
 | 422 | none | Schema validation (`Invalid request`): unknown fields, wrong types, control characters, lengths, and a missing or malformed `review_token` |

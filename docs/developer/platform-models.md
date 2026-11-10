@@ -126,3 +126,25 @@ run `upgrade head`, `alembic check` and `downgrade base` locally.
 `uv run alembic upgrade head` from `fastapi_backend/` against the production database (`DATABASE_URL_DIRECT`). Until
 then every query on the changed tables fails, and `GET /health/ready` (header `X-Internal-Key`) answers 503
 `migrations_pending` with `migrations.current` and `migrations.head`.
+
+## Rolling out migration 0006 (`offers.commercial_basis`)
+
+The column is NOT NULL with no default, so an old backend cannot insert an offer once `0006` has run. Roll out in this
+order:
+
+1. **Before `0006`**, check the providers the backfill will see: `SELECT DISTINCT provider FROM affiliate_links WHERE
+   active;`. The backfill recognises exactly `awin`, `cj`, `partnerize`, `rakuten` and `tradedoubler` (a list frozen in the
+   migration); any other string (a typo, a different case) backfills `EDITORIAL`. Fix those rows first if they are really
+   network links.
+2. **Pause offer creation and the Awin import** (`commands.import_awin_offers`), apply `0006`, and **deploy the backend at
+   once**: between the migration and the backend deploy the old code fails every insert into `offers`.
+3. **Check the API**: `/v1/catalogue/offers` items must carry `sponsored` before the frontend ships (the frontend drops an
+   offer that does not say, rather than show it unlabelled).
+4. **Deploy the frontend**, then resume creation and the import.
+5. **After `0006`**, list what nobody has confirmed: published offers with at least one active link and no active network
+   link (`needs_basis_confirmation`), whose basis was backfilled to `EDITORIAL`. An editor reviews each: a sponsorship the
+   backfill could not know about would otherwise show unlabelled.
+
+**Rollback:** frontend first, then backend. Never downgrade `0006` in production: it drops the column and discards every
+editor's choice, including every `SPONSORED` marking (a later upgrade backfills again from the links and never restores
+`SPONSORED`).

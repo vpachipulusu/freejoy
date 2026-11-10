@@ -291,9 +291,9 @@ async def test_taking_the_last_network_link_off_a_published_offer_is_422_with_a_
     ],
 )
 async def test_the_offer_read_says_whether_publishing_needs_the_confirmation(
-    harness: Harness,
+    harness: Harness,  # noqa: F811
     providers,
-    expected,  # noqa: F811
+    expected,
 ):
     harness.offers.offers["off1"] = offer("off1")
     for index, provider in enumerate(providers):

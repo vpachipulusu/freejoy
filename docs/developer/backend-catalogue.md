@@ -103,7 +103,8 @@ stores the upper-case names.
 the listing); the frontend shows a "Sponsored" label for it. It is on the list items and the detail alike. The
 three-way `commercial_basis` (`EDITORIAL`, `AFFILIATE`, `SPONSORED`) is **never** in a public response: the public
 record carries it only to compute this flag, and a test checks no response contains the name or the values. A
-featured offer can be sponsored; nothing lets `sponsored` be hidden.
+featured offer can be sponsored; nothing lets `sponsored` be hidden. No sort or filter of the public list reads the
+basis (`tests/repositories/test_catalogue.py` compiles them and checks), so sponsorship does not change the order of results.
 
 Never exposed: `publisher_notes`, the three-way `commercial_basis`, `status`, category and merchant ids, `source_url`, merchant `website`, timestamps other than the ones
 above, and anything from `affiliate_links` (destinations are resolved server-side by the outbound click endpoint, see [freejoy-affiliate.md](freejoy-affiliate.md)). The
