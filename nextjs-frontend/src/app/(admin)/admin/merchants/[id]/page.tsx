@@ -12,6 +12,7 @@ import { logCatalogueFailure } from '@/lib/api/admin-catalogue-log';
 import { InlineError } from '../../_components/inline-error';
 import { requireAdminPage } from '../../_lib/require-admin-page';
 import { MerchantForm } from '../merchant-form';
+import { PartnerKeysSection } from '../_components/partner-keys-section';
 
 type Params = Promise<{ id: string }>;
 
@@ -58,6 +59,12 @@ export default async function EditMerchantPage({ params }: { params: Params }) {
         mode="edit"
         merchantId={merchant.id}
         initialValues={merchantToFormValues(merchant)}
+      />
+      <PartnerKeysSection
+        merchantId={merchant.id}
+        merchantName={merchant.name}
+        website={merchant.website}
+        active={merchant.active}
       />
     </div>
   );

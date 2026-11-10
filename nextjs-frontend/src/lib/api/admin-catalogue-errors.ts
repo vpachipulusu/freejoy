@@ -17,6 +17,8 @@ type FailedResult = Extract<ApiResult<unknown>, { success: false }>;
 export const OFFER_NOT_FOUND_MESSAGE = 'That offer no longer exists. Go back to the list.';
 export const CATEGORY_NOT_FOUND_MESSAGE = 'That category no longer exists. Go back to the list.';
 export const MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists. Go back to the list.';
+export const PARTNER_KEY_NOT_FOUND_MESSAGE =
+  'That key or merchant no longer exists. Refresh the page.';
 export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
 export const NO_SOURCE_CHANGE_MESSAGE =
   'There is no source change to dismiss on this offer. This page has been refreshed.';
@@ -38,6 +40,10 @@ const CODE_MESSAGES: Record<string, string> = {
   invalid_window: 'The end date must be after the start date.',
   unknown_category: 'That category does not exist. Choose another.',
   unknown_merchant: 'That merchant does not exist. Choose another.',
+  merchant_inactive: 'Activate the merchant before issuing a key.',
+  merchant_no_website: 'Add the merchant website before issuing a key.',
+  keys_unavailable: 'Partner keys cannot be issued in this environment.',
+  invalid_label: 'A label is a name, not a key. Do not paste a key.',
 };
 
 /** The backend's fixed publish rules (`PUBLISH_BLOCKERS`), mapped to our own wording. */
