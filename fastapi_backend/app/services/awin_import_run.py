@@ -46,6 +46,7 @@ from app.services.awin_offer_import import (
     SystemAuditor,
 )
 from app.services.awin_promotions import (
+    MAX_ID,
     Promotion,
     Rejected,
     SkipReason,
@@ -64,6 +65,7 @@ RUN_DEADLINE = "run_deadline"
 MEMBERSHIP_NOT_JOINED = "membership_not_joined"
 LOCK_NOT_AVAILABLE = "55P03"  # SQLSTATE: lock_timeout expired
 STAGE_FETCH = "while fetching promotions"
+STAGE_BEFORE_FETCH = "before the first fetch"
 STAGE_WRITE = "while writing offers"
 logger = logging.getLogger("freejoy.awin_import")
 
@@ -91,6 +93,11 @@ class RunOptions:
     membership: Membership = "joined"  # anything else is for a dry run only
 
 
+def filters_for(options: RunOptions) -> PromotionFilters:
+    """The one place the request filters are built; the dry-run summary prints these same filters."""
+    return PromotionFilters(options.updated_since, options.membership)
+
+
 @dataclass(frozen=True)
 class RunReport:
     tally: ImportTally = field(default_factory=ImportTally)
@@ -115,11 +122,15 @@ class _Progress:
 
 
 def _raw_id(item: object) -> int | None:
-    """The promotion id of a raw item when it is a plain integer, else ``None`` (safe to log)."""
+    """The promotion id of a raw item when it is an integer in the accepted range, else ``None`` (safe to log).
+
+    An out-of-range id is still rejected by ``parse_promotion`` (``invalid_id``); it is only never logged.
+    """
     if not isinstance(item, dict):
         return None
     value = item.get("promotionId")
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+    ok = isinstance(value, int) and not isinstance(value, bool) and 0 < value <= MAX_ID
+    return value if ok else None
 
 
 def _parse_page(
@@ -216,11 +227,8 @@ async def _progress(
     options: RunOptions,
     now: datetime,
 ) -> AsyncIterator[_Progress]:
-    if options.membership != "joined" and not options.dry_run:
-        # Tracking links only work for joined programmes: importing others must be impossible.
-        raise ImportAborted(MEMBERSHIP_NOT_JOINED)
     page_size = max(MIN_PAGE_SIZE, min(MAX_PAGE_SIZE, options.limit))
-    filters = PromotionFilters(options.updated_since, options.membership)
+    filters = filters_for(options)
     report, seen = RunReport(), set[int]()
     for page_no in range(1, options.max_pages + 1):
         page = await client.fetch_promotions(filters, page=page_no, page_size=page_size)
@@ -271,6 +279,9 @@ async def run_import(
     now: datetime,
 ) -> RunReport:
     """Run the import; ``units`` may be ``None`` only for a dry run. Raises ``ImportFailed``."""
+    if options.membership != "joined" and not options.dry_run:
+        # Tracking links only work for joined programmes: importing others must be impossible.
+        raise ImportFailed(RunReport(), STAGE_BEFORE_FETCH, MEMBERSHIP_NOT_JOINED)
     progress = _Progress(RunReport(), STAGE_FETCH)
     deadline = asyncio.timeout(options.max_seconds)
     try:

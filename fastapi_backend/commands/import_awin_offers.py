@@ -17,8 +17,8 @@ Output is counts by outcome and by reason code. No URL, token, voucher code or a
 printed or logged; skipped items are logged as a promotion id and a reason code. A failed run sends ONE
 Sentry event (stage, cause, counts, reason codes) after the last request has finished.
 
-``--membership`` (joined, notJoined or all; default joined) and ``--show-shape`` (print which key, host and query
-parameter NAMES Awin returned, never a value) are dry-run only: without ``--dry-run`` they are a usage error, and
+``--membership`` (joined, notJoined or all; default joined) and ``--show-shape`` (print counts and bounded labels of the keys, hosts and
+paths Awin returned, never a value) are dry-run only: without ``--dry-run`` they are a usage error, and
 the service refuses a real run for any membership but joined. Together they let a dry run look at every programme
 when the account has joined none, to check the importer's assumptions about the items.
 
@@ -44,7 +44,6 @@ from app.core.awin_client import (
     HttpxAwinClient,
     Membership,
     PromotionFilters,
-    PromotionsPage,
 )
 from app.repositories.audit import AuditRepository
 from app.repositories.awin_import import DEFAULT_LOCK_TIMEOUT_MS, AwinImportRepository
@@ -57,16 +56,20 @@ from app.services.awin_import_run import (
     MAX_MAX_PAGES,
     MAX_MAX_SECONDS,
     RUN_DEADLINE,
+    STAGE_BEFORE_FETCH,
     ImportFailed,
     RunOptions,
     RunReport,
     Unit,
     UnitOpener,
+    filters_for,
     run_import,
 )
-from app.services.awin_shape_report import NameList, ShapeReport, build_shape_report
+from app.services.awin_shape_report import ShapeCollector
+from commands.awin_shape_print import PageRecorder, shape_output
 
 PROG = "import-awin-offers"
+NL = chr(10)
 FAILURE_MESSAGE = "Awin offers import run failed"
 EVENT_CONTEXT = "awin_import"
 MIN_VALUE = 1
@@ -189,7 +192,7 @@ def _parse(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--show-shape",
         action="store_true",
-        help="with --dry-run: print the key, host and query parameter names Awin returned (never values)",
+        help="with --dry-run: print counts and bounded labels of what Awin returned (never values)",
     )
     parser.add_argument(
         "--updated-since",
@@ -207,12 +210,13 @@ def _fail(message: str, code: int) -> int:
 
 
 def _invalid(args: argparse.Namespace) -> str | None:
-    for name, used in (
-        ("--membership other than joined", args.membership != "joined"),
-        ("--show-shape", args.show_shape),
-    ):
-        if used and not args.dry_run:
-            return f"{name} needs --dry-run (only a dry run may look at programmes you have not joined)."
+    if not args.dry_run and args.membership != "joined":
+        return (
+            "--membership other than joined needs --dry-run "
+            "(only a dry run may look at programmes you have not joined)."
+        )
+    if not args.dry_run and args.show_shape:
+        return "--show-shape needs --dry-run (it describes what a dry run fetched)."
     for name, value, cap in (
         ("--limit", args.limit, MAX_LIMIT),
         ("--max-pages", args.max_pages, MAX_MAX_PAGES),
@@ -304,6 +308,13 @@ def _send(reporter: Reporter, context: Mapping[str, Any]) -> None:
 
 
 def _fail_run(failure: ImportFailed, *, dry_run: bool, reporter: Reporter) -> int:
+    if failure.stage == STAGE_BEFORE_FETCH:  # refused up front: nothing to continue
+        code = _fail(
+            f"refused ({failure.cause}) {failure.stage}: nothing was fetched or written.",
+            1,
+        )
+        _send(reporter, _failure_context(failure, dry_run=dry_run))
+        return code
     # A deadline can cancel a batch inside its own commit: it may be committed and not counted.
     qualifier = " (at least)" if failure.cause == RUN_DEADLINE else ""
     done = (
@@ -317,74 +328,6 @@ def _fail_run(failure: ImportFailed, *, dry_run: bool, reporter: Reporter) -> in
     )
     _send(reporter, _failure_context(failure, dry_run=dry_run))
     return code
-
-
-class _PageRecorder:
-    """An ``AwinClient`` that passes every call on and keeps the pages, for the shape report."""
-
-    def __init__(self, inner: AwinClient) -> None:
-        self._inner = inner
-        self.pages: list[PromotionsPage] = []
-
-    async def fetch_promotions(
-        self, filters: PromotionFilters, *, page: int, page_size: int
-    ) -> PromotionsPage:
-        fetched = await self._inner.fetch_promotions(
-            filters, page=page, page_size=page_size
-        )
-        self.pages.append(fetched)
-        return fetched
-
-    async def aclose(self) -> None:
-        await self._inner.aclose()
-
-
-def _names_text(names: NameList) -> str:
-    if not names.names:
-        return "none"
-    text = ", ".join(names.names)
-    return f"{text} (+{names.more} more)" if names.more else text
-
-
-def _envelope_text(report: ShapeReport) -> str:
-    kinds = []
-    if report.pages_object:
-        kinds.append(f"object with data ({report.pages_object} page(s))")
-    if report.pages_bare_list:
-        kinds.append(f"bare list ({report.pages_bare_list} page(s))")
-    return " and ".join(kinds) or "none (no page was fetched)"
-
-
-def _shape_lines(report: ShapeReport) -> list[str]:
-    """The shape report as lines. Every name was made printable and bounded by the report itself."""
-    facts = [("envelope", _envelope_text(report))]
-    if report.pages_object:
-        facts.append(
-            (
-                "pagination.totalPages",
-                f"present on {report.total_pages_present} of {report.pages_object} page(s)",
-            )
-        )
-    joined = (
-        f"true {report.joined_true}, false {report.joined_false}, "
-        f"missing or not a boolean {report.joined_other}"
-    )
-    facts += [
-        ("items seen", f"{report.items} (not objects: {report.non_object_items})"),
-        ("item keys", _names_text(report.item_keys)),
-        ("advertiser keys", _names_text(report.advertiser_keys)),
-        ("voucher keys", _names_text(report.voucher_keys)),
-        ("regions keys", _names_text(report.regions_keys)),
-        ("urlTracking hosts", _names_text(report.tracking_hosts)),
-        ("urlTracking paths", _names_text(report.tracking_paths)),
-        ("urlTracking query parameters", _names_text(report.tracking_params)),
-        ("urlTracking missing or not a URL", str(report.tracking_unreadable)),
-        ("url hosts", _names_text(report.url_hosts)),
-        ("url missing or not a URL", str(report.url_unreadable)),
-        ("advertiser.joined", joined),
-    ]
-    header = f"{PROG}: shape of the response (names only, never values):"
-    return [header, *(f"{PROG}: shape: {label}: {text}" for label, text in facts)]
 
 
 async def _run(
@@ -442,6 +385,14 @@ def _real_units() -> tuple[UnitOpener, AsyncEngine]:
     return database_units(async_session_maker), engine
 
 
+def _print_partial_shape(recorder: PageRecorder | None) -> None:
+    """After a failed dry run: what the pages fetched before the failure looked like (stdout)."""
+    if recorder is not None:
+        lines = shape_output(recorder, partial=True)
+        if lines:
+            print(NL.join(lines))
+
+
 def _execute(
     args: argparse.Namespace,
     client: AwinClient,
@@ -452,22 +403,25 @@ def _execute(
 ) -> int:
     options = _options(args, publisher_id)
     engine: AsyncEngine | None = None
-    recorder = _PageRecorder(client) if args.show_shape else None
+    # the probe exists only in a dry run, whatever the arguments say
+    probing = args.show_shape and args.dry_run
+    recorder = PageRecorder(client, ShapeCollector(publisher_id)) if probing else None
     try:
         if units is None and not args.dry_run:
             units, engine = _real_units()
         report = asyncio.run(_run(recorder or client, units, options, now, engine))
     except ImportFailed as stopped:
+        _print_partial_shape(recorder)
         return _fail_run(stopped, dry_run=args.dry_run, reporter=reporter)
     except Exception as error:  # noqa: BLE001  (report the type only, never the message)
         early = ImportFailed(
             RunReport(), "before the run started", type(error).__name__
         )
+        _print_partial_shape(recorder)
         return _fail_run(early, dry_run=args.dry_run, reporter=reporter)
-    filters = PromotionFilters(args.updated_since, args.membership)
-    lines = _summary_lines(report, dry_run=args.dry_run, filters=filters)
+    lines = _summary_lines(report, dry_run=args.dry_run, filters=filters_for(options))
     if recorder is not None:
-        lines += _shape_lines(build_shape_report(recorder.pages))
+        lines += shape_output(recorder, partial=False)
     print("\n".join(lines))
     return 0
 

@@ -113,3 +113,11 @@ def test_an_object_envelope_records_whether_total_pages_was_present() -> None:
     # present but unusable: present is True, the usable total stays None
     assert bad_type == PromotionsPage((), None, "object", True)
     assert no_pagination == PromotionsPage((), None, "object", False)
+
+
+@pytest.mark.parametrize(
+    "value", ["", "Joined", "ALL", "notjoined", "everything", None]
+)
+def test_a_membership_outside_the_documented_values_is_refused(value: Any) -> None:
+    with pytest.raises(ValueError, match="membership"):
+        PromotionFilters(membership=value)

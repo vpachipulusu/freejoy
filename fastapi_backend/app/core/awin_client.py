@@ -35,7 +35,7 @@ import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, get_args
 
 import httpx
 from pydantic import SecretStr
@@ -121,6 +121,10 @@ class PromotionFilters:
 
     updated_since: date | None = None
     membership: Membership = "joined"
+
+    def __post_init__(self) -> None:
+        if self.membership not in get_args(Membership):
+            raise ValueError("membership must be one of the values Awin documents")
 
     def to_json(self) -> dict[str, Any]:
         filters: dict[str, Any] = {

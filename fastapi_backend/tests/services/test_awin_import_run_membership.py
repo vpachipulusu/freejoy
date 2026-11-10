@@ -28,6 +28,7 @@ async def test_a_real_run_with_another_membership_is_refused_before_any_fetch(
         await go(client, db, membership=membership)
 
     assert caught.value.cause == "membership_not_joined"
+    assert caught.value.stage == "before the first fetch"
     assert caught.value.report.pages == 0 and caught.value.report.received == 0
     assert client.requests == []
     assert db.units_opened == 0 and db.committed.offers == {}

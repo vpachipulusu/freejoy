@@ -60,7 +60,7 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1; stderr says "already committed and kept (at least)" because a batch cancelled inside its own commit may be committed and not counted) and what was committed stays; a rerun carries on. |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
 | `--membership {joined,notJoined,all}` | `joined` | Which programmes to ask Awin for. **Dry run only**: with any value but `joined` and no `--dry-run` the command exits 2. See [the probe](#the-dry-run-probe-membership-and-show-shape). |
-| `--show-shape` | off | After the counts, print the names (never the values) of what Awin returned. **Dry run only**: without `--dry-run` the command exits 2. |
+| `--show-shape` | off | After the counts, print counts and a bounded set of key, host and path labels of what Awin returned (never values; see the probe section). **Dry run only**: without `--dry-run` the command exits 2. |
 
 | Exit | Meaning |
 | --- | --- |
@@ -330,19 +330,47 @@ describes the shape of what comes back. Nothing is written, no database is opene
 `membership` takes the three values Awin's [promotions documentation](https://help.awin.com/apidocs/promotions) lists
 (read 2026-11-10): `joined`, `notJoined` and `all`. The importer itself sends `joined`, the default.
 
-The shape report prints **names only**: never the token, the publisher id, a full URL, a query value, a voucher code or
-any title, description or terms. It prints, after the counts:
+The shape report prints **counts, reason codes and a bounded set of labels**, not values. It is built to leak as little
+as possible from data it does not control, and this is exactly what it can print:
 
-- the envelope (a bare list, or an object with `data`) and on how many pages `pagination.totalPages` was present;
-- the item keys, and the keys one level under `advertiser`, `voucher` and `regions`;
-- the hosts of `urlTracking` and of `url`, and for `urlTracking` the paths and the query parameter names;
-- how many items are not objects, how many `urlTracking` / `url` values are missing or not a URL, and how many items have
-  `advertiser.joined` true, false, or missing or not a boolean.
+- counts: pages, items, items that are not objects, `urlTracking` / `url` values that are missing, too long (over the
+  importer's `MAX_URL_LENGTH`) or without a valid host, and how many items have `advertiser.joined` true, false, or
+  missing or not a boolean;
+- the envelope (a bare list, or an object with `data`) and, for object pages, on how many `pagination.totalPages` was
+  present and on how many it was usable (a non-negative integer);
+- **object keys** (top level, and one level under `advertiser`, `voucher` and `regions`) and **query parameter names**
+  of `urlTracking`, but only a name that is letters and underscores with at most two trailing digits (`NAME_SHAPE`).
+  Every other name (an id, a code, a sentence, an empty name) is only counted, on a separate line
+  `<list>, other names (not printed): N`;
+- the **path** of `urlTracking`, as it is only when it is one the importer knows (`/cread.php`, `/awclick.php`); any other
+  path as an outline (letters `a`, digits `9`, `/ . - _` kept, anything else `?`: `/a/424242/77/cread` prints
+  `/a/9/9/a`);
+- the **hosts** of `urlTracking` and `url`, as they are (they are compared with `PROVIDER_HOSTS`), but only when the host
+  passes the importer's own hostname grammar and is at most 253 characters; anything else counts as unreadable. The
+  publisher id is replaced by `#` and any run of five or more digits is masked as `#`;
+- the **schemes** of `urlTracking` (through the name rule), and counts of `urlTracking` values that the importer's
+  `validate_https_url` accepts (N of the object items), that carry a fragment, or whose query is not strictly parseable
+  (the importer refuses all three);
+- the outcome of the importer's own tracking-link check, **as if the programme were joined**, per reason code
+  (`accepted`, `tracking_host_not_allowed`, `tracking_shape_unrecognised`, ...). Items of programmes you have not joined
+  are skipped as `not_joined` before that check, so the skip counts alone cannot show these.
 
-Because it prints data from outside, each set holds at most 40 names (`MAX_ENTRIES`, then `(+N more)`), each name at most
-60 characters (`MAX_NAME_LENGTH`), only printable ASCII (anything else is shown as `?`), and every set is sorted. A
-query parameter is listed only when it has a name and an `=`. Code: `app/services/awin_shape_report.py` (pure functions);
-the command only formats and prints.
+It never prints the token, the publisher id, a query value, a fragment, user info, a port, a voucher code, a title, a
+description, terms or a full URL. Every label is made of `A-Z a-z 0-9 . _ - / [ ] % :` (and `#` from the mask), so a
+response cannot put a space, comma, parenthesis, backtick, `@`, angle bracket, control character or line break into a
+line, and no name can imitate the `(none)` marker. Each printed set is sorted and holds at most 40 labels
+(`MAX_ENTRIES`, then `(+N more)`), each label at most 60 characters (`MAX_NAME_LENGTH`); each set the report tracks stops
+growing at 1000 (`NAME_CAP`) and then says `(+N or more)`. No page is kept: the collector reads each page as it is
+fetched.
+
+**Residual risk.** A host is printed (a merchant, or a short-link service), and so is a short alphabetic token that
+happens to sit in a name position. The skip log lines that appear before the report (`awin item skipped:
+promotion_id=...`) carry promotion ids, so a whole-terminal paste is not "names only"; paste only the `shape:` lines.
+`items in the fetched pages` counts every item in the pages that were fetched, which can be more than `fetched N` in the
+first line when `--limit` cut a page. If the report cannot be built it prints `shape: not available (<ExceptionType>).`
+and the counts and exit code are unchanged; if the run fails after some pages, the shape of those pages is printed under
+`partial: N page(s) before the failure` and the exit code is still 1. Code: `app/services/awin_shape_report.py` (the
+collector and pure helpers) and `commands/awin_shape_print.py` (formatting).
 
 ### The owner's first run (a real token is an owner step)
 
@@ -353,13 +381,17 @@ the command only formats and prints.
 3. **The probe, when step 2 returns nothing:**
    `uv run python -m commands.import_awin_offers --dry-run --membership all --show-shape --limit 20 --max-pages 1`.
    Read the shape lines against the numbered assumptions below:
-   - `envelope` and `pagination.totalPages` check assumption 1 (and, with the number of items, 2);
-   - `item keys` and `advertiser.joined: true/false/missing` check 4 (an `advertiser.joined` of `false` is expected for
-     programmes you have not joined, so this probe cannot show a `true`);
+   - `envelope` and `pagination.totalPages` (present, usable) check assumption 1 (and, with the number of items, 2);
+   - `item keys`, their `other names` count and `advertiser.joined: true/false/missing` check 4 (an `advertiser.joined`
+     of `false` is expected for programmes you have not joined, so this probe cannot show a `true`);
    - `voucher keys` check 8, `regions keys` the region shape in 4;
-   - `urlTracking hosts` check 6 (compare with `PROVIDER_HOSTS`), and `urlTracking paths` with
-     `urlTracking query parameters` check 11 (the paths `/cread.php` or `/awclick.php`, and only the parameters in the
-     allowed list);
+   - `urlTracking hosts` check 6 (compare with `PROVIDER_HOSTS`: a short-link host there means the tracking host
+     assumption is wrong); `urlTracking paths` (the outline of an unknown path shows how the real one is built),
+     `urlTracking query parameters` and its `other names` count check 11;
+   - `urlTracking schemes`, `accepted as an https URL: N of M`, `with a fragment` and `not strictly parseable` show what
+     the importer would refuse before any shape check (6 and 11), and `importer check, as if joined` runs the
+     importer's own tracking-link check on every item and counts the reason codes, which the skip counts cannot show
+     while the items are `not_joined`: `accepted` for all of them would support 6 and 11 for these links;
    - `url hosts` check 7 (a merchant host, not a tracking host).
 
    Values are not shown, so 4's date and id formats, 5, 9 and 10 stay unverified until a joined programme returns items,
@@ -447,7 +479,7 @@ envelope, deadlines, `trust_env`), `test_call_limiter.py` (never more than 20 in
 `test_plain_text.py`; `tests/services/test_awin_promotions.py` (every rejection, look-alike hosts, dates, lengths),
 `test_awin_offer_mapping.py`, `test_offer_fingerprint.py` (the fingerprint per editable field, its pinned field list and a pinned digest) and `test_awin_offer_import.py` (create, idempotency, refresh,
 the protection cases, merchants, slugs, audit), `test_awin_import_run.py` (paging, limits, batching, failure accounting,
-dry run), `test_awin_import_run_membership.py` (a real run with another membership is refused before the first fetch),
+dry run), `test_awin_import_run_membership.py` (a real run with another membership is refused before the first fetch), `test_awin_import_run_ids.py` (a promotion id is logged only when it is in range),
 `test_awin_shape_report.py` (content, bounds, sanitising, no value ever printed); `tests/core/test_awin_client_membership.py`
 (the filter JSON per membership, the default request body unchanged, the envelope facts);
 `tests/commands/test_import_awin_offers.py` (flags, output, exit codes, settings, Sentry content and
