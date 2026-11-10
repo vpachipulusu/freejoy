@@ -281,14 +281,15 @@ Not done by this story. Recorded in [ADR-013](../adr/0013-partner-api.md).
 3. Add a Vercel Firewall rate rule on `/partner/v1/`. The rewrite sends every such request to the backend function, which
    answers the 404 itself, so unauthenticated traffic costs function time and shares concurrency with the internal API
    even while the surface is off.
-4. Check the first production run of the `partner-surface` smoke job. It needs no secret and passes while the
-   surface is off. If it fails, the backend answered a path under or around the prefix without the surface header:
+4. Check the first production run of the `partner-surface` smoke job. It needs no secret and passes whether the
+   surface is off (every path is the same 404) or on (authentication comes before routing, so a "must" path answers 404 or 401, always with the
+   surface header). If it fails, the backend answered a path under or around the prefix without the surface header:
    read its log before changing anything. It is also a manual step: `bash scripts/smoke-partner-surface.sh https://<domain>`.
 5. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` (see *The restricted database role*) and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`). Startup refuses `PARTNER_API_ENABLED=true` without it.
 6. Leave `PARTNER_API_ENABLED` unset in production until FREEJ-58 and FREEJ-59 are in.
 
 The smoke is a workflow job rather than a manual step because it can run without secrets and cannot break while the
-surface is off. It speaks https only, validates the base URL, follows redirects once (on the root, to find the
+surface is off or on (it sends no key). It speaks https only, validates the base URL, follows redirects once (on the root, to find the
 effective origin) and never on a probe. Whether the real Vercel edge treats the `..`, `%2e%2e`, `%0A` and `//` paths the
 way the script assumes has not been seen yet; it insists on the surface header and `Cache-Control` only for paths that
 cannot leave the prefix, and for the others fails only on a backend answer (`X-Request-ID` present, or a JSON error

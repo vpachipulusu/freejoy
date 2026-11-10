@@ -158,8 +158,9 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
    **Add a Vercel Firewall rate rule on `/partner/v1/`**, so unauthenticated traffic to the surface is limited
    at the edge, whether the surface is on or off.
 3. **Run the post-deploy smoke against the real domain** (`scripts/smoke-partner-surface.sh`, the
-   `partner-surface` job in `.github/workflows/post-deploy-smoke.yml`). It needs no secret and passes while the
-   surface is off. It fails if the backend answers a request under or around the prefix without the
+   `partner-surface` job in `.github/workflows/post-deploy-smoke.yml`). It needs no secret and passes whether the
+   surface is off (404) or on (a "must" path answers 404 or 401, with the surface header, because authentication comes before
+   routing). It fails if the backend answers a request under or around the prefix without the
    `X-Freejoy-Surface` header. Read the first production run, because it is the first time these paths meet
    Vercel's edge (below).
 4. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`).

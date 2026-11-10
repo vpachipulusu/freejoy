@@ -8,50 +8,17 @@ import pytest
 
 from app.core.partner_keys import key_digest, parse_key
 from app.core.permissions import AdminContext
-from app.repositories.admin_partner_keys import PartnerKeyRecord
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
     InvalidInput,
     KeyNotAllowed,
 )
 from app.services.admin_partner_keys import AdminPartnerKeyService
-from tests.fakes_admin_catalogue import NOW, FakeAuditor, FakeSession, merchant
+from tests.fakes_admin_catalogue import FakeAuditor, FakeSession, merchant
+from tests.fakes_partner import FakeAdminKeyStore
 
 ACTOR = AdminContext("admin1", "admin", frozenset({"merchants.write"}))
 ENVIRONMENT = "test"
-
-
-class FakeKeyStore:
-    def __init__(self) -> None:
-        self.rows: dict[str, PartnerKeyRecord] = {}
-        self.hashes: dict[str, str] = {}
-
-    async def list_for_merchant(self, merchant_id: str) -> list[PartnerKeyRecord]:
-        return [r for r in self.rows.values() if r.merchant_id == merchant_id]
-
-    async def get(
-        self, merchant_id: str, key_id: str, *, lock: bool = False
-    ) -> PartnerKeyRecord | None:
-        found = self.rows.get(key_id)
-        return found if found and found.merchant_id == merchant_id else None
-
-    async def insert(self, values: dict[str, Any]) -> PartnerKeyRecord:
-        record = PartnerKeyRecord(
-            id=values["id"],
-            merchant_id=values["merchant_id"],
-            label=values["label"],
-            created_by=values["created_by"],
-            created_at=NOW,
-            revoked_at=None,
-            last_used_at=None,
-        )
-        self.rows[record.id] = record
-        self.hashes[record.id] = values["key_hash"]
-        return record
-
-    async def revoke(self, merchant_id: str, key_id: str) -> PartnerKeyRecord:
-        self.rows[key_id] = replace(self.rows[key_id], revoked_at=NOW)
-        return self.rows[key_id]
 
 
 class FakeMerchants:
@@ -69,7 +36,7 @@ class Setup:
         environment: str | None = ENVIRONMENT,
     ) -> None:
         self.keys, self.session, self.auditor = (
-            FakeKeyStore(),
+            FakeAdminKeyStore(),
             FakeSession(),
             FakeAuditor(),
         )
