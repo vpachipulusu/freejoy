@@ -6,6 +6,7 @@ import app.models.platform  # noqa: F401  (registers the tables)
 from app.core.base import Base
 from app.models.platform import (
     AlertFrequency,
+    CommercialBasis,
     MembershipRole,
     OfferFreshness,
     OfferStatus,
@@ -277,3 +278,16 @@ def test_subscriber_stores_a_token_hash_not_a_token():
     assert "confirmation_token_hash" in columns
     assert "confirmation_sent_at" in columns
     assert "confirmation_token" not in columns
+
+
+def test_the_commercial_basis_is_required_and_has_no_default_anywhere():
+    column = table("offers").columns["commercial_basis"]
+
+    assert column.nullable is False
+    assert column.server_default is None
+    assert column.default is None
+    assert [member.value for member in CommercialBasis] == [
+        "EDITORIAL",
+        "AFFILIATE",
+        "SPONSORED",
+    ]

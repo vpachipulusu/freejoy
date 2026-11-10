@@ -25,6 +25,7 @@ from app.core.database import build_engine
 from app.core.ids import new_id
 from app.models.platform import (
     AlertFrequency,
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -129,6 +130,7 @@ async def insert_offer(
             "category_id": category_id,
             "merchant_id": merchant_id,
             "offer_type": "FREE_SAMPLE",
+            "commercial_basis": "EDITORIAL",
             "image_tint": "mint",
             "image_label": "l",
             "image_alt": "a",
@@ -455,6 +457,7 @@ async def test_subscribers_without_a_token_hash_do_not_collide(
 # member added to a Python enum without a migration.
 ENUM_COLUMNS = [
     ("offers", "offer_type", OfferType),
+    ("offers", "commercial_basis", CommercialBasis),
     ("offers", "status", OfferStatus),
     ("offers", "postage_kind", PostageKind),
     ("offers", "freshness", OfferFreshness),

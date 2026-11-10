@@ -27,6 +27,7 @@ from app.core.ids import new_id
 from app.models.platform import (
     AffiliateLink,
     Category,
+    CommercialBasis,
     Merchant,
     Offer,
     OfferStatus,
@@ -643,6 +644,7 @@ def _real_offer(slug: str, category_id: str, merchant_id: str) -> Offer:
         category_id=category_id,
         merchant_id=merchant_id,
         offer_type=OfferType.VOUCHER,
+        commercial_basis=CommercialBasis.EDITORIAL,
         image_tint="blush",
         image_label="l",
         image_alt="a",

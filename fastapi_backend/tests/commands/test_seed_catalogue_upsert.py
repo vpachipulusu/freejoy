@@ -15,6 +15,7 @@ from app.core.ids import new_id
 from app.models.platform import (
     AffiliateLink,
     Category,
+    CommercialBasis,
     Merchant,
     Offer,
     OfferType,
@@ -55,6 +56,17 @@ async def seed(session: FakeSession, today: date = TODAY) -> SeedSummary:
 
 def of_type[Row](session: FakeSession, model: type[Row]) -> list[Row]:
     return [row for row in session.rows if isinstance(row, model)]
+
+
+async def test_every_sample_offer_is_editorial_because_nobody_pays_for_it() -> None:
+    session = FakeSession()
+
+    await seed(session)
+
+    offers = of_type(session, Offer)
+    assert offers and {o.commercial_basis for o in offers} == {
+        CommercialBasis.EDITORIAL
+    }
 
 
 async def test_first_run_on_an_empty_catalogue_adds_every_row() -> None:

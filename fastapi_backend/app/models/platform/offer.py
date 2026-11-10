@@ -19,6 +19,21 @@ class OfferType(enum.StrEnum):
     COMPETITION = "COMPETITION"
 
 
+class CommercialBasis(enum.StrEnum):
+    """The commercial relationship behind a listing, stated honestly to the editor.
+
+    ``SPONSORED`` is the only value visitors are told about (a "Sponsored" label); the three-way
+    value itself is never public.
+    """
+
+    # No payment or benefit of any kind.
+    EDITORIAL = "EDITORIAL"
+    # Commission through an affiliate network.
+    AFFILIATE = "AFFILIATE"
+    # The merchant pays or gives a benefit for the listing or its placement.
+    SPONSORED = "SPONSORED"
+
+
 class OfferStatus(enum.StrEnum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
@@ -67,6 +82,7 @@ class Offer(IdMixin, TimestampMixin, Base):
             name="published_is_verified",
         ),
         enum_check("offer_type", OfferType),
+        enum_check("commercial_basis", CommercialBasis),
         enum_check("status", OfferStatus),
         enum_check("postage_kind", PostageKind),
         enum_check("freshness", OfferFreshness),
@@ -88,6 +104,11 @@ class Offer(IdMixin, TimestampMixin, Base):
         ForeignKey("merchants.id", ondelete="RESTRICT"), index=True
     )
     offer_type: Mapped[OfferType] = mapped_column(enum_column(OfferType))
+    # Deliberately no default: every writer states it (the admin form requires it, the Awin importer
+    # writes AFFILIATE), so a basis is never assumed at publish time.
+    commercial_basis: Mapped[CommercialBasis] = mapped_column(
+        enum_column(CommercialBasis)
+    )
     status: Mapped[OfferStatus] = mapped_column(
         enum_column(OfferStatus), server_default=OfferStatus.DRAFT.value
     )
