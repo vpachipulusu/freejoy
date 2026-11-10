@@ -44,6 +44,20 @@ package = false
 [tool.ruff]
 src = ["."]
 
+# ADR-004: engines and session makers are built in one place only.
+[tool.ruff.lint]
+extend-select = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sqlalchemy.create_engine".msg = "Build engines in app/core/database.py only (ADR-004)."
+"sqlalchemy.ext.asyncio.create_async_engine".msg = "Build engines in app/core/database.py only (ADR-004)."
+"app.core.database.build_engine".msg = "Build engines in app/core/database.py only (ADR-004)."
+
+[tool.ruff.lint.per-file-ignores]
+"app/core/database.py" = ["TID251"]
+"alembic_migrations/env.py" = ["TID251"]
+"tests/**" = ["TID251"]
+
 # Coverage ratchet. `uv run pytest --cov` fails when line coverage of app/ and
 # commands/ is below fail_under. fail_under is set about 1 point under the
 # coverage measured without the Postgres-backed *_e2e tests (91.55%; with them
