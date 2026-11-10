@@ -1,6 +1,7 @@
 import { DemoBadge } from '@/components/catalogue/demo-badge';
 import { OfferArt } from '@/components/catalogue/offer-art';
 import { OfferTypeBadge } from '@/components/catalogue/offer-type-badge';
+import { SponsoredBadge } from '@/components/catalogue/sponsored-badge';
 import { SaveButton } from '@/components/saved/save-button';
 import type { Category, Merchant, Offer } from '@/lib/catalogue/types';
 import { OfferCta } from './offer-cta';
@@ -33,9 +34,12 @@ export function OfferHero({ offer, merchant, category, ended }: OfferHeroProps) 
         />
       </div>
       <div className="flex flex-col gap-5 lg:pt-4">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-accent-ink">
-          {merchant.name} / {category.name}
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-accent-ink">
+            {merchant.name} / {category.name}
+          </p>
+          {offer.sponsored && <SponsoredBadge />}
+        </div>
         <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight sm:text-5xl sm:leading-[1.1]">
           {offer.title}
         </h1>
@@ -47,6 +51,7 @@ export function OfferHero({ offer, merchant, category, ended }: OfferHeroProps) 
           <OfferCta
             offerType={offer.offerType}
             demo={offer.demo}
+            sponsored={offer.sponsored}
             offerId={offer.demo ? null : offer.id}
             conditions={ctaConditions(offer)}
           />

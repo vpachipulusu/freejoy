@@ -111,7 +111,9 @@ function malformedOfferField(api: unknown): string | null {
     Array.isArray(api.steps) &&
     api.steps.every((s) => isObj(s) && allStrings(s, ['title', 'detail']));
   if (!stepsOk) return 'steps';
-  if (typeof api.featured !== 'boolean' || typeof api.requires_card !== 'boolean') return 'flags';
+  // `sponsored` is a legal label: a record that does not say is dropped, never shown as if it were not sponsored.
+  const flags = [api.featured, api.requires_card, api.sponsored];
+  if (!flags.every((flag) => typeof flag === 'boolean')) return 'flags';
   const terms = api.subscription_terms;
   if (terms !== null && typeof terms !== 'string') return 'subscription_terms';
   const label = api.freshness;
@@ -162,6 +164,7 @@ export function mapOffer(api: ApiOffer): Offer | null {
     merchant: toMerchant(api.merchant),
     offerType: api.offer_type,
     status: 'published',
+    sponsored: api.sponsored,
     featured: api.featured,
     image: toImage(api.image),
     postage: toPostage(api.postage),

@@ -8,6 +8,7 @@ import type { CardOffer, Merchant } from '@/lib/catalogue/types';
 import { DemoBadge } from './demo-badge';
 import { OfferArt } from './offer-art';
 import { OfferTypeBadge } from './offer-type-badge';
+import { SponsoredBadge } from './sponsored-badge';
 
 interface OfferCardProps {
   /** Only the card fields: the Saved page sends no more than this to the browser. */
@@ -56,6 +57,8 @@ export function OfferCard({ offer, merchant, className, prefetch }: OfferCardPro
       <p className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
         {merchant.name}
       </p>
+      {/* In the flow, not over the art: it never meets the type badge or the heart, even at 320px. */}
+      {offer.sponsored && <SponsoredBadge className="mt-1.5 self-start" />}
       <h3 className="mt-1.5 font-display text-base font-bold leading-snug text-foreground sm:text-lg">
         {/* Stretched link: its ::after covers the card, so the card draws the one focus outline (the focus-proxy rule in globals.css) and the link draws none. */}
         <Link

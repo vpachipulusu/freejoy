@@ -196,6 +196,33 @@ describe('affiliate disclosure page', () => {
   });
 });
 
+describe('affiliate disclosure page: sponsored listings', () => {
+  it('has a plain-words section that says what sponsored means and how it is labelled', () => {
+    const { container } = render(<AffiliatePage />);
+
+    const heading = screen.getByRole('heading', { name: 'Sponsored listings' });
+    expect(heading).toHaveAttribute('id', 'sponsored-listings');
+    expect(container.textContent).toMatch(/the brand pays Freejoy, or gives it a benefit/i);
+    expect(container.textContent).toMatch(/“Sponsored” label on its card and on its own page/);
+    expect(container.textContent).toMatch(/written out in words, not shown by colour alone/i);
+    expect(container.textContent).toMatch(/marked as a paid link for search engines/i);
+  });
+
+  it('no longer says paid placements are not planned, and claims nothing about sponsors being held to other standards', () => {
+    const { container } = render(<AffiliatePage />);
+    const section: string[] = [];
+    let node = screen.getByRole('heading', { name: 'Sponsored listings' }).nextElementSibling;
+    while (node && node.tagName !== 'H2') {
+      section.push(node.textContent ?? '');
+      node = node.nextElementSibling;
+    }
+    const text = section.join(' ');
+
+    expect(container.textContent).not.toMatch(/does not plan to sell paid placements/i);
+    expect(text).not.toMatch(/editorial|standards|independen|vetted|same checks/i);
+  });
+});
+
 describe('about page', () => {
   it('has the how-it-works anchor with three numbered steps', async () => {
     const { container } = render(await AboutPage());
@@ -401,7 +428,9 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     const text = container.textContent ?? '';
 
     expect(text).toMatch(/not stored in a database or against an account/i);
-    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(
+      /page addresses of freebies you open can appear in error and timing reports/i
+    );
     expect(text).toMatch(/14 days/);
     expect(text).toMatch(/30 days/);
     expect(text).not.toMatch(/short-lived/i);
@@ -417,7 +446,9 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     expect(text).toMatch(/list of freebies you saved stays in your browser/i);
     expect(text).toMatch(/no analytics event when you save or remove/i);
     expect(text).toMatch(/not stored in a database or against an account/i);
-    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(
+      /page addresses of freebies you open can appear in error and timing reports/i
+    );
     expect(text).toMatch(/14 days/);
     expect(text).not.toMatch(/short-lived/i);
     expect(text).not.toMatch(/name of a button/i);
