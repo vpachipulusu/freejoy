@@ -22,11 +22,21 @@ test also checks. The first manual check on a real deployment is listed in ADR-0
 """
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 VERCEL_JSON = Path(__file__).resolve().parents[2] / "vercel.json"
+BACKEND_VERCEL_JSON = Path(__file__).resolve().parents[1] / "vercel.json"
+# A checkout without the root vercel.json (the backend packaged alone) skips these tests; in CI a
+# missing file is a failure, because then nothing would be proving the routing.
+SKIP_WITHOUT_VERCEL_JSON = pytest.mark.skipif(
+    not VERCEL_JSON.exists() and not os.environ.get("CI"),
+    reason="root vercel.json is not in this checkout",
+)
 BACKEND_SERVICE = "fastapi_backend"
 FRONTEND_SERVICE = "nextjs-frontend"
 WILDCARD = "(.*)"

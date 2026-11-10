@@ -10,12 +10,15 @@ The matching rules, and what is assumed about Vercel's path-to-regexp, are in
 """
 
 import inspect
+import json
 
 import pytest
 
 from tests.vercel_rewrites import (
     BACKEND_SERVICE,
+    BACKEND_VERCEL_JSON,
     FRONTEND_SERVICE,
+    SKIP_WITHOUT_VERCEL_JSON,
     VERCEL_JSON,
     backend_sources,
     destination_service,
@@ -23,9 +26,7 @@ from tests.vercel_rewrites import (
     source_pattern,
 )
 
-pytestmark = pytest.mark.skipif(
-    not VERCEL_JSON.exists(), reason="root vercel.json is not in this checkout"
-)
+pytestmark = SKIP_WITHOUT_VERCEL_JSON
 STRIPE_WEBHOOK_PATH = "/webhooks/stripe"
 PARTNER_SOURCE = "/partner/v1/(.*)"
 
@@ -135,6 +136,45 @@ def test_a_conditional_rewrite_is_refused_not_matched_as_unconditional(
 
     with pytest.raises(ValueError, match="conditional rewrite"):
         destination_service("/x", rewrites)
+
+
+def test_every_rewrite_has_exactly_a_source_and_one_of_the_two_known_destinations() -> (
+    None
+):
+    """No ``has``, ``missing``, ``headers`` or other key, and no third destination."""
+    known = [{"service": BACKEND_SERVICE}, {"service": FRONTEND_SERVICE}]
+
+    for rule in load_rewrites():
+        assert set(rule) == {"source", "destination"}, rule
+        assert rule["destination"] in known, rule
+
+
+def test_the_root_vercel_json_has_only_the_top_level_keys_it_has_today() -> None:
+    """A new top-level key (``routes``, ``redirects``, ``headers``, ``trailingSlash``...) can change what
+    reaches the backend; adding one has to be a decision that also updates this test."""
+    config = json.loads(VERCEL_JSON.read_text(encoding="utf-8"))
+
+    assert set(config) == {"$schema", "git", "services", "rewrites"}
+    assert set(config["services"]) == {FRONTEND_SERVICE, BACKEND_SERVICE}
+    assert set(config["services"][BACKEND_SERVICE]) == {
+        "root",
+        "framework",
+        "entrypoint",
+    }
+
+
+def test_the_backend_services_own_vercel_json_has_no_routing_keys() -> None:
+    routing_keys = {
+        "rewrites",
+        "routes",
+        "redirects",
+        "headers",
+        "trailingSlash",
+        "cleanUrls",
+    }
+    config = json.loads(BACKEND_VERCEL_JSON.read_text(encoding="utf-8"))
+
+    assert routing_keys & set(config) == set()
 
 
 def test_the_stripe_route_matches_the_rewrite_and_checks_the_signature() -> None:
