@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 
 from app.api.ids import simple_generate_unique_route_id
@@ -8,6 +10,8 @@ from app.core.logging import configure_logging
 from app.core.request_id import RequestIdMiddleware
 from app.core.sentry import init_sentry
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> FastAPI:
     configure_logging(settings.LOG_LEVEL)
@@ -16,7 +20,13 @@ def create_app() -> FastAPI:
 
     # The backend URL is public, so production serves no schema or docs UI
     # (ADR-003). `app.openapi()` still works for the schema generation command.
-    docs_enabled = settings.relaxed_environment
+    # Testing-phase exception: API_DOCS_ENABLED serves them in production too.
+    docs_enabled = settings.relaxed_environment or settings.API_DOCS_ENABLED
+    if docs_enabled and not settings.relaxed_environment:
+        logger.warning(
+            "API docs (/docs, /redoc, schema) are served in a non-relaxed environment "
+            "because API_DOCS_ENABLED is set; remove it at go-live"
+        )
     application = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,

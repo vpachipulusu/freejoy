@@ -78,3 +78,12 @@ def test_the_env_file_switch_is_turned_on() -> None:
     isolate_settings_environment(environment)
 
     assert environment["IGNORE_ENV_FILE"] == "1"
+
+
+def test_the_docs_switch_is_removed_so_a_shell_cannot_turn_the_docs_on() -> None:
+    environment = {"API_DOCS_ENABLED": "true", "api_docs_enabled": "1"}
+
+    isolate_settings_environment(environment)
+
+    assert not {"API_DOCS_ENABLED", "api_docs_enabled"} & set(environment)
+    assert "API_DOCS_ENABLED" in settings_field_names()

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
 
     # OpenAPI docs
     OPENAPI_URL: str = "/openapi.json"
+    # Testing phase only (FREEJ-48, ADR-003): serve /docs, /redoc and the schema in production too.
+    # Relaxes nothing else. Remove the variable at go-live.
+    API_DOCS_ENABLED: bool = False
 
     # Database
     DATABASE_URL: str
