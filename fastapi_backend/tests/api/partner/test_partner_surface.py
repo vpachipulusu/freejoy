@@ -19,7 +19,12 @@ from app.core.request_id import RequestIdMiddleware
 from app.main import app
 from app.partner.app import create_partner_api
 from app.partner.surface import MAX_BODY_BYTES, PartnerSurface
-from tests.api.partner.support import SURFACE_HEADERS, Recorder, call_raw
+from tests.api.partner.support import (
+    SURFACE_HEADERS,
+    Recorder,
+    call_raw,
+    error_logs,
+)
 
 NOT_FOUND = {"success": False, "error": "Not Found"}
 # (path as the server decodes it, raw_path as it came off the wire)
@@ -37,6 +42,10 @@ ADVERSARIAL = [
     ("/partner/v1/openapi.json", "/partner/v1/openapi.json"),
     ("/partner/v1/docs/oauth2-redirect", "/partner/v1/docs/oauth2-redirect"),
     ("/partner/v1/x/", "/partner/v1/x/"),
+    # A newline: Starlette's own mount regex does not match across one (see PartnerMount).
+    ("/partner/v1/a\nb", "/partner/v1/a%0Ab"),
+    ("/partner/v1/a\nb/", "/partner/v1/a%0Ab/"),
+    ("/partner/v1/\n/../../v1/me", "/partner/v1/%0A/../../v1/me"),
 ]
 
 
@@ -144,7 +153,9 @@ async def test_an_outer_cors_middleware_would_reach_the_partner_responses() -> N
     assert "access-control-allow-origin" in response.header_names()
 
 
-async def test_the_real_body_limit_is_checked_before_routing(switch: bool) -> None:
+async def test_the_real_body_limit_applies_only_while_the_surface_is_on(
+    switch: bool,
+) -> None:
     over = await call_raw(
         app,
         "POST",
@@ -155,10 +166,32 @@ async def test_the_real_body_limit_is_checked_before_routing(switch: bool) -> No
         app, "POST", "/partner/v1/x", headers=[("Content-Length", str(MAX_BODY_BYTES))]
     )
 
-    assert over.status == 413
-    assert over.json() == {"success": False, "error": "Payload too large"}
-    _assert_partner_headers(over.headers)
+    # Switched off, every request gets the same 404, a large declared length included.
+    assert over.status == (413 if switch else 404)
+    assert over.json() == (
+        {"success": False, "error": "Payload too large"} if switch else NOT_FOUND
+    )
     assert within.status == 404
+    _assert_partner_headers(over.headers)
+
+
+@pytest.mark.parametrize("with_origin", [False, True])
+async def test_a_partner_404_has_exactly_these_headers(
+    switch: bool, with_origin: bool
+) -> None:
+    """A new header on a partner response (from outer middleware, say) must be a decision."""
+    headers = [("Origin", "https://retailer.example")] if with_origin else []
+
+    response = await call_raw(app, "GET", "/partner/v1/x", headers=headers)
+
+    assert response.header_names() == {
+        "content-length",
+        "content-type",
+        "cache-control",
+        "x-content-type-options",
+        "x-freejoy-surface",
+        "x-request-id",
+    }
 
 
 # ---------------------------------------------------------------- the surface on its own (throwaway sub-app)
@@ -329,6 +362,17 @@ async def test_a_500_carries_the_headers_and_leaks_nothing() -> None:
     assert response.json() == {"success": False, "error": "Internal server error"}
     assert b"secret internal detail" not in response.body
     _assert_partner_headers(response.headers)
+
+
+async def test_a_failing_request_is_logged_once() -> None:
+    surface, _ = _throwaway_surface()
+
+    with error_logs() as records:
+        response = await call_raw(surface, "GET", "/boom")
+
+    assert response.status == 500
+    assert response.error is None  # not re-raised after the sub-app answered
+    assert [r.getMessage() for r in records] == ["unhandled exception"]
 
 
 async def test_validation_errors_do_not_echo_the_input() -> None:

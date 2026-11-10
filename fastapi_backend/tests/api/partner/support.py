@@ -8,7 +8,9 @@ as written. ``Recorder`` proves it: it sits in front of the application and note
 that arrived.
 """
 
-from collections.abc import Callable, Iterable
+import logging
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,8 +61,10 @@ def build_scope(
     path: str,
     raw_path: str | None = None,
     headers: Iterable[tuple[str, str]] = (),
+    root_path: str = "",
 ) -> Scope:
     return {
+        "root_path": root_path,
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
@@ -84,6 +88,7 @@ async def call_raw(
     headers: Iterable[tuple[str, str]] = (),
     chunks: Iterable[bytes] = (b"",),
     on_receive: Callable[[], None] | None = None,
+    root_path: str = "",
 ) -> RawResponse:
     """Call ``application`` with a hand-built scope; ``chunks`` are the body, sent in order."""
     pending = list(chunks)
@@ -106,9 +111,31 @@ async def call_raw(
 
     error: Exception | None = None
     try:
-        await application(build_scope(method, path, raw_path, headers), receive, send)
+        scope = build_scope(method, path, raw_path, headers, root_path)
+        await application(scope, receive, send)
     except Exception as exc:  # noqa: BLE001 - a 500 is re-raised after it is sent; keep the response
         error = exc
     start = started[0]
     pairs = [(k.decode().lower(), v.decode()) for k, v in start["headers"]]
     return RawResponse(start["status"], pairs, bytes(body), error)
+
+
+class _Records(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@contextmanager
+def error_logs() -> Iterator[list[logging.LogRecord]]:
+    """The ERROR records logged anywhere (they all reach the root logger) while the block runs."""
+    handler = _Records()
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield handler.records
+    finally:
+        root.removeHandler(handler)

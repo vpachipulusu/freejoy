@@ -7,10 +7,12 @@ response the sub-app can produce, including 404s and 500s, and the ones it write
 
 For every partner response it:
 
-* answers 404 for any path while the surface is switched off (``PARTNER_API_ENABLED``), with the
-  same body as an unknown path while it is on;
-* refuses an over-long body, by the declared ``Content-Length`` and again by counting the bytes
-  actually received (a missing or false length is never trusted, and the body is never buffered);
+* answers 404 for any request while the surface is switched off (``PARTNER_API_ENABLED``), whatever
+  the headers say, with the same body as an unknown path while it is on;
+* owns the 413 for an over-long body: refused by the declared ``Content-Length``, and again by
+  counting the bytes actually received (a missing or false length is never trusted, and the body is
+  never buffered by the surface). Application code cannot turn it into something else, see
+  ``_Exchange``;
 * sets ``Cache-Control: no-store, private``, ``X-Content-Type-Options: nosniff`` and
   ``X-Freejoy-Surface: partner``, and removes ``Set-Cookie`` and every ``Access-Control-*`` header.
 
@@ -18,15 +20,18 @@ Middleware of the main app wraps this surface from outside and cannot be undone 
 a test (``tests/api/partner/test_partner_surface.py``) pins the main app's middleware list.
 """
 
+import asyncio
+import logging
 from collections.abc import Callable
 
-from fastapi import HTTPException
 from starlette.datastructures import Headers
 from starlette.routing import BaseRoute
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from app.core.errors import error_response
+
+logger = logging.getLogger("yourapp.partner")
 
 PARTNER_PREFIX = "/partner/v1"
 SURFACE_HEADER = "X-Freejoy-Surface"
@@ -41,13 +46,23 @@ PAYLOAD_TOO_LARGE_MESSAGE = "Payload too large"
 
 EnabledCheck = Callable[[], bool]
 
-
 # Names (lower case, as bytes) the surface sets itself, so anything the inner app set is replaced.
 SURFACE_RESPONSE_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"cache-control", CACHE_CONTROL.encode()),
     (b"x-content-type-options", b"nosniff"),
     (SURFACE_HEADER.lower().encode(), SURFACE_NAME.encode()),
 )
+# Never swallowed, whatever the request did.
+_PASS_THROUGH = (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit)
+
+
+class _BodyTooLarge(BaseException):
+    """Raised from ``receive`` once the body crosses the cap.
+
+    A ``BaseException`` on purpose: application code and the sub-app's error middleware catch
+    ``Exception``, so neither can swallow it, log it or turn it into a 500 or a 200. The surface
+    answers the 413 itself (``_Exchange``).
+    """
 
 
 def _is_dropped(name: bytes) -> bool:
@@ -84,20 +99,56 @@ def _declares_too_much(scope: Scope, limit: int) -> bool:
     )
 
 
-def _counting(receive: Receive, limit: int) -> Receive:
-    received = 0
+class _Exchange:
+    """One request through the surface: counts the body and decides who answers.
 
-    async def counting_receive() -> Message:
-        nonlocal received
-        message = await receive()
+    Before any response has started, crossing the cap raises ``_BodyTooLarge`` from ``receive``.
+    Whatever the application then does (let it escape, swallow it, answer 200, fail otherwise), the
+    client gets the 413: the first message the application sends is replaced by it and the rest are
+    dropped. Once a response has started it cannot be replaced, so ``receive`` reports a disconnect
+    instead of raising (a streaming response that listens for one must not fail on a body it never read).
+    """
+
+    def __init__(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
+        self._scope = scope
+        self._receive = receive
+        self._send = send
+        self._limit = limit
+        self._received = 0
+        self.overflowed = False
+        self.replaced = False
+        self.started = False
+        self.status = 0
+
+    async def receive(self) -> Message:
+        if self.overflowed:
+            return {"type": "http.disconnect"}
+        message = await self._receive()
         if message["type"] == "http.request":
-            received += len(message.get("body", b""))
-            if received > limit:
-                # Stops reading at once; the sub-app's handler turns this into the 413 envelope.
-                raise HTTPException(413, PAYLOAD_TOO_LARGE_MESSAGE)
+            self._received += len(message.get("body", b""))
+            if self._received > self._limit:
+                self.overflowed = True
+                if self.started:
+                    return {"type": "http.disconnect"}
+                raise _BodyTooLarge
         return message
 
-    return counting_receive
+    async def send(self, message: Message) -> None:
+        if self.replaced:
+            return  # the rest of a response that was replaced by the 413
+        if self.overflowed and not self.started:
+            await self.refuse()  # replaces the application's first message
+            return
+        if message["type"] == "http.response.start":
+            self.started = True
+            self.status = message["status"]
+        await self._send(message)
+
+    async def refuse(self) -> None:
+        self.started = True
+        self.replaced = True
+        response = error_response(413, PAYLOAD_TOO_LARGE_MESSAGE)
+        await response(self._scope, self._receive, self._send)
 
 
 class PartnerSurface:
@@ -122,11 +173,39 @@ class PartnerSurface:
             await WebSocketClose()(scope, receive, send)  # the surface speaks HTTP only
             return
         send = _with_surface_headers(send)
+        # The switch comes first: a switched-off surface answers every request the same way.
+        if not self._enabled():
+            await error_response(404, NOT_FOUND_MESSAGE)(scope, receive, send)
+            return
         if _declares_too_much(scope, self._max_body_bytes):
             response = error_response(413, PAYLOAD_TOO_LARGE_MESSAGE)
             await response(scope, receive, send)
             return
-        if not self._enabled():
-            await error_response(404, NOT_FOUND_MESSAGE)(scope, receive, send)
-            return
-        await self.app(scope, _counting(receive, self._max_body_bytes), send)
+        exchange = _Exchange(scope, receive, send, self._max_body_bytes)
+        try:
+            await self.app(scope, exchange.receive, exchange.send)
+        except BaseException as exc:
+            if isinstance(exc, _PASS_THROUGH):
+                raise
+            if exchange.overflowed and not exchange.started:
+                await (
+                    exchange.refuse()
+                )  # whatever the app did with the exception, the answer is 413
+                return
+            if exchange.replaced:
+                # The 413 is already sent. The private exception is just that refusal travelling up;
+                # anything else is what the app did after it: kept visible, though not an error.
+                if not isinstance(exc, _BodyTooLarge):
+                    logger.warning(
+                        "partner request failed after its body was refused: %s",
+                        type(exc).__name__,
+                    )
+                return
+            if isinstance(exc, Exception) and exchange.status == 500:
+                # The sub-app already answered 500 and logged it; re-raising would log it again.
+                return
+            raise
+        if exchange.overflowed and not exchange.started:
+            await (
+                exchange.refuse()
+            )  # the application read too much and then sent nothing

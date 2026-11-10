@@ -4,6 +4,11 @@ from starlette.routing import Match, Mount
 from starlette.types import Scope
 
 
+def _under(path: str, prefix: str) -> bool:
+    """``path`` is the prefix itself or something below it (a plain string comparison)."""
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
 def _route_path(scope: Scope) -> str:
     """The path below the root path the application is served under (what Starlette routes on)."""
     path: str = scope["path"]
@@ -12,19 +17,30 @@ def _route_path(scope: Scope) -> str:
 
 
 class PartnerMount(Mount):
-    """A ``Mount`` that also takes the bare prefix, ``/partner/v1`` with no trailing slash.
+    """A ``Mount`` that takes everything under its prefix, matched by string comparison.
 
-    A plain ``Mount`` matches only ``/partner/v1/...``. For the bare prefix the main app's router
-    would answer a 307 with a ``Location`` header, outside the surface wrapper and so without its
-    headers. Matching it here sends it to the sub-app like every other path under the prefix.
+    Starlette's own ``Mount`` matches a regular expression in which ``.`` does not match a newline,
+    so ``/partner/v1/a%0Ab`` would fall out of the mount and be answered by the main app, without
+    the surface headers. It also leaves the bare prefix ``/partner/v1`` to the router, which
+    answers it with a 307. A string comparison has neither gap.
+
+    It compares both the path below the root path (what Starlette routes on) and the full
+    ``path``, so a runtime that sets a ``root_path`` of ``/partner/v1`` cannot slide a request
+    such as ``/partner/v1/health`` out from under the mount and into a main-app route.
     """
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        match, child_scope = super().matches(scope)
-        if (
-            match is Match.NONE
-            and scope["type"] == "http"
-            and _route_path(scope) == self.path
+        if scope["type"] not in ("http", "websocket"):
+            return Match.NONE, {}
+        if not (
+            _under(_route_path(scope), self.path) or _under(scope["path"], self.path)
         ):
-            return super().matches({**scope, "path": f"{scope['path']}/"})
-        return match, child_scope
+            return Match.NONE, {}
+        root_path: str = scope.get("root_path", "")
+        child_scope: Scope = {
+            "path_params": dict(scope.get("path_params", {})),
+            "app_root_path": scope.get("app_root_path", root_path),
+            "root_path": root_path + self.path,
+            "endpoint": self.app,
+        }
+        return Match.FULL, child_scope
