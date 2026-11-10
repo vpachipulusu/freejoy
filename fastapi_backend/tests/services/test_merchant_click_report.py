@@ -205,3 +205,57 @@ async def test_a_cutoff_exactly_at_midnight_keeps_that_whole_day():
         report.earliest_complete_date
         == (midnight - timedelta(days=CLICK_RETENTION_DAYS)).date()
     )
+
+
+async def test_the_store_is_asked_in_a_fixed_order_with_the_ids_of_every_offer():
+    store = FakeStore(
+        offers=[
+            OfferClicks("o1", "soap", "Soap", 2),
+            OfferClicks("o2", "balm", "Balm", 1),
+            OfferClicks("o3", "cream", "Cream", 0),
+        ]
+    )
+
+    await service(store).report("m1", date(2026, 3, 10), date(2026, 3, 11))
+
+    assert [call[0] for call in store.calls] == [
+        "merchant",
+        "totals",
+        "offers",
+        "daily",
+    ]
+    assert store.calls[3][1] == ["o1", "o2", "o3"]
+
+
+async def test_the_total_is_the_sum_of_the_offers_when_none_was_cut():
+    store = FakeStore(
+        offers=[
+            OfferClicks("o1", "soap", "Soap", 3),
+            OfferClicks("o2", "balm", "Balm", 1),
+        ],
+        days=[
+            DayClicks("o1", date(2026, 3, 10), 3),
+            DayClicks("o2", date(2026, 3, 10), 1),
+        ],
+        totals=MerchantClickTotals(
+            3, 0
+        ),  # a snapshot one click short of the offer query
+    )
+
+    report = await service(store).report("m1", date(2026, 3, 10), date(2026, 3, 11))
+
+    assert report.total_clicks == 4
+    assert report.total_clicks == sum(o.total_clicks for o in report.offers)
+
+
+async def test_the_merchant_total_is_kept_when_offers_were_cut():
+    store = FakeStore(
+        offers=[OfferClicks("o1", "soap", "Soap", 3)],
+        total_offers=5,
+        days=[DayClicks("o1", date(2026, 3, 10), 3)],
+        totals=MerchantClickTotals(9, 0),
+    )
+
+    report = await service(store).report("m1", date(2026, 3, 10), date(2026, 3, 11))
+
+    assert report.total_clicks == 9

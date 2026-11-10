@@ -39,8 +39,14 @@ class AuthChallengeErrorResponse(ErrorResponse):
 class CodedHTTPException(HTTPException):
     """An HTTP error whose body also carries a stable machine-readable ``code``."""
 
-    def __init__(self, status_code: int, detail: str, code: str) -> None:
-        super().__init__(status_code, detail)
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        code: str,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code, detail, dict(headers) if headers else None)
         self.code = code
 
 

@@ -10,7 +10,6 @@ data, and are never cached. The sync reports drift and writes one audit row; see
 """
 
 from collections.abc import AsyncIterator
-from datetime import date
 from typing import Annotated, Literal
 
 import httpx
@@ -21,7 +20,11 @@ from app.api.admin import AuditorDep, require_admin
 from app.api.auth import require_internal_key
 from app.api.deps import SessionDep
 from app.api.rate_limit import RATE_LIMIT_FAIL_CLOSED_RESPONSES, limit_by_subject
-from app.api.v1.admin_analytics_clicks import MerchantClicksResponse, clicks_response
+from app.api.v1.admin_analytics_clicks import (
+    IsoDay,
+    MerchantClicksResponse,
+    clicks_response,
+)
 from app.api.v1.admin_catalogue_common import (
     CatalogueErrorResponse,
     catalogue_http_error,
@@ -243,6 +246,9 @@ ClickReportDep = Annotated[
 SyncDep = Annotated[SubscriptionSyncService, Depends(get_sync_service)]
 
 
+NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
@@ -332,16 +338,20 @@ async def admin_merchant_clicks(
     merchant_id: Annotated[
         str, Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     ],
-    date_from: Annotated[date, Query(alias="from")],
-    date_to: Annotated[date, Query(alias="to")],
+    date_from: Annotated[IsoDay, Query(alias="from")],
+    date_to: Annotated[IsoDay, Query(alias="to")],
 ) -> MerchantClicksResponse:
     _no_store(response)
     try:
         report = await service.report(merchant_id, date_from, date_to)
     except InvalidClickRange as exc:
-        raise CodedHTTPException(422, str(exc), "invalid_range") from None
+        raise CodedHTTPException(
+            422, str(exc), "invalid_range", headers=NO_STORE_HEADERS
+        ) from None
     except CatalogueError as exc:
-        raise catalogue_http_error(exc) from None
+        refusal = catalogue_http_error(exc)
+        refusal.headers = NO_STORE_HEADERS
+        raise refusal from None
     return clicks_response(report)
 
 

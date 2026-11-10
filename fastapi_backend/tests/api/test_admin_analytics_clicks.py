@@ -187,6 +187,7 @@ async def test_an_unknown_merchant_is_a_404_with_a_stable_code(harness):
         "error": "Merchant not found",
         "code": "not_found",
     }
+    assert result.headers["cache-control"] == "no-store"
 
 
 async def test_unauthenticated_requests_are_401(harness):
@@ -232,6 +233,11 @@ async def test_an_admin_holding_only_the_other_analytics_permissions_is_403(harn
         {"merchant_id": "m1", "from": "2026-03-10"},
         {**QUERY, "from": "10/03/2026"},
         {**QUERY, "to": "2026-02-30"},
+        {**QUERY, "from": "1773100800"},
+        {**QUERY, "to": "2026-03-11T00:00:00"},
+        {**QUERY, "to": "2026-03-11T00:00:00Z"},
+        {**QUERY, "from": "20260310"},
+        {**QUERY, "from": "2026-03-10 "},
         {**QUERY, "merchant_id": ""},
         {**QUERY, "merchant_id": "bad id!"},
         {**QUERY, "merchant_id": "x" * 129},
@@ -260,6 +266,7 @@ async def test_a_reversed_or_too_long_range_is_a_422_with_a_code(harness, start,
 
     assert result.status_code == 422
     assert result.json()["code"] == "invalid_range"
+    assert result.headers["cache-control"] == "no-store"
     assert harness.store.seen == []
 
 

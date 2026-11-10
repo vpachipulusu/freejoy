@@ -139,11 +139,16 @@ class MerchantClickReportService:
             )
             for o in page.offers
         )
+        # The statements may see different snapshots. When no offer was cut, every offer with clicks is in
+        # the list, so the total is its sum and the table always adds up; otherwise the merchant total
+        # (which also covers the offers that were cut) is the only figure there is.
+        listed_clicks = sum(offer.total_clicks for offer in offers)
+        complete = page.total_offers == len(page.offers)
         return ClickReport(
             merchant=merchant,
             from_date=date_from,
             to_date=date_to,
-            total_clicks=totals.clicks,
+            total_clicks=listed_clicks if complete else totals.clicks,
             excluded_bot_clicks=totals.bot_clicks,
             offers_total=page.total_offers,
             max_offers=MAX_REPORT_OFFERS,

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 import tests.catalogue_e2e_support as support
 from app.core.ids import new_id
 from app.repositories.merchant_clicks import MerchantClickRepository
+from app.services.merchant_click_report import MerchantClickReportService
 from tests.api.test_catalogue_e2e import add_category, add_merchant, add_offer
 
 pytestmark = support.requires_database
@@ -182,6 +183,7 @@ async def test_draft_and_archived_offers_appear_only_when_they_had_clicks(
     )
 
     assert {o.slug for o in page.offers} == {"was-live", "soap", "balm", "gone"}
+    assert page.total_offers == 4
 
 
 async def test_offers_are_capped_busiest_first_and_the_full_count_is_reported(
@@ -215,7 +217,9 @@ async def test_an_unknown_merchant_has_no_offers_and_no_record(session, world):
     assert found.slug == "acme"
 
 
-async def test_the_report_costs_a_fixed_number_of_statements(engine, session, world):
+async def test_the_service_report_costs_four_statements_however_many_offers(
+    engine, session, world
+):
     third = await add_offer(engine, world["category"], world["acme"], "cream")
     at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
     for offer in (world["soap"], world["balm"], third):
@@ -228,11 +232,49 @@ async def test_the_report_costs_a_fixed_number_of_statements(engine, session, wo
 
     event.listen(engine.sync_engine, "before_cursor_execute", record)
     try:
-        repo = MerchantClickRepository(session)
-        await repo.totals(world["acme"], START, END)
-        page = await repo.offers(world["acme"], START, END, limit=10)
-        await repo.daily([o.offer_id for o in page.offers], START, END)
+        report = await MerchantClickReportService(
+            MerchantClickRepository(session)
+        ).report(world["acme"], date(2026, 3, 10), date(2026, 3, 11))
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", record)
 
-    assert len(statements) == 3
+    # merchant lookup, totals, offers, per-day counts
+    assert len(statements) == 4
+    assert [offer.total_clicks for offer in report.offers] == [2, 2, 2]
+    assert report.total_clicks == 6
+
+
+async def test_equal_counts_are_ordered_by_title_then_id(engine, session, world):
+    # Inserted out of title order, with equal counts, and two offers sharing a title.
+    zed = await add_offer(engine, world["category"], world["acme"], "zed", title="Aaa")
+    amy = await add_offer(engine, world["category"], world["acme"], "amy", title="Aaa")
+    at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    for offer in (world["soap"], world["balm"], zed, amy):
+        await click(engine, offer, at)
+
+    page = await MerchantClickRepository(session).offers(
+        world["acme"], START, END, limit=10
+    )
+
+    first, second = sorted([zed, amy])
+    assert [o.offer_id for o in page.offers] == [
+        first,
+        second,
+        world["balm"],  # "Balm"
+        world["soap"],  # "Soap"
+    ]
+
+
+async def test_the_merchant_total_counts_an_offer_the_limit_cut(engine, session, world):
+    at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    for _ in range(3):
+        await click(engine, world["soap"], at)
+    await click(engine, world["balm"], at)
+    repo = MerchantClickRepository(session)
+
+    page = await repo.offers(world["acme"], START, END, limit=1)
+    totals = await repo.totals(world["acme"], START, END)
+
+    assert [o.slug for o in page.offers] == ["soap"]
+    assert page.total_offers == 2
+    assert totals.clicks == 4
