@@ -278,3 +278,28 @@ async def test_taking_the_last_network_link_off_a_published_offer_is_422_with_a_
     assert result.json()["code"] == "publish_blocked"
     assert "its commercial basis has not been confirmed" in result.json()["error"]
     assert harness.offers.links["l1"].active is True
+
+
+@pytest.mark.parametrize(
+    ("providers", "expected"),
+    [
+        ([], False),
+        (["direct"], True),
+        (["direct", "sample"], True),
+        (["awin"], False),
+        (["direct", "awin"], False),
+    ],
+)
+async def test_the_offer_read_says_whether_publishing_needs_the_confirmation(
+    harness: Harness,
+    providers,
+    expected,  # noqa: F811
+):
+    harness.offers.offers["off1"] = offer("off1")
+    for index, provider in enumerate(providers):
+        harness.offers.links[f"l{index}"] = link(f"l{index}", provider=provider)
+
+    async with harness.client() as client:
+        data = (await client.get("/v1/admin/offers/off1")).json()["data"]
+
+    assert data["needs_basis_confirmation"] is expected

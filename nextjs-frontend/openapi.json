@@ -16031,6 +16031,10 @@
             "type": "string",
             "title": "Review Token"
           },
+          "needs_basis_confirmation": {
+            "type": "boolean",
+            "title": "Needs Basis Confirmation"
+          },
           "provenance": {
             "anyOf": [
               {
@@ -16194,6 +16198,7 @@
           "import_provider",
           "source_changed_at",
           "review_token",
+          "needs_basis_confirmation",
           "provenance",
           "summary",
           "description",
@@ -16474,6 +16479,10 @@
             "type": "string",
             "title": "Review Token"
           },
+          "needs_basis_confirmation": {
+            "type": "boolean",
+            "title": "Needs Basis Confirmation"
+          },
           "provenance": {
             "anyOf": [
               {
@@ -16641,6 +16650,7 @@
           "import_provider",
           "source_changed_at",
           "review_token",
+          "needs_basis_confirmation",
           "provenance",
           "summary",
           "description",

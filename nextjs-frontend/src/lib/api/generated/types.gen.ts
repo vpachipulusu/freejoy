@@ -1939,6 +1939,10 @@ export type OfferOut = {
      * Review Token
      */
     review_token: string;
+    /**
+     * Needs Basis Confirmation
+     */
+    needs_basis_confirmation: boolean;
     provenance: OfferProvenanceOut | null;
     /**
      * Summary
@@ -2164,6 +2168,10 @@ export type OfferWriteOut = {
      * Review Token
      */
     review_token: string;
+    /**
+     * Needs Basis Confirmation
+     */
+    needs_basis_confirmation: boolean;
     provenance: OfferProvenanceOut | null;
     /**
      * Summary

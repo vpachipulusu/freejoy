@@ -33,6 +33,7 @@ from app.repositories.admin_offers import (
     OfferRecord,
 )
 from app.services.admin_offers import OfferDetail
+from app.services.offer_rules import needs_basis_confirmation
 
 MAX_PARAGRAPHS = 20
 MAX_STEPS = 20
@@ -257,6 +258,8 @@ class OfferSummaryOut(BaseModel):
 
 class OfferOut(OfferSummaryOut):
     review_token: str
+    # True when publishing needs the editor to confirm the commercial basis (see ``needs_basis_confirmation``).
+    needs_basis_confirmation: bool
     provenance: OfferProvenanceOut | None
     summary: str
     description: list[str]
@@ -340,6 +343,9 @@ def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
         **_import_fields(provenance),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
+        "needs_basis_confirmation": needs_basis_confirmation(
+            (link.provider, link.active) for link in detail.links
+        ),
         "provenance": OfferProvenanceOut(**provenance.__dict__) if provenance else None,
     }
 
