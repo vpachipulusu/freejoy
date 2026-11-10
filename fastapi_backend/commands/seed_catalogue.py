@@ -36,7 +36,14 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.models.platform import AffiliateLink, Category, Merchant, Offer, OfferStatus
+from app.models.platform import (
+    AffiliateLink,
+    Category,
+    CommercialBasis,
+    Merchant,
+    Offer,
+    OfferStatus,
+)
 from commands.seed_data import (
     CATEGORIES,
     MERCHANTS,
@@ -209,6 +216,8 @@ def _offer_values(
         "category_id": category_id,
         "merchant_id": merchant_id,
         "offer_type": seed.offer_type,
+        # The sample catalogue is invented editorial copy: nobody pays for it.
+        "commercial_basis": CommercialBasis.EDITORIAL,
         "status": seed.status,
         "featured": seed.featured,
         "image_tint": seed.image_tint,

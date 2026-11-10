@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.platform.offer import (
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -29,6 +30,7 @@ def make_offer(**overrides: Any) -> OfferRecord:
         merchant_name="Acme",
         merchant_logo_url=None,
         offer_type=OfferType.FREE_SAMPLE,
+        commercial_basis=CommercialBasis.EDITORIAL,
         status=OfferStatus.PUBLISHED,
         featured=False,
         image_tint="blush",

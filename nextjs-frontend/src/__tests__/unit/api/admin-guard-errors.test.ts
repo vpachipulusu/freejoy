@@ -131,6 +131,15 @@ describe('catalogueErrorMessage', () => {
     expect(message).not.toContain('script');
   });
 
+  it('names an unconfirmed commercial basis and says how to confirm it, also for a link change on a live offer', () => {
+    const backend =
+      'The offer cannot be published yet: its commercial basis has not been confirmed';
+
+    expect(catalogueErrorMessage(fail(422, 'publish_blocked', backend), 'x')).toBe(
+      'This offer cannot be published yet: its commercial basis has not been confirmed (confirm it on the offer page; for a live offer, unpublish it, change its links, then publish again).'
+    );
+  });
+
   it('falls back to a plain message when no publish rule is recognised', () => {
     expect(catalogueErrorMessage(fail(422, 'publish_blocked', SECRET), 'x')).toBe(
       'This offer cannot be published yet.'

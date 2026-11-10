@@ -18,6 +18,8 @@ import { AffiliateCta } from './outbound-link';
 
 interface OfferCtaProps {
   offerType: OfferType;
+  /** True when the listing is sponsored: the real-offer CTA says so in a sentence of its own. */
+  sponsored?: boolean;
   /** True for fixture offers (design preview); false for real catalogue offers. */
   demo: boolean;
   /** Set for a real offer: the CTA links to `/go/<offerId>`. Null or absent keeps the demo dialog. */
@@ -32,10 +34,23 @@ interface OfferCtaProps {
  * "Demo offer" dialog instead: nothing here renders an external href. The ended state is rendered by the
  * (server) hero instead of this client component.
  */
-export function OfferCta({ offerType, demo, offerId = null, conditions = null }: OfferCtaProps) {
+export function OfferCta({
+  offerType,
+  demo,
+  sponsored = false,
+  offerId = null,
+  conditions = null,
+}: OfferCtaProps) {
   const conditionsId = useId();
   if (offerId && !demo) {
-    return <AffiliateCta offerId={offerId} offerType={offerType} conditions={conditions} />;
+    return (
+      <AffiliateCta
+        offerId={offerId}
+        offerType={offerType}
+        sponsored={sponsored}
+        conditions={conditions}
+      />
+    );
   }
 
   return (

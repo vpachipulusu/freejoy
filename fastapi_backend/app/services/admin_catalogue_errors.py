@@ -2,7 +2,7 @@
 
 Each carries a stable machine-readable ``code`` (the admin UI branches on it, never on the
 message). The routers map them to HTTP: ``CatalogueNotFound`` 404, ``SlugTaken``,
-``IllegalTransition`` and ``OfferChanged`` 409, ``InvalidInput`` and ``PublishBlocked`` 422.
+``IllegalTransition`` and ``OfferChanged`` 409, ``PermissionDenied`` 403, ``InvalidInput`` and ``PublishBlocked`` 422.
 """
 
 
@@ -35,6 +35,16 @@ class InvalidInput(CatalogueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class PermissionDenied(CatalogueError):
+    """The admin lacks a permission the service itself has to check (403).
+
+    The route dependency checks the permission a route always needs; this is for a rule that depends on the
+    data, such as changing the commercial basis of a published offer (needs ``offers.publish``).
+    """
+
+    code = "permission_denied"
 
 
 class IllegalTransition(CatalogueError):

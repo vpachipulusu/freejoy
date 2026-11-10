@@ -94,12 +94,19 @@ reactivate the merchant to show its offers again.
 
 The offer shape is the allowlist `OfferData` in `app/api/v1/catalogue_schemas.py`: `id` (needed for the later `/go/[id]`
 redirect), `slug`, `title`, `summary`, `description` paragraphs, `category {slug, name}`, `merchant {slug, name,
-logo_url}`, `offer_type`, `featured`, `image {tint, label, alt}`, `postage {kind, amount_minor, currency}`,
+logo_url}`, `offer_type`, `sponsored`, `featured`, `image {tint, label, alt}`, `postage {kind, amount_minor, currency}`,
 `requires_card`, `subscription_terms`, `eligibility`, `availability`, `start_at`, `end_at`, `last_verified_at`,
 `freshness`, `steps`. Enum values are lower-case, as in `nextjs-frontend/src/lib/catalogue/types.ts`; the database
 stores the upper-case names.
 
-Never exposed: `publisher_notes`, `status`, category and merchant ids, `source_url`, merchant `website`, timestamps other than the ones
+`sponsored` is `true` only when the offer's commercial basis is `SPONSORED` (the merchant pays or gives a benefit for
+the listing); the frontend shows a "Sponsored" label for it. It is on the list items and the detail alike. The
+three-way `commercial_basis` (`EDITORIAL`, `AFFILIATE`, `SPONSORED`) is **never** in a public response: the public
+record carries it only to compute this flag, and a test checks no response contains the name or the values. A
+featured offer can be sponsored; nothing lets `sponsored` be hidden. No sort or filter of the public list reads the
+basis (`tests/repositories/test_catalogue.py` compiles them and checks), so sponsorship does not change the order of results.
+
+Never exposed: `publisher_notes`, the three-way `commercial_basis`, `status`, category and merchant ids, `source_url`, merchant `website`, timestamps other than the ones
 above, and anything from `affiliate_links` (destinations are resolved server-side by the outbound click endpoint, see [freejoy-affiliate.md](freejoy-affiliate.md)). The
 repository selects an explicit column list, so those columns never leave the database layer, and the response models
 are a second, independent allowlist. To expose another field, add it to `OfferRecord`, the select list, `OfferData` and

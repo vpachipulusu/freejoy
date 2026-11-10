@@ -30,6 +30,8 @@ const CODE_MESSAGES: Record<string, string> = {
   slug_taken: 'That slug is already in use. Choose another.',
   offer_changed: OFFER_CHANGED_MESSAGE,
   review_token_required: OFFER_CHANGED_MESSAGE,
+  permission_denied:
+    'Changing the commercial basis of a published offer needs permission to publish. Ask an editor who can publish.',
   illegal_transition:
     'That change is not allowed for an offer in its current status. Refresh the page and try again.',
   invalid_url: 'A web address was rejected. Use a full https:// address.',
@@ -48,6 +50,8 @@ const PUBLISH_REASONS: Record<string, string> = {
   'it has no active affiliate link or source URL': 'it has no active affiliate link or source URL',
   'its end date has passed': 'its end date has passed',
   'it has not been verified': 'it has not been verified',
+  'its commercial basis has not been confirmed':
+    'its commercial basis has not been confirmed (confirm it on the offer page; for a live offer, unpublish it, change its links, then publish again)',
 };
 
 const PUBLISH_BLOCKED_PREFIX = 'The offer cannot be published yet: ';

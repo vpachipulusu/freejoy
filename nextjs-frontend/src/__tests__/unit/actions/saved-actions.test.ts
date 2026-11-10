@@ -468,6 +468,7 @@ describe('loadSavedOffersAction: only what a card needs leaves the server', () =
         'postage',
         'slug',
         'source',
+        'sponsored',
         'title',
       ].sort()
     );

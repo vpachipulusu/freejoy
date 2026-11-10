@@ -34,6 +34,8 @@ type OfferReviewHandlers = {
   recordFailure: (reason?: 'offer_changed') => void;
   /** The token the page was just loaded with. */
   watchLoadedToken: (token: string) => void;
+  /** The token of the last version the editor was shown (what a save sends back), or undefined before any. */
+  currentToken: () => string | undefined;
 };
 type OfferReview = OfferReviewHandlers & { changed: boolean };
 
@@ -43,6 +45,7 @@ const NOOP: OfferReview = {
   recordWrite: () => undefined,
   recordFailure: () => undefined,
   watchLoadedToken: () => undefined,
+  currentToken: () => undefined,
 };
 
 const OfferReviewContext = createContext<OfferReview>(NOOP);
@@ -73,6 +76,9 @@ export function OfferReviewProvider({ children }: { children: ReactNode }) {
       recordFailure(reason) {
         inFlight.current = false;
         if (reason === 'offer_changed') setChanged(true);
+      },
+      currentToken() {
+        return seen.current ?? undefined;
       },
       watchLoadedToken(token) {
         loaded.current = token;

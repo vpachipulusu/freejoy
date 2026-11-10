@@ -102,3 +102,16 @@ def test_every_unmet_rule_is_reported_together():
 
 def test_an_end_date_one_second_ahead_still_publishes():
     assert publish_blockers(ready(end_at=NOW + timedelta(seconds=1)), NOW) == []
+
+
+def test_an_unconfirmed_basis_is_its_own_blocker_listed_last():
+    facts = ready(last_verified_at=None, basis_unconfirmed=True)
+
+    assert publish_blockers(facts, NOW) == [
+        PublishReason.NOT_VERIFIED,
+        PublishReason.COMMERCIAL_BASIS_REQUIRED,
+    ]
+
+
+def test_a_confirmed_basis_blocks_nothing():
+    assert publish_blockers(ready(basis_unconfirmed=False), NOW) == []

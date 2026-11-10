@@ -1,4 +1,4 @@
-import { minorToPounds, type OfferFormValues } from './offer-schema';
+import { isCommercialBasis, minorToPounds, type OfferFormValues } from './offer-schema';
 import type { OfferRowStatus } from './offer-status';
 
 /**
@@ -13,6 +13,8 @@ export interface OfferRowView {
   categoryId: string;
   merchantId: string;
   offerType: string;
+  /** EDITORIAL, AFFILIATE or SPONSORED; anything else (a newer API) is kept as sent and never preselected. */
+  commercialBasis: string;
   status: OfferRowStatus;
   featured: boolean;
   endAt: string | null;
@@ -61,6 +63,11 @@ export interface OfferDetailView extends OfferRowView {
   publisherNotes: string | null;
   createdAt: string;
   links: OfferLinkView[];
+  /**
+   * True when publishing needs the editor to confirm the commercial basis (at least one active link and none on an
+   * affiliate network). The API works it out; this page does not hold its own copy of the rule.
+   */
+  needsBasisConfirmation: boolean;
   /** Null for an offer made by hand. */
   provenance: OfferProvenanceView | null;
 }
@@ -89,6 +96,7 @@ export function offerToFormValues(offer: OfferDetailView): OfferFormValues {
     categoryId: offer.categoryId,
     merchantId: offer.merchantId,
     offerType: offer.offerType as OfferFormValues['offerType'],
+    commercialBasis: isCommercialBasis(offer.commercialBasis) ? offer.commercialBasis : '',
     featured: offer.featured,
     imageTint: offer.imageTint as OfferFormValues['imageTint'],
     imageLabel: offer.imageLabel,

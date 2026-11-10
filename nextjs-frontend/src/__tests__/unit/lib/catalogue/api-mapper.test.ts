@@ -17,6 +17,7 @@ const apiOffer = (patch: Partial<ApiOffer> = {}): ApiOffer => ({
   category: { slug: 'food-drink', name: 'Food & drink' },
   merchant: { slug: 'tea-time', name: 'Tea Time', logo_url: null },
   offer_type: 'free_sample',
+  sponsored: false,
   featured: true,
   image: { tint: 'mint', label: 'cuppa', alt: 'A cup of tea' },
   postage: { kind: 'free', amount_minor: null, currency: null },

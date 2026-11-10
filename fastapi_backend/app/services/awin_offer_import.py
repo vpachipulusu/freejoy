@@ -18,7 +18,8 @@ expired or archived                            ``source_changed_at`` is set     
 =============================================  ===============================================
 
 "Edited by a person" is detected by fingerprint, not by ``updated_at``: when the importer writes an
-offer it stores a hash of every editor-changeable field and the offer's links
+offer it stores a hash of the editor-changeable fields (all but ``commercial_basis``, which it writes once as
+AFFILIATE and never refreshes) and the offer's links
 (``offer_fingerprint.fingerprint``) in ``applied_content_hash``. Any later difference means a person
 changed the offer (a refresh by the importer re-stores the new fingerprint). ``updated_at`` would also
 move for the importer's own writes and for housekeeping such as expiry, which is why it is not used.
@@ -313,6 +314,7 @@ class OfferImporter:
                 "category_id": offer.category_id,
                 "merchant_id": offer.merchant_id,
                 "offer_type": offer.offer_type.value,
+                "commercial_basis": offer.commercial_basis.value,
                 "status": offer.status.value,
             },
             details={**origin, "reason": "imported"},

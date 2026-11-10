@@ -15,6 +15,25 @@ export function freshnessLabel(value: string): string {
   return FRESHNESS_LABELS[value.toLowerCase() as Freshness] ?? value;
 }
 
+/** The three commercial bases, in the order the form lists them. Plain words, UK English. */
+export const COMMERCIAL_BASIS_LABELS: Record<string, string> = {
+  EDITORIAL: 'Editorial',
+  AFFILIATE: 'Affiliate',
+  SPONSORED: 'Sponsored',
+};
+
+/** One line under each choice. Sponsored is the only one visitors are told about. */
+export const COMMERCIAL_BASIS_HELP: Record<string, string> = {
+  EDITORIAL: 'Freejoy gets no payment or benefit for this listing.',
+  AFFILIATE: 'Freejoy earns a commission through an affiliate network if someone takes it up.',
+  SPONSORED:
+    'The merchant pays Freejoy, or gives it a benefit, for the listing or where it appears. Visitors see a "Sponsored" label.',
+};
+
+export function commercialBasisLabel(value: string): string {
+  return COMMERCIAL_BASIS_LABELS[value] ?? value;
+}
+
 export const POSTAGE_KIND_LABELS: Record<string, string> = {
   FREE: 'Free postage',
   COST: 'Postage costs money',

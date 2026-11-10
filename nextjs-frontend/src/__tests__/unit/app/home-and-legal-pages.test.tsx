@@ -196,6 +196,80 @@ describe('affiliate disclosure page', () => {
   });
 });
 
+describe('affiliate disclosure page: sponsored listings', () => {
+  it('has a plain-words section that says what sponsored means and how it is labelled', () => {
+    const { container } = render(<AffiliatePage />);
+
+    const heading = screen.getByRole('heading', { name: 'Sponsored listings' });
+    expect(heading).toHaveAttribute('id', 'sponsored-listings');
+    expect(container.textContent).toMatch(/the brand pays Freejoy, or gives it a benefit/i);
+    expect(container.textContent).toMatch(/“Sponsored” label on its card and on its own page/);
+    expect(container.textContent).toMatch(/written out in words, not shown by colour alone/i);
+    expect(container.textContent).toMatch(/marked as a paid link for search engines/i);
+  });
+
+  it('explains both labels, and says the Ad label is shown today even where no commission is earned', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(screen.getByRole('heading', { name: 'Two labels, two meanings' })).toBeInTheDocument();
+    expect(text).toMatch(
+      /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled “Sponsored”/i
+    );
+    expect(text).toMatch(
+      /“Ad”: shown before the button on every offer page that links to a brand, including links that earn Freejoy no commission/i
+    );
+    expect(text).toMatch(/also has an affiliate link shows both labels/i);
+    expect(text).not.toMatch(
+      /links that earn freejoy a commission through an affiliate network carry/i
+    );
+  });
+
+  it('does not call every link an affiliate link: some go straight to the brand and pay nothing', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).not.toMatch(
+      /where an offer has a link to a brand, that link is an affiliate link/i
+    );
+    expect(text).toMatch(/most links to brands are affiliate links/i);
+    expect(text).toMatch(/go straight to the brand.s own website and pay Freejoy no commission/i);
+  });
+
+  it('commits to labelling every paid listing instead of claiming an unlabelled one is not sponsored', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(
+      /we label every listing that a brand pays for, or gives Freejoy any other benefit for/i
+    );
+    expect(text).not.toMatch(/without the .Sponsored. label is not sponsored/i);
+  });
+
+  it('says where the Sponsored label shows, and that sponsorship does not reorder search results', () => {
+    const { container } = render(<AffiliatePage />);
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(/labelled on its card in every list and on its own page/i);
+    expect(text).not.toMatch(/wherever it appears/i);
+    expect(text).toMatch(/sponsorship does not change the order of search results/i);
+  });
+
+  it('no longer says paid placements are not planned, and claims nothing about sponsors being held to other standards', () => {
+    const { container } = render(<AffiliatePage />);
+    const section: string[] = [];
+    let node = screen.getByRole('heading', { name: 'Sponsored listings' }).nextElementSibling;
+    while (node && node.tagName !== 'H2') {
+      section.push(node.textContent ?? '');
+      node = node.nextElementSibling;
+    }
+    const text = section.join(' ');
+
+    expect(container.textContent).not.toMatch(/does not plan to sell paid placements/i);
+    expect(text).not.toMatch(/editorial|standards|independen|vetted|same checks/i);
+  });
+});
+
 describe('about page', () => {
   it('has the how-it-works anchor with three numbered steps', async () => {
     const { container } = render(await AboutPage());
@@ -401,7 +475,9 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     const text = container.textContent ?? '';
 
     expect(text).toMatch(/not stored in a database or against an account/i);
-    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(
+      /page addresses of freebies you open can appear in error and timing reports/i
+    );
     expect(text).toMatch(/14 days/);
     expect(text).toMatch(/30 days/);
     expect(text).not.toMatch(/short-lived/i);
@@ -417,7 +493,9 @@ describe('saved freebies in the legal drafts (FREEJ-28)', () => {
     expect(text).toMatch(/list of freebies you saved stays in your browser/i);
     expect(text).toMatch(/no analytics event when you save or remove/i);
     expect(text).toMatch(/not stored in a database or against an account/i);
-    expect(text).toMatch(/page addresses of freebies you open can appear in error and timing reports/i);
+    expect(text).toMatch(
+      /page addresses of freebies you open can appear in error and timing reports/i
+    );
     expect(text).toMatch(/14 days/);
     expect(text).not.toMatch(/short-lived/i);
     expect(text).not.toMatch(/name of a button/i);

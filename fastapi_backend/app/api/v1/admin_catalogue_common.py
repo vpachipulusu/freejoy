@@ -20,6 +20,7 @@ from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
     IllegalTransition,
     OfferChanged,
+    PermissionDenied,
     PublishBlocked,
 )
 
@@ -95,6 +96,7 @@ INVALID_MESSAGES = {
 }
 SLUG_TAKEN = "That slug is already in use"
 ILLEGAL_TRANSITION = "Operation not allowed in the current state"
+PERMISSION_DENIED = "Forbidden"
 OFFER_CHANGED = "The offer changed after it was loaded: review it again"
 PUBLISH_BLOCKED = "The offer cannot be published yet"
 PUBLISH_BLOCKERS = {
@@ -103,6 +105,7 @@ PUBLISH_BLOCKERS = {
     "no_destination": "it has no active affiliate link or source URL",
     "end_date_passed": "its end date has passed",
     "not_verified": "it has not been verified",
+    "commercial_basis_required": "its commercial basis has not been confirmed",
 }
 
 
@@ -116,6 +119,8 @@ def catalogue_http_error(exc: CatalogueError) -> HTTPException:
         return CodedHTTPException(409, ILLEGAL_TRANSITION, exc.code)
     if isinstance(exc, OfferChanged):
         return CodedHTTPException(409, OFFER_CHANGED, exc.code)
+    if isinstance(exc, PermissionDenied):
+        return CodedHTTPException(403, PERMISSION_DENIED, exc.code)
     if isinstance(exc, PublishBlocked):
         reasons = "; ".join(
             PUBLISH_BLOCKERS.get(reason, reason) for reason in exc.reasons

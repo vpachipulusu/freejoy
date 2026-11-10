@@ -253,6 +253,17 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
 
 - Fixture (demo) offers keep the "Demo offer" dialog: their ids have no row, so `/go/` would answer 404. The CTA
   switches to the link when a page passes `offerId` (`OfferHero` does so for `demo: false` offers).
+- **`direct` and `SPONSORED`.** A `direct` link points at the merchant's own site and earns no network commission, so
+  nothing about the link says how the listing is paid for; that is what the offer's commercial basis is for. A
+  `direct` link on an offer marked `SPONSORED` means "the merchant pays or gives a benefit for this listing, and there is
+  no network in between": visitors see the "Sponsored" label and a sentence next to the button, and the click is still
+  counted like any other. A `direct` link on an `EDITORIAL` offer means no payment at all. Publishing an offer with no network link
+  needs the editor to confirm the basis ([backend-admin-catalogue.md](backend-admin-catalogue.md#commercial-basis)). The
+  outbound `rel` is `sponsored nofollow noopener` for every basis. A sponsored offer's call to action does not state
+  as fact that a commission is paid: it says the listing is sponsored and that Freejoy "may also earn a commission".
+  **Known gap, follow-up FREEJ-60:** the "Ad" label and the commission sentence are shown for every real offer that is
+  not sponsored, including a `direct` one, where no commission is earned; FREEJ-60 shows "Ad" only on links that earn a
+  commission. The public disclosure page says so in the meantime.
 - The "Ad" label and the sentence "Freejoy is paid a commission by the brand if you take up this offer through this
   link." are from the compliance checklist and still need the reviewer's sign-off on wording. Offer cards do not
   carry the label yet (checklist A1.3).

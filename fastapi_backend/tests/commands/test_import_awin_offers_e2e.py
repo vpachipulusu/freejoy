@@ -173,8 +173,8 @@ async def _bare_offer(engine: AsyncEngine) -> str:
     await execute(
         engine,
         "INSERT INTO offers (id, title, slug, summary, category_id, merchant_id, offer_type,"
-        " image_tint, image_label, image_alt, postage_kind, eligibility, availability)"
-        " VALUES (:id, 't', :slug, 's', :c, :m, 'VOUCHER', 'cream', 'l', 'a', 'CHECK_TERMS', 'e', 'a')",
+        " commercial_basis, image_tint, image_label, image_alt, postage_kind, eligibility, availability)"
+        " VALUES (:id, 't', :slug, 's', :c, :m, 'VOUCHER', 'AFFILIATE', 'cream', 'l', 'a', 'CHECK_TERMS', 'e', 'a')",
         id=offer_id,
         slug=f"bare-{offer_id}",
         c=category,
@@ -247,10 +247,12 @@ async def test_an_import_creates_a_draft_with_provenance_and_audit_rows(
     assert report.tally.created == 2
     offer = (
         await rows(
-            engine, "SELECT status, last_verified_at, featured, offer_type FROM offers"
+            engine,
+            "SELECT status, last_verified_at, featured, offer_type, commercial_basis"
+            " FROM offers",
         )
     )[0]
-    assert tuple(offer) == ("DRAFT", None, False, "VOUCHER")
+    assert tuple(offer) == ("DRAFT", None, False, "VOUCHER", "AFFILIATE")
     assert (
         await scalar(
             engine,

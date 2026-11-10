@@ -6,7 +6,12 @@ from typing import Any
 
 from app.core.ids import new_id
 from app.core.permissions import AdminContext
-from app.models.platform.offer import OfferStatus, OfferType, PostageKind
+from app.models.platform.offer import (
+    CommercialBasis,
+    OfferStatus,
+    OfferType,
+    PostageKind,
+)
 from app.repositories.admin_categories import CategoryPage, CategoryRecord
 from app.repositories.admin_merchants import MerchantPage, MerchantRecord
 from app.repositories.admin_offers import (
@@ -82,6 +87,7 @@ def offer(offer_id: str = "off1", **changes: Any) -> OfferRecord:
         category_id="cat1",
         merchant_id="mer1",
         offer_type=OfferType.FREE_SAMPLE,
+        commercial_basis=CommercialBasis.EDITORIAL,
         status=OfferStatus.DRAFT,
         featured=False,
         image_tint="sage",
@@ -119,12 +125,16 @@ def provenance(
 
 
 def link(
-    link_id: str, offer_id: str = "off1", *, active: bool = True
+    link_id: str,
+    offer_id: str = "off1",
+    *,
+    active: bool = True,
+    provider: str = "awin",
 ) -> AffiliateLinkRecord:
     return AffiliateLinkRecord(
         id=link_id,
         offer_id=offer_id,
-        provider="awin",
+        provider=provider,
         destination_url="https://shop.example.com/go",
         tracking_id=None,
         active=active,

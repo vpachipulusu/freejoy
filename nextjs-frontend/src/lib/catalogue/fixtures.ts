@@ -165,6 +165,7 @@ const STEPS_BY_TYPE: Record<OfferType, readonly ClaimStep[]> = {
 
 type OptionalOfferKey =
   | 'status'
+  | 'sponsored'
   | 'featured'
   | 'postage'
   | 'requiresCard'
@@ -180,6 +181,7 @@ type OfferInput = Omit<Offer, OptionalOfferKey | FixedOfferKey> &
 function defineOffer(input: OfferInput): Offer {
   return {
     status: 'published',
+    sponsored: false,
     featured: false,
     postage: { kind: 'free' },
     requiresCard: false,

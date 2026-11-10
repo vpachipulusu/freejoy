@@ -7,7 +7,12 @@ from typing import Any
 
 import pytest
 
-from app.models.platform.offer import OfferFreshness, OfferStatus, OfferType
+from app.models.platform.offer import (
+    CommercialBasis,
+    OfferFreshness,
+    OfferStatus,
+    OfferType,
+)
 from app.repositories.awin_import import OfferImportRecord
 from app.services.awin_offer_import import (
     SOURCE,
@@ -82,6 +87,30 @@ async def test_a_new_promotion_becomes_a_draft_offer_with_a_link_and_provenance(
     assert record.source_hash == record.applied_source_hash == source_hash(promotion())
     assert record.applied_content_hash == fingerprint(offer, [link])
     assert record.source_changed_at is None and record.applied_at == T0
+
+
+async def test_an_imported_offer_is_written_as_affiliate() -> None:
+    db = FakeDatabase()
+
+    await run(db, promotion())
+
+    assert only_offer(db).commercial_basis is CommercialBasis.AFFILIATE
+
+
+async def test_a_refresh_never_rewrites_the_basis_an_editor_chose() -> None:
+    db = FakeDatabase()
+    await run(db, promotion())
+    created = only_offer(db)
+    # The editor marks it sponsored; the fingerprint ignores the basis, so the import still counts as untouched.
+    db.committed.offers[created.id] = dataclasses.replace(
+        created, commercial_basis=CommercialBasis.SPONSORED
+    )
+
+    tally = await run(db, promotion(title="Brand new title"), now=LATER)
+
+    assert tally.updated == 1
+    assert only_offer(db).title == "Brand new title"
+    assert only_offer(db).commercial_basis is CommercialBasis.SPONSORED
 
 
 async def test_an_imported_draft_cannot_be_published_until_an_editor_acts() -> None:
@@ -546,6 +575,10 @@ async def test_a_creation_is_audited_by_the_command_without_urls_copy_or_codes()
     flat = json.dumps(db.committed.audits, default=str)
     for forbidden in ("https://", "awinaffid", CODE, "10% off", "Save 10%", "terms"):
         assert forbidden not in flat
+    offer_audit = next(
+        a for a in db.committed.audits if a["action"] == "admin.offers.create"
+    )
+    assert offer_audit["after"]["commercial_basis"] == "AFFILIATE"
     link_audit = db.committed.audits[-1]
     assert link_audit["details"]["destination_host"] == "www.awin1.com"
     assert link_audit["after"] == {"provider": "awin", "active": True}

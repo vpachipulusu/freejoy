@@ -110,6 +110,7 @@ const TOKEN = 'tok-1_ABC';
 
 const offerInput = {
   ...emptyOfferFormValues(),
+  commercialBasis: 'EDITORIAL',
   title: 'Free coffee',
   summary: 'A sachet.',
   categoryId: 'c1',
@@ -327,6 +328,91 @@ describe('offer actions', () => {
       ]);
     }
   );
+
+  it('sends the loaded review token with an edit so a stale basis change is refused', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok(OFFER));
+
+    await updateOfferAction('o1', offerInput, TOKEN);
+    await updateOfferAction('o1', offerInput);
+    await updateOfferAction('o1', offerInput, '../not a token');
+
+    expect(mocks.patchAdminOffer.mock.calls.map((call) => call[1].review_token)).toEqual([
+      TOKEN,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('turns a 409 offer_changed on an edit into the curated message and refreshes the page', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(fail(409, 'offer_changed'));
+
+    const result = await updateOfferAction('o1', offerInput, TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error: OFFER_CHANGED_MESSAGE,
+      reason: 'offer_changed',
+    });
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers/o1');
+    expect(mocks.revalidateCatalogue).not.toHaveBeenCalled();
+  });
+
+  it('explains that changing the basis of a published offer needs the publish permission', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(fail(403, 'permission_denied'));
+
+    const result = await updateOfferAction('o1', offerInput, TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Changing the commercial basis of a published offer needs permission to publish. Ask an editor who can publish.',
+    });
+  });
+
+  it('sends the confirmed commercial basis with publish only, and only a known one', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
+
+    await offerLifecycleAction('o1', 'publish', TOKEN, 'SPONSORED');
+    await offerLifecycleAction('o1', 'publish', TOKEN, 'PAID');
+    await offerLifecycleAction('o1', 'verify', TOKEN, 'SPONSORED');
+    await offerLifecycleAction('o1', 'unpublish', undefined, 'SPONSORED');
+
+    expect(mocks.runAdminOfferAction.mock.calls).toEqual([
+      ['o1', { action: 'publish', reviewToken: TOKEN, commercialBasis: 'SPONSORED' }],
+      ['o1', { action: 'publish', reviewToken: TOKEN }],
+      ['o1', { action: 'verify', reviewToken: TOKEN }],
+      ['o1', { action: 'unpublish' }],
+    ]);
+  });
+
+  it('turns an unconfirmed basis into the curated message, never the backend text', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(
+      fail(
+        422,
+        'publish_blocked',
+        'The offer cannot be published yet: its commercial basis has not been confirmed'
+      )
+    );
+
+    const result = await offerLifecycleAction('o1', 'publish', TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'This offer cannot be published yet: its commercial basis has not been confirmed (confirm it on the offer page; for a live offer, unpublish it, change its links, then publish again).',
+    });
+  });
+
+  it('refuses a create without a commercial basis, naming the field, and calls nothing', async () => {
+    const result = await createOfferAction({ ...offerInput, commercialBasis: '' });
+
+    expect(result).toMatchObject({
+      success: false,
+      fieldErrors: { commercialBasis: 'Choose the commercial basis.' },
+    });
+    expect(mocks.createAdminOffer).not.toHaveBeenCalled();
+  });
 
   it('rejects an unknown lifecycle action without calling the API', async () => {
     const result = await offerLifecycleAction('o1', 'delete' as never);

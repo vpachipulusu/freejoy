@@ -191,8 +191,13 @@ An offer's row in `offer_imports` says whether the offer is still an untouched i
 - `source_hash` is the latest source content seen (the **normalised** promotion, hashed, so an unused key appearing in
   the response never counts as a change). `applied_source_hash` is the source content the offer currently reflects.
 - `applied_content_hash` is a **fingerprint of the offer and its links as the importer left them**: every field an
-  editor can change (`EDITABLE_FIELDS`), plus `status` and `last_verified_at`, plus each link's provider, destination,
+  editor can change (`EDITABLE_FIELDS`) **except `commercial_basis`** (see below), plus `status` and `last_verified_at`, plus each link's provider, destination,
   tracking id and active flag (not ids, slugs or timestamps).
+
+Imported offers are written with `commercial_basis` **`AFFILIATE`** (commission through the network); an editor may change
+it. The importer writes it once, when it creates the draft, and a refresh never rewrites it. It is left out of the
+fingerprint on purpose: including it would change every stored hash and mark every existing import as edited. The create
+audit row carries it.
 
 On each item the importer compares hashes, in this order:
 

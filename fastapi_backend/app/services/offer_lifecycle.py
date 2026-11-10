@@ -69,6 +69,7 @@ class PublishReason(enum.StrEnum):
     NO_DESTINATION = "no_destination"
     END_DATE_PASSED = "end_date_passed"
     NOT_VERIFIED = "not_verified"
+    COMMERCIAL_BASIS_REQUIRED = "commercial_basis_required"
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,8 @@ class PublishFacts:
     has_source_url: bool
     end_at: datetime | None
     last_verified_at: datetime | None
+    # True when the offer's only active links are ``direct`` and the editor has not confirmed its basis.
+    basis_unconfirmed: bool = False
 
 
 def publish_blockers(facts: PublishFacts, now: datetime) -> list[PublishReason]:
@@ -88,7 +91,9 @@ def publish_blockers(facts: PublishFacts, now: datetime) -> list[PublishReason]:
 
     Rules: the category is enabled, the merchant is active, there is at least one active
     affiliate link or a source URL, ``end_at`` is null or in the future, and the offer has
-    been verified (``last_verified_at`` set; publishing never stamps it itself).
+    been verified (``last_verified_at`` set; publishing never stamps it itself), and an offer whose only
+    active links are ``direct`` (no network is paid for it, so the basis is a judgement call) has had its
+    commercial basis confirmed by the editor in the publish request.
     """
     blockers: list[PublishReason] = []
     if not facts.category_enabled:
@@ -101,4 +106,6 @@ def publish_blockers(facts: PublishFacts, now: datetime) -> list[PublishReason]:
         blockers.append(PublishReason.END_DATE_PASSED)
     if facts.last_verified_at is None:
         blockers.append(PublishReason.NOT_VERIFIED)
+    if facts.basis_unconfirmed:
+        blockers.append(PublishReason.COMMERCIAL_BASIS_REQUIRED)
     return blockers

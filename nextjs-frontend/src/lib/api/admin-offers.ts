@@ -1,5 +1,6 @@
 import 'server-only';
 
+import type { CommercialBasisValue } from '@/lib/admin-catalogue/offer-schema';
 import {
   isOfferStatus,
   OFFER_STATUSES,
@@ -87,10 +88,13 @@ export function patchAdminOffer(offerId: string, body: UpdateOfferRequest) {
 /**
  * A lifecycle call. Publish and verify say "a person reviewed this", so they carry the `review_token` of the
  * offer the admin loaded; the backend answers 409 `offer_changed` when the offer or its links moved since. The
- * steps that only take an offer off the public site carry nothing.
+ * steps that only take an offer off the public site carry nothing. Publish may also carry the commercial basis the
+ * editor confirmed: the backend needs it when the offer's only active links are `direct`, and refuses (409
+ * `offer_changed`) one that is not the stored basis.
  */
 export type OfferActionRequest =
-  | { action: ReviewedOfferAction; reviewToken: string }
+  | { action: 'publish'; reviewToken: string; commercialBasis?: CommercialBasisValue }
+  | { action: Exclude<ReviewedOfferAction, 'publish'>; reviewToken: string }
   | { action: Exclude<OfferAction, ReviewedOfferAction> };
 
 /** The lifecycle calls. (The API's optional verify note is not used by this UI.) */
@@ -99,7 +103,14 @@ export function runAdminOfferAction(offerId: string, request: OfferActionRequest
   return callBackend((client) => {
     switch (request.action) {
       case 'publish':
-        return adminPublishOffer({ client, path, body: { review_token: request.reviewToken } });
+        return adminPublishOffer({
+          client,
+          path,
+          body: {
+            review_token: request.reviewToken,
+            ...(request.commercialBasis ? { commercial_basis: request.commercialBasis } : {}),
+          },
+        });
       case 'verify':
         return adminVerifyOffer({ client, path, body: { review_token: request.reviewToken } });
       case 'unpublish':
@@ -176,6 +187,7 @@ export function toOfferRow(offer: OfferSummaryOut): OfferRowView {
     categoryId: offer.category_id,
     merchantId: offer.merchant_id,
     offerType: offer.offer_type,
+    commercialBasis: offer.commercial_basis,
     status: readStatus(offer.status),
     featured: offer.featured,
     endAt: offer.end_at,
@@ -235,6 +247,7 @@ export function toOfferDetail(offer: OfferOut): OfferDetailView {
     publisherNotes: offer.publisher_notes,
     createdAt: offer.created_at,
     links: offer.links.map(toOfferLink),
+    needsBasisConfirmation: offer.needs_basis_confirmation,
     provenance: toProvenance(offer.provenance),
   };
 }

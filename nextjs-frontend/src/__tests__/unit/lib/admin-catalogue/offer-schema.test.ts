@@ -27,6 +27,7 @@ import {
 function valid(overrides: Partial<OfferFormValues> = {}): OfferFormValues {
   return {
     ...emptyOfferFormValues(),
+    commercialBasis: 'EDITORIAL',
     title: 'Free coffee sample',
     summary: 'A free tasting sachet.',
     categoryId: 'cat_1',
@@ -189,6 +190,7 @@ describe('offerToFormValues', () => {
     categoryId: 'c',
     merchantId: 'm',
     offerType: 'VOUCHER',
+    commercialBasis: 'AFFILIATE',
     status: 'DRAFT',
     featured: true,
     endAt: '2026-05-01T12:00:00Z',
@@ -217,6 +219,7 @@ describe('offerToFormValues', () => {
     publisherNotes: null,
     createdAt: '2026-01-01T00:00:00Z',
     links: [],
+    needsBasisConfirmation: false,
   };
 
   it('maps an offer to form values with blanks for nulls', () => {

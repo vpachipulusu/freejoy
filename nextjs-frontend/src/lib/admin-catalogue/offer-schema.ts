@@ -21,6 +21,14 @@ export const OFFER_TYPE_VALUES = [
   'VOUCHER',
   'COMPETITION',
 ] as const;
+/** How a listing is paid for. Required on every offer: there is no default to leave in place by accident. */
+export const COMMERCIAL_BASIS_VALUES = ['EDITORIAL', 'AFFILIATE', 'SPONSORED'] as const;
+export type CommercialBasisValue = (typeof COMMERCIAL_BASIS_VALUES)[number];
+
+export function isCommercialBasis(value: unknown): value is CommercialBasisValue {
+  return (COMMERCIAL_BASIS_VALUES as readonly unknown[]).includes(value);
+}
+
 export const POSTAGE_KIND_VALUES = ['FREE', 'COST', 'CHECK_TERMS'] as const;
 export const FRESHNESS_VALUES = [
   'NEW_TODAY',
@@ -117,6 +125,8 @@ const offerFieldsSchema = z.object({
   categoryId: z.string().regex(ID_PATTERN, 'Choose a category.'),
   merchantId: z.string().regex(ID_PATTERN, 'Choose a merchant.'),
   offerType: z.enum(OFFER_TYPE_VALUES, 'Choose an offer type.'),
+  // '' until the editor chooses: the form starts with nothing selected, and an empty choice is refused.
+  commercialBasis: z.enum(['', ...COMMERCIAL_BASIS_VALUES], 'Choose the commercial basis.'),
   featured: z.boolean(),
   imageTint: z.enum(TINT_VALUES, 'Choose a tint.'),
   imageLabel: requiredLine('the picture label', 40),
@@ -160,6 +170,14 @@ export function minorToPounds(minor: number): string {
 }
 
 function checkCrossFields(values: OfferFormValues, ctx: z.RefinementCtx): void {
+  if (values.commercialBasis === '') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['commercialBasis'],
+      message: 'Choose the commercial basis.',
+    });
+  }
+
   const paragraphs = descriptionParagraphs(values.description);
   if (paragraphs.length > MAX_PARAGRAPHS) {
     ctx.addIssue({
@@ -206,6 +224,7 @@ export function emptyOfferFormValues(): OfferFormValues {
     categoryId: '',
     merchantId: '',
     offerType: 'FREE_SAMPLE',
+    commercialBasis: '',
     featured: false,
     imageTint: 'blush',
     imageLabel: '',

@@ -23,6 +23,7 @@ from app.models.platform.membership import Membership, MembershipRole
 from app.models.platform.merchant import Merchant
 from app.models.platform.network_report import CommissionStatus, NetworkReportRow
 from app.models.platform.offer import (
+    CommercialBasis,
     Offer,
     OfferFreshness,
     OfferStatus,
@@ -43,6 +44,7 @@ __all__ = [
     "AuditLog",
     "Category",
     "ClickEvent",
+    "CommercialBasis",
     "CommissionStatus",
     "EmailSubscriber",
     "EmailTemplate",

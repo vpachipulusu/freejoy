@@ -43,7 +43,7 @@ from app.api.v1.admin_offers_schemas import (
     summary_out,
 )
 from app.core.permissions import AdminContext
-from app.models.platform.offer import OfferStatus
+from app.models.platform.offer import CommercialBasis, OfferStatus
 from app.repositories.admin_offers import AdminOfferRepository, OfferFilters
 from app.services.admin_catalogue_common import MAX_PAGE_SIZE
 from app.services.admin_catalogue_errors import CatalogueError
@@ -71,10 +71,13 @@ async def _transition(
     response: Response,
     service: AdminOfferService,
     review_token: str | None = None,
+    commercial_basis: CommercialBasis | None = None,
 ) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.transition(admin, offer_id, action, review_token)
+        detail = await service.transition(
+            admin, offer_id, action, review_token, commercial_basis
+        )
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
     return OfferWriteResponse(data=offer_write_out(detail))
@@ -145,9 +148,8 @@ async def admin_update_offer(
 ) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.update_offer(
-            admin, offer_id, body.model_dump(exclude_unset=True)
-        )
+        changes = body.model_dump(exclude_unset=True, exclude={"review_token"})
+        detail = await service.update_offer(admin, offer_id, changes, body.review_token)
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
     return OfferWriteResponse(data=offer_write_out(detail))
@@ -162,7 +164,13 @@ async def admin_publish_offer(
     service: ServiceDep,
 ) -> OfferWriteResponse:
     return await _transition(
-        admin, offer_id, OfferAction.PUBLISH, response, service, body.review_token
+        admin,
+        offer_id,
+        OfferAction.PUBLISH,
+        response,
+        service,
+        body.review_token,
+        body.commercial_basis,
     )
 
 
