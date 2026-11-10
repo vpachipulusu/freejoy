@@ -33,6 +33,7 @@ from app.core.awin_client import (
     MIN_PAGE_SIZE,
     AwinClient,
     AwinError,
+    Membership,
     PromotionFilters,
     PromotionsPage,
 )
@@ -60,6 +61,7 @@ DEFAULT_MAX_SECONDS, MAX_MAX_SECONDS = (
 )  # the whole run, 20 minutes by default
 MAX_LOGGED_SKIPS = 100
 RUN_DEADLINE = "run_deadline"
+MEMBERSHIP_NOT_JOINED = "membership_not_joined"
 LOCK_NOT_AVAILABLE = "55P03"  # SQLSTATE: lock_timeout expired
 STAGE_FETCH = "while fetching promotions"
 STAGE_WRITE = "while writing offers"
@@ -86,6 +88,7 @@ class RunOptions:
     max_pages: int = DEFAULT_MAX_PAGES
     updated_since: date | None = None
     max_seconds: float = DEFAULT_MAX_SECONDS  # the whole run, fetching and writing
+    membership: Membership = "joined"  # anything else is for a dry run only
 
 
 @dataclass(frozen=True)
@@ -213,8 +216,11 @@ async def _progress(
     options: RunOptions,
     now: datetime,
 ) -> AsyncIterator[_Progress]:
+    if options.membership != "joined" and not options.dry_run:
+        # Tracking links only work for joined programmes: importing others must be impossible.
+        raise ImportAborted(MEMBERSHIP_NOT_JOINED)
     page_size = max(MIN_PAGE_SIZE, min(MAX_PAGE_SIZE, options.limit))
-    filters = PromotionFilters(options.updated_since)
+    filters = PromotionFilters(options.updated_since, options.membership)
     report, seen = RunReport(), set[int]()
     for page_no in range(1, options.max_pages + 1):
         page = await client.fetch_promotions(filters, page=page_no, page_size=page_size)

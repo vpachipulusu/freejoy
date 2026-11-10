@@ -35,7 +35,7 @@ import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import SecretStr
@@ -108,15 +108,23 @@ class AwinError(Exception):
         self.reason = reason
 
 
+# The values Awin documents for the membership filter (help.awin.com/apidocs/promotions).
+Membership = Literal["joined", "notJoined", "all"]
+
+
 @dataclass(frozen=True)
 class PromotionFilters:
-    """The filters the importer sends: joined programmes, vouchers and promotions, active, UK only."""
+    """The filters the importer sends: joined programmes, vouchers and promotions, active, UK only.
+
+    ``membership`` is ``joined`` unless a dry-run probe asks for more; a real run refuses any other value.
+    """
 
     updated_since: date | None = None
+    membership: Membership = "joined"
 
     def to_json(self) -> dict[str, Any]:
         filters: dict[str, Any] = {
-            "membership": "joined",
+            "membership": self.membership,
             "type": "all",
             "status": "active",
             "regionCodes": list(REGION_CODES),
@@ -132,6 +140,8 @@ class PromotionsPage:
 
     items: tuple[Any, ...]
     total_pages: int | None = None
+    envelope: Literal["list", "object"] = "list"  # a bare list, or {"data": [...]}
+    total_pages_present: bool = False  # pagination.totalPages was there (usable or not)
 
 
 class AwinClient(Protocol):
@@ -160,7 +170,10 @@ def parse_promotions(payload: object) -> PromotionsPage | None:
     pagination = payload.get("pagination")
     total = pagination.get("totalPages") if isinstance(pagination, dict) else None
     valid = isinstance(total, int) and not isinstance(total, bool) and total >= 0
-    return PromotionsPage(tuple(payload["data"]), total if valid else None)
+    present = isinstance(pagination, dict) and "totalPages" in pagination
+    return PromotionsPage(
+        tuple(payload["data"]), total if valid else None, "object", present
+    )
 
 
 @dataclass(frozen=True)
