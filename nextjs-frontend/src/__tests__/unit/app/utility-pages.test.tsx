@@ -129,7 +129,7 @@ describe('contact page', () => {
 
     expect(screen.getByRole('group', { name: /unavailable/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /send message/i })).toBeDisabled();
-    expect(document.body.innerHTML).not.toMatch(/mailto:|tel:|@[a-z0-9-]+\.(com|io)/i);
+    expect(document.body.innerHTML).not.toMatch(/mailto:|tel:|@[a-z0-9-]+\.[a-z]{2,}/i);
   });
 
   it('uses labels, not placeholders, and marks required fields in the label text', async () => {
@@ -159,6 +159,16 @@ describe('contact page', () => {
     );
 
     expect(screen.queryByLabelText(/interested plan/i)).toBeNull();
+  });
+
+  it('links retailers to the "List your free sample" page without adding any contact detail (FREEJ-55)', async () => {
+    await renderPage();
+
+    expect(screen.getByRole('link', { name: 'List your free sample' })).toHaveAttribute(
+      'href',
+      '/partners'
+    );
+    expect(document.body.innerHTML).not.toMatch(/mailto:|tel:|@[a-z0-9-]+\.[a-z]{2,}/i);
   });
 
   it('shows the selected plan, capitalised', async () => {

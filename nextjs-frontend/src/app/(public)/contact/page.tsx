@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -152,6 +153,20 @@ export default async function ContactPage({
                 <p className="text-sm text-muted-foreground">
                   The operator&apos;s name, address and contact email will be shown here before any
                   real offer goes live. They have not been added yet.
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="rounded-card">
+              <CardHeader>
+                <CardTitle className="text-lg">Retailers and brands</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  To have a free sample, trial or similar offer listed, read{' '}
+                  <Link href="/partners" className="font-semibold text-accent-ink underline">
+                    List your free sample
+                  </Link>
+                  .
                 </p>
               </CardContent>
             </Card>
