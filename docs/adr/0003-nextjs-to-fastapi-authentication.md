@@ -44,6 +44,27 @@ prove two things: that it came from our Next.js server, and which user it acts f
    organisation membership and role, and the platform-admin role for admin endpoints. Email verification is enforced here from the verified token
    claims (`email_verified`), not from a cookie the browser can set.
 
+## Testing-phase exception: API docs in production
+
+Production is still in testing, so the owner decided on 2026-11-09 to serve Swagger on the production backend
+for now. This overrides the default above (no schema or docs UI in production) for the testing phase only.
+
+- The opt-in setting `API_DOCS_ENABLED` (default `false`) serves `/docs`, `/redoc` and the OpenAPI schema in a
+  non-relaxed environment. It relaxes no other production check. The backend logs one warning at startup while it
+  is on in such an environment.
+- The docs UI has no Authorize button (no security scheme). `X-Internal-Key` and `X-Session-Token` appear as
+  optional header parameters on protected routes, so "Try it out" answers 401 unless the caller types a valid key;
+  anyone holding the key can drive production from the browser, which is one more reason to remove the flag at
+  go-live.
+- The served schema is the document `commands.generate_openapi_schema` writes to
+  `nextjs-frontend/openapi.json`, before the tag prefix is stripped from operationIds and with the runtime title
+  and version; it contains no servers block, URLs, examples or security schemes.
+- `/openapi.json` (about 490 KB), `/docs` and `/redoc` sit outside the rate-limited router, another reason to
+  remove the flag at go-live.
+- **Go-live step:** delete `API_DOCS_ENABLED` from the Vercel backend project's environment variables and redeploy
+  the backend. Production then returns 404 for `/docs`, `/redoc` and `/openapi.json` again. Delete the variable
+  rather than blanking it: `API_DOCS_ENABLED=` (empty) fails settings validation and the backend does not start.
+
 ## Alternatives considered
 
 - **Session cookie only, no service key.** Anyone holding a stolen session cookie could call the backend
