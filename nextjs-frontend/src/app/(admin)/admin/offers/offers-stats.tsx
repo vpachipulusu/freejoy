@@ -11,6 +11,8 @@ const STATS = [
   { key: 'DRAFT', label: 'Drafts', tone: '' },
   { key: 'EXPIRED', label: 'Expired', tone: 'bg-warn text-warn-foreground' },
   { key: 'ARCHIVED', label: 'Archived', tone: '' },
+  // Imported offers that are drafts or whose source changed: it overlaps the statuses, so it is not in the total.
+  { key: 'NEEDS_REVIEW', label: 'Needs review', tone: '' },
 ] as const;
 
 /** Offer counts straight from the API's list totals. If any count cannot be read, none is shown. */
@@ -27,7 +29,7 @@ export async function OfferStatsStrip() {
   }
 
   return (
-    <dl aria-label="Offer counts" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <dl aria-label="Offer counts" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {STATS.map(({ key, label, tone }) => (
         // The term comes first for assistive technology; the number is shown above it.
         <div
@@ -44,7 +46,7 @@ export async function OfferStatsStrip() {
 
 export function OfferStatsSkeleton() {
   return (
-    <div aria-busy="true" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div aria-busy="true" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <p role="status" className="sr-only">
         Loading offer counts
       </p>

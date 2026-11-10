@@ -11,10 +11,11 @@ import { offersHref, OFFERS_PATH, type OffersQuery } from './offers-query';
 const UNKNOWN_NAME = 'Unknown';
 const BEYOND_LIST_NAME = 'Not in the first 100';
 
-function emptyMessage({ q, status, category, page }: OffersQuery): string {
+function emptyMessage({ q, status, category, review, page }: OffersQuery): string {
   if (page > 1) return 'No offers on this page';
   if (q) return `No offers match '${q}'`;
-  if (status || category) return 'No offers match these filters';
+  if (review && !status && !category) return 'Nothing needs review';
+  if (status || category || review) return 'No offers match these filters';
   return 'No offers yet';
 }
 
@@ -30,6 +31,7 @@ export async function OffersResults({ query }: { query: OffersQuery }) {
       search: query.q,
       status: query.status,
       categoryId: query.category,
+      needsReview: query.review,
       limit: ADMIN_OFFERS_PAGE_SIZE,
       offset: (query.page - 1) * ADMIN_OFFERS_PAGE_SIZE,
     }),
@@ -60,7 +62,7 @@ export async function OffersResults({ query }: { query: OffersQuery }) {
   const total = result.data.total_count;
   const hasNext = query.page * ADMIN_OFFERS_PAGE_SIZE < total;
   const pageCount = Math.max(Math.ceil(total / ADMIN_OFFERS_PAGE_SIZE), query.page);
-  const filtered = Boolean(query.q || query.status || query.category);
+  const filtered = Boolean(query.q || query.status || query.category || query.review);
 
   return (
     <section aria-labelledby="offers-heading">

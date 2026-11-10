@@ -18,6 +18,8 @@ export const OFFER_NOT_FOUND_MESSAGE = 'That offer no longer exists. Go back to 
 export const CATEGORY_NOT_FOUND_MESSAGE = 'That category no longer exists. Go back to the list.';
 export const MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists. Go back to the list.';
 export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
+export const NO_SOURCE_CHANGE_MESSAGE =
+  'There is no source change to dismiss on this offer. This page has been refreshed.';
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Wait a minute and try again.';
 export const INVALID_INPUT_MESSAGE = 'Some values were rejected. Check the form and try again.';
 export const INVALID_FORM_MESSAGE = 'Check the highlighted fields and try again.';

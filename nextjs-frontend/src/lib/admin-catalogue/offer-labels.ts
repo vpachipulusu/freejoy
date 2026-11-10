@@ -21,6 +21,13 @@ export const POSTAGE_KIND_LABELS: Record<string, string> = {
   CHECK_TERMS: 'Check the terms',
 };
 
+const PROVIDER_LABELS: Record<string, string> = { awin: 'Awin' };
+
+/** The affiliate network an offer was imported from, by name; one this UI does not know shows as sent. */
+export function providerLabel(value: string): string {
+  return PROVIDER_LABELS[value] ?? value;
+}
+
 const TINT_LABELS: Record<string, string> = {
   blush: 'Blush',
   mint: 'Mint',
