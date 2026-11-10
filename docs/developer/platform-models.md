@@ -3,7 +3,7 @@
 SQLAlchemy models for the platform database are in `fastapi_backend/app/models/platform/`, one aggregate per file
 (`user`, `admin_user`, `organization`, `membership`, `invitation`, `audit_log`, `app_setting`, `feature_flag`,
 `email_template`, `seo_meta`, `url_redirect`, `stripe_event`) plus the Freejoy catalogue (`category`, `merchant`,
-`offer`, `affiliate_link`, `click_event`, `email_subscriber`) and the import provenance (`catalogue_import`), registered in the package `__init__.py`. Alembic revision
+`offer`, `affiliate_link`, `click_event`, `email_subscriber`) the import provenance (`catalogue_import`) and the network report rows (`network_report`), registered in the package `__init__.py`. Alembic revision
 `0001` (`alembic_migrations/versions/0001_baseline.py`) creates the platform tables; revision `0002`
 (`0002_freejoy_catalogue.py`) adds the six catalogue tables and never edits `0001`.
 
@@ -49,6 +49,7 @@ SQLAlchemy models for the platform database are in `fastapi_backend/app/models/p
 | `affiliate_links` | Per-offer destination and `tracking_id` for a `provider`; `destination_url` is read server-side only. Index `(offer_id, active)`. |
 | `offer_imports`, `merchant_imports` | Provenance for the Awin importer (migration `0004`): which provider promotion an offer came from and which advertiser a merchant stands for, unique `(provider, external_id)`, FKs that cascade, plus the hashes that tell a change at the source from an edit by a person. See [backend-awin-import.md](backend-awin-import.md). |
 | `click_events` | One row per outbound click. See the privacy rule below. Indexes `(offer_id, occurred_at)`, `occurred_at` (migration `0003`, serves the retention job) and `affiliate_link_id` (the `SET NULL` delete runs on every link delete). |
+| `network_report_rows` | One row per transaction in the affiliate network's own report (migration `0005`, Awin importer): unique `(provider, external_id)`; `commission_status` is `pending`, `approved`, `declined` or `paid` with the raw value beside it; amounts are `bigint` minor units `>= 0` plus a 3-letter `currency`; the reported `click_ref`; `report_hash` of the normalised row. `offer_id`, `affiliate_link_id` and `merchant_id` are optional and `SET NULL`, so deleting any of them keeps the reported revenue. Indexes `(provider, transaction_at)` and `offer_id`. Revenue comes from here, never from `click_events`. See [backend-network-reports.md](backend-network-reports.md). |
 | `email_subscribers` | Double opt-in alert subscribers; see the email decision below. |
 
 ### Click events are anonymous

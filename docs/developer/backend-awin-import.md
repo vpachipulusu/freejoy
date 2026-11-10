@@ -17,6 +17,9 @@ slugs, the edit fingerprint), `app/repositories/awin_import.py` (SQL), `app/core
 `app/core/call_limiter.py` (the 20-per-minute limiter), `app/core/plain_text.py` (HTML and control-character
 removal), `app/models/platform/catalogue_import.py` and migration `0004` (provenance tables).
 
+The same client also reads Awin's transaction report for revenue (a separate command, `commands.import_awin_reports`,
+see [backend-network-reports.md](backend-network-reports.md)); this one never touches revenue.
+
 > **Not verified against the live Awin API.** Everything here was built and tested against fakes
 > (`tests/fakes_awin.py`, `httpx.MockTransport`); no request has ever been sent to Awin and the code never uses a real
 > token. Awin's documentation ([promotions](https://help.awin.com/apidocs/promotions), read 2026-11-09) does not say
