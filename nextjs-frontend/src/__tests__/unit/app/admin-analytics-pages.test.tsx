@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const mocks = vi.hoisted(() => ({
+  requireAdminPage: vi.fn(),
   fetchAdminOverview: vi.fn(),
   fetchAdminRevenue: vi.fn(),
   fetchAdminSystemStats: vi.fn(),
@@ -18,6 +19,19 @@ vi.mock('@/lib/api/admin-analytics', () => ({
   fetchAdminRevenue: mocks.fetchAdminRevenue,
   fetchAdminSystemStats: mocks.fetchAdminSystemStats,
 }));
+vi.mock('@/app/(admin)/admin/_lib/require-admin-page', () => ({
+  requireAdminPage: mocks.requireAdminPage,
+}));
+// The section is an async server component (its own tests render it directly): here it is a stub that shows
+// what the page handed it.
+vi.mock('@/app/(admin)/admin/analytics/merchant-clicks-section', () => ({
+  MerchantClicksSection: ({ parsed }: { parsed: { query: Record<string, string> } }) => (
+    <section>
+      <h2>Clicks by merchant</h2>
+      <p>{JSON.stringify(parsed.query)}</p>
+    </section>
+  ),
+}));
 vi.mock('@/components/admin/refresh-button', () => ({ RefreshButton: () => <span /> }));
 vi.mock('@/lib/logger', () => ({ logger: { error: mocks.logError } }));
 
@@ -25,6 +39,7 @@ import AdminAnalyticsPage from '@/app/(admin)/admin/analytics/page';
 import AdminSettingsPage from '@/app/(admin)/admin/settings/page';
 import { formatMinorUnits } from '@/app/(admin)/admin/_components/format-money';
 
+const PROPS = { searchParams: Promise.resolve({}) };
 const html = (node: React.ReactNode) => renderToStaticMarkup(node as React.ReactElement);
 const ok = <T,>(data: T) => ({ success: true as const, data });
 const fail = (status: number) => ({ success: false as const, error: 'SECRET detail', status });
@@ -66,10 +81,11 @@ describe('admin analytics page', () => {
     vi.clearAllMocks();
     mocks.fetchAdminOverview.mockResolvedValue(ok(OVERVIEW));
     mocks.fetchAdminRevenue.mockResolvedValue(ok(REVENUE));
+    mocks.requireAdminPage.mockResolvedValue(undefined);
   });
 
   it('shows users, organisations and revenue in the platform currency', async () => {
-    const markup = html(await AdminAnalyticsPage());
+    const markup = html(await AdminAnalyticsPage(PROPS));
 
     expect(markup).toContain('>Analytics</h1>');
     for (const label of ['Users', 'Active, 30 days', 'Organisations', 'MRR', 'ARR']) {
@@ -87,7 +103,7 @@ describe('admin analytics page', () => {
       ok({ ...REVENUE, complete: false, unpriced_organizations: 2 })
     );
 
-    expect(html(await AdminAnalyticsPage())).toContain(
+    expect(html(await AdminAnalyticsPage(PROPS))).toContain(
       '2 paying organisation(s) could not be priced'
     );
   });
@@ -95,7 +111,7 @@ describe('admin analytics page', () => {
   it('shows an empty state when nothing is paying', async () => {
     mocks.fetchAdminRevenue.mockResolvedValue(ok({ ...REVENUE, by_plan: [] }));
 
-    const markup = html(await AdminAnalyticsPage());
+    const markup = html(await AdminAnalyticsPage(PROPS));
 
     expect(markup).toContain('User summary');
     expect(markup).toContain('No paying organisations yet');
@@ -104,7 +120,7 @@ describe('admin analytics page', () => {
   it('keeps the revenue section when the overview fails, with a curated message and retry', async () => {
     mocks.fetchAdminOverview.mockResolvedValue(fail(403));
 
-    const markup = html(await AdminAnalyticsPage());
+    const markup = html(await AdminAnalyticsPage(PROPS));
 
     expect(markup).toContain('You do not have permission to do that');
     expect(markup).not.toContain('SECRET');
@@ -116,11 +132,38 @@ describe('admin analytics page', () => {
   it('keeps the overview when revenue fails', async () => {
     mocks.fetchAdminRevenue.mockResolvedValue(fail(502));
 
-    const markup = html(await AdminAnalyticsPage());
+    const markup = html(await AdminAnalyticsPage(PROPS));
 
     expect(markup).toContain('Something went wrong');
     expect(markup).toContain('1,200');
     expect(markup).not.toContain('aria-label="MRR"');
+  });
+
+  it('adds the clicks by merchant section', async () => {
+    const markup = html(await AdminAnalyticsPage(PROPS));
+
+    expect(markup).toContain('Clicks by merchant');
+  });
+
+  it('checks the admin gate before reading anything', async () => {
+    mocks.requireAdminPage.mockRejectedValue(new Error('NEXT_REDIRECT'));
+
+    await expect(AdminAnalyticsPage(PROPS)).rejects.toThrow('NEXT_REDIRECT');
+
+    expect(mocks.fetchAdminOverview).not.toHaveBeenCalled();
+    expect(mocks.fetchAdminRevenue).not.toHaveBeenCalled();
+  });
+
+  it('passes the merchant and the dates of the link to the report', async () => {
+    const props = {
+      searchParams: Promise.resolve({ merchant: 'm1', from: '2026-03-10', to: '2026-03-11' }),
+    };
+
+    const markup = html(await AdminAnalyticsPage(props));
+
+    expect(markup).toContain('&quot;merchant&quot;:&quot;m1&quot;');
+    expect(markup).toContain('&quot;from&quot;:&quot;2026-03-10&quot;');
+    expect(markup).toContain('&quot;to&quot;:&quot;2026-03-11&quot;');
   });
 });
 

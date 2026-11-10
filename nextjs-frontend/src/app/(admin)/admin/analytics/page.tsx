@@ -10,8 +10,13 @@ import { logger } from '@/lib/logger';
 import { KpiStrip, type KpiCell } from '@/components/dashboard/kpi-strip';
 import { Panel } from '@/components/dashboard/overview/panel';
 import { RefreshButton } from '@/components/admin/refresh-button';
+import { parseClicksQuery } from '@/lib/admin-clicks/range';
 import { InlineError } from '../_components/inline-error';
 import { formatCount, formatMinorUnits } from '../_components/format-money';
+import { requireAdminPage } from '../_lib/require-admin-page';
+import { MerchantClicksSection } from './merchant-clicks-section';
+
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 // Always show current figures.
 export const dynamic = 'force-dynamic';
@@ -82,7 +87,9 @@ function revenueCells(revenue: RevenueData): KpiCell[] {
   ];
 }
 
-export default async function AdminAnalyticsPage() {
+export default async function AdminAnalyticsPage({ searchParams }: { searchParams: SearchParams }) {
+  await requireAdminPage();
+  const parsedClicks = parseClicksQuery(await searchParams, new Date());
   const [overview, revenue] = await Promise.all([fetchAdminOverview(), fetchAdminRevenue()]);
 
   return (
@@ -90,7 +97,9 @@ export default async function AdminAnalyticsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Analytics</h1>
-          <p className="text-muted-foreground">Platform users, organisations and revenue</p>
+          <p className="text-muted-foreground">
+            Platform users, organisations and revenue, and clicks by merchant
+          </p>
         </div>
         <RefreshButton />
       </div>
@@ -148,6 +157,8 @@ export default async function AdminAnalyticsPage() {
       ) : (
         <InlineError message={failed('revenue', revenue)} retryHref={ANALYTICS_HREF} />
       )}
+
+      <MerchantClicksSection parsed={parsedClicks} />
     </div>
   );
 }
