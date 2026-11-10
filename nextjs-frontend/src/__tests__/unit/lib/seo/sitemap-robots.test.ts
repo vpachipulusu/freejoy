@@ -28,7 +28,7 @@ const disabledCategory: Category = { ...(CATEGORIES[0] as Category), slug: 'off'
 const urls = (entries: { url: string }[]) => entries.map((entry) => entry.url);
 
 describe('buildSitemapEntries', () => {
-  it('lists only the home page and /freebies while the catalogue is fixture-backed', () => {
+  it('lists only the home page, /freebies and /partners while the catalogue is fixture-backed', () => {
     const entries = buildSitemapEntries({
       offers: OFFERS,
       categories,
@@ -36,7 +36,21 @@ describe('buildSitemapEntries', () => {
       source: 'fixture',
     });
 
-    expect(urls(entries)).toEqual([`${BASE}/`, `${BASE}/freebies`]);
+    expect(urls(entries)).toEqual([`${BASE}/`, `${BASE}/freebies`, `${BASE}/partners`]);
+  });
+
+  it('lists /partners whichever catalogue source is used, and never dates it from the offers', () => {
+    for (const source of ['fixture', 'api'] as const) {
+      const entries = buildSitemapEntries({
+        offers: [apiOffer('glow-sample')],
+        categories,
+        today: TODAY,
+        source,
+      });
+      const partners = entries.filter((entry) => entry.url === `${BASE}/partners`);
+
+      expect(partners).toEqual([{ url: `${BASE}/partners` }]);
+    }
   });
 
   it('never gives the generic entries a lastModified when nothing has a date', () => {
@@ -63,6 +77,7 @@ describe('buildSitemapEntries', () => {
     expect(urls(entries)).toEqual([
       `${BASE}/`,
       `${BASE}/freebies`,
+      `${BASE}/partners`,
       ...categories.map((category) => `${BASE}/category/${category.slug}`),
       `${BASE}/freebies/glow-sample`,
       `${BASE}/freebies/tea-trial`,
@@ -70,12 +85,13 @@ describe('buildSitemapEntries', () => {
     expect(urls(entries)).not.toContain(`${BASE}/category/off`);
   });
 
-  it('lists the home page, /freebies and the categories when API-backed with nothing live yet', () => {
+  it('lists the static pages and the categories when API-backed with nothing live yet', () => {
     const entries = buildSitemapEntries({ offers: [], categories, today: TODAY, source: 'api' });
 
     expect(urls(entries)).toEqual([
       `${BASE}/`,
       `${BASE}/freebies`,
+      `${BASE}/partners`,
       ...categories.map((category) => `${BASE}/category/${category.slug}`),
     ]);
   });
@@ -127,8 +143,8 @@ describe('buildSitemapEntries', () => {
 });
 
 describe('sitemap route', () => {
-  it('serves the home and /freebies entries from the fixture catalogue', async () => {
-    expect(urls(await sitemap())).toEqual([`${BASE}/`, `${BASE}/freebies`]);
+  it('serves the home, /freebies and /partners entries from the fixture catalogue', async () => {
+    expect(urls(await sitemap())).toEqual([`${BASE}/`, `${BASE}/freebies`, `${BASE}/partners`]);
   });
 });
 
