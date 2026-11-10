@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # Partner API (ADR-013). Off by default: while false every path under /partner/v1 answers the
     # same 404 as an unknown path. Nothing is served there yet; this is the switch for later stories.
+    # Blank means off; any other non-boolean value stops startup.
     PARTNER_API_ENABLED: bool = False
 
     # Database
@@ -135,6 +136,16 @@ class Settings(BaseSettings):
     def blank_secret_is_unset(cls, value: object) -> object:
         """A blank value (``NAME=`` copied from .env.example) means "not set", never an empty secret."""
         return None if value == "" else value
+
+    @field_validator("PARTNER_API_ENABLED", mode="before")
+    @classmethod
+    def blank_partner_switch_is_off(cls, value: object) -> object:
+        """``PARTNER_API_ENABLED=`` (blank, as copied from .env.example) means the default, off.
+
+        Any other value that is not a boolean still stops startup: a typo must not leave the
+        surface in a state nobody chose.
+        """
+        return False if isinstance(value, str) and not value.strip() else value
 
     @field_validator("AWIN_PUBLISHER_ID", mode="before")
     @classmethod
