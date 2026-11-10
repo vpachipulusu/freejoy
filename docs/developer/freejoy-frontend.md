@@ -23,6 +23,7 @@ All public pages live in the `(public)` route group under `src/app/(public)/` an
 | `/freebies/[slug]` | 03 / 07 | Hero, claim steps, "important bits", trust panel, related offers; the "offer has ended" page for an ended offer; 404 page for an unknown one |
 | `/saved` | 05 / 06 tab | The visitor's saved freebies, read from this device ([Saved freebies](#saved-freebies-freej-28)); static shell, `noindex, follow`, not in the sitemap |
 | `/alerts` | 04 | Preferences form; starts a double opt-in through a server action ([backend-subscribers.md](backend-subscribers.md)); a plain "not open yet" notice until `ALERTS_FORM_LIVE=true` |
+| `/partners` | – | "List your free sample" for retailers (FREEJ-55): static page in the same draft shell as the legal pages (banner, `noindex` while draft), no form and no data collected; linked from the footer and `/contact`, always in the sitemap |
 | `/about`, `/contact`, `/privacy`, `/cookies`, `/terms`, `/affiliate-disclosure` | – | Editorial and legal scaffolding, each with a visible "draft, pending legal review" banner |
 | `not-found.tsx` | – | Freejoy-styled 404 |
 
