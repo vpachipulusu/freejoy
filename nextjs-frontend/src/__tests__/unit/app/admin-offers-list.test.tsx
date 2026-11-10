@@ -72,6 +72,8 @@ const offer = (overrides: Record<string, unknown> = {}) => ({
   end_at: null,
   last_verified_at: '2026-03-05T10:00:00Z',
   updated_at: '2026-03-06T10:00:00Z',
+  import_provider: null,
+  source_changed_at: null,
   ...overrides,
 });
 
@@ -114,7 +116,7 @@ beforeEach(() => {
   mocks.requireAdminSession.mockResolvedValue({ ok: true });
   mocks.fetchOfferStatusCounts.mockResolvedValue({
     success: true,
-    data: { TOTAL: 0, PUBLISHED: 0, DRAFT: 0, EXPIRED: 0, ARCHIVED: 0 },
+    data: { TOTAL: 0, PUBLISHED: 0, DRAFT: 0, EXPIRED: 0, ARCHIVED: 0, NEEDS_REVIEW: 0 },
   });
   listOk([]);
   pickLists();
@@ -127,9 +129,23 @@ describe('offers URL parameters', () => {
         q: `  ${'x'.repeat(150)} `,
         status: 'Published',
         category: 'c_1',
+        review: 'needed',
         page: '3',
       })
-    ).toEqual({ q: 'x'.repeat(100), status: 'PUBLISHED', category: 'c_1', page: 3 });
+    ).toEqual({
+      q: 'x'.repeat(100),
+      status: 'PUBLISHED',
+      category: 'c_1',
+      review: true,
+      page: 3,
+    });
+  });
+
+  it('reads review=needed as the review queue and ignores every other value', () => {
+    expect(parseOffersQuery({ review: 'needed' }).review).toBe(true);
+    for (const value of ['', 'yes', 'true', '1', 'NEEDED', 'needed ', 'needed,all', undefined]) {
+      expect(parseOffersQuery({ review: value }).review, String(value)).toBe(false);
+    }
   });
 
   it('ignores unknown statuses, bad category ids and bad pages', () => {
@@ -137,6 +153,7 @@ describe('offers URL parameters', () => {
       q: undefined,
       status: undefined,
       category: undefined,
+      review: false,
       page: 1,
     });
     expect(parseOffersQuery({ page: 'abc' }).page).toBe(1);
@@ -152,6 +169,10 @@ describe('offers URL parameters', () => {
       '/admin/offers?q=a+b&status=draft&category=c1&page=2'
     );
     expect(offersHref({ page: 1 })).toBe('/admin/offers');
+    expect(offersHref({ review: false })).toBe('/admin/offers');
+    expect(offersHref({ q: 'a', review: true, page: 2 })).toBe(
+      '/admin/offers?q=a&review=needed&page=2'
+    );
   });
 });
 
@@ -159,7 +180,7 @@ describe('OfferStatsStrip', () => {
   it('shows the counts the API returned, each under its label', async () => {
     mocks.fetchOfferStatusCounts.mockResolvedValue({
       success: true,
-      data: { TOTAL: 31, PUBLISHED: 17, DRAFT: 8, EXPIRED: 4, ARCHIVED: 2 },
+      data: { TOTAL: 31, PUBLISHED: 17, DRAFT: 8, EXPIRED: 4, ARCHIVED: 2, NEEDS_REVIEW: 6 },
     });
     render(await OfferStatsStrip());
 
@@ -169,10 +190,24 @@ describe('OfferStatsStrip', () => {
       ['Drafts', '8'],
       ['Expired', '4'],
       ['Archived', '2'],
+      ['Needs review', '6'],
     ]) {
       expect(screen.getByText(label).parentElement).toHaveTextContent(count);
     }
     expect(document.querySelector('dl')).toHaveAttribute('aria-label', 'Offer counts');
+  });
+
+  it('shows the review count as its own card, not part of the total', async () => {
+    mocks.fetchOfferStatusCounts.mockResolvedValue({
+      success: true,
+      data: { TOTAL: 10, PUBLISHED: 4, DRAFT: 3, EXPIRED: 2, ARCHIVED: 1, NEEDS_REVIEW: 0 },
+    });
+    render(await OfferStatsStrip());
+
+    const card = screen.getByText('Needs review').parentElement!;
+    expect(card).toHaveTextContent('0');
+    expect(screen.getByText('Total offers').parentElement).toHaveTextContent('10');
+    expect(screen.getAllByRole('term')).toHaveLength(6);
   });
 
   it('shows no numbers at all when a count cannot be read, and a way to retry', async () => {
@@ -181,6 +216,7 @@ describe('OfferStatsStrip', () => {
 
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText('Total offers')).not.toBeInTheDocument();
+    expect(screen.queryByText('Needs review')).not.toBeInTheDocument();
     expect(screen.queryByText(/SECRET/)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Retry' })).toHaveAttribute('href', '/admin/offers');
   });
@@ -227,7 +263,7 @@ describe('admin offers page shell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent)
-    ).toEqual(['All', 'Published', 'Draft', 'Expired', 'Archived']);
+    ).toEqual(['All', 'Published', 'Draft', 'Expired', 'Archived', 'Needs review']);
     const current = within(nav)
       .getAllByRole('link')
       .filter((link) => link.getAttribute('aria-current') === 'true');
@@ -236,6 +272,65 @@ describe('admin offers page shell', () => {
       'href',
       '/admin/offers?q=x&status=draft'
     );
+  });
+
+  it('marks the Needs review chip current for review=needed, and only that one', async () => {
+    await renderPage({ review: 'needed', q: 'x' });
+
+    const nav = screen.getByRole('navigation', { name: 'Filter by status' });
+    const current = within(nav)
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('aria-current') === 'true');
+    expect(current.map((link) => link.textContent)).toEqual(['Needs review']);
+    expect(within(nav).getByRole('link', { name: 'Needs review' })).toHaveAttribute(
+      'href',
+      '/admin/offers?q=x&review=needed'
+    );
+  });
+
+  it('lets the chips replace one another: a status or All leaves the review queue', async () => {
+    await renderPage({ review: 'needed', q: 'x' });
+
+    const nav = screen.getByRole('navigation', { name: 'Filter by status' });
+    expect(within(nav).getByRole('link', { name: 'Draft' })).toHaveAttribute(
+      'href',
+      '/admin/offers?q=x&status=draft'
+    );
+    expect(within(nav).getByRole('link', { name: 'All' })).toHaveAttribute(
+      'href',
+      '/admin/offers?q=x'
+    );
+  });
+
+  it('keeps the category filter on the review chip and on a status chip', async () => {
+    await renderPage({ review: 'needed', category: 'c1' });
+
+    const nav = screen.getByRole('navigation', { name: 'Filter by status' });
+    expect(within(nav).getByRole('link', { name: 'Needs review' })).toHaveAttribute(
+      'href',
+      '/admin/offers?category=c1&review=needed'
+    );
+    expect(within(nav).getByRole('link', { name: 'Draft' })).toHaveAttribute(
+      'href',
+      '/admin/offers?status=draft&category=c1'
+    );
+    expect(within(nav).getByRole('link', { name: 'All' })).toHaveAttribute(
+      'href',
+      '/admin/offers?category=c1'
+    );
+  });
+
+  it('keeps the review queue across a search with a hidden input, and only then', async () => {
+    const { unmount } = await renderPage({ review: 'needed' });
+    expect(
+      screen.getByRole('search').querySelector('input[type="hidden"][name="review"]')
+    ).toHaveValue('needed');
+    unmount();
+
+    await renderPage({ review: 'maybe' });
+    expect(
+      screen.getByRole('search').querySelector('input[type="hidden"][name="review"]')
+    ).toBeNull();
   });
 
   it('keeps the page and says so when the category filter cannot load', async () => {
@@ -324,9 +419,74 @@ describe('OffersResults', () => {
       search: 'tea',
       status: 'PUBLISHED',
       categoryId: 'c1',
+      needsReview: false,
       limit: 25,
       offset: 25,
     });
+  });
+
+  it('asks the API for the review queue when review=needed, next to the other filters', async () => {
+    listOk([offer({ status: 'DRAFT', import_provider: 'awin' })], 1);
+    await renderResults(parseOffersQuery({ review: 'needed', status: 'draft', q: 'tea' }));
+
+    expect(mocks.fetchAdminOffers).toHaveBeenCalledWith(
+      expect.objectContaining({ needsReview: true, status: 'DRAFT', search: 'tea' })
+    );
+    expect(screen.getByRole('table', { name: 'Matching offers (1)' })).toBeInTheDocument();
+  });
+
+  it('says an empty review queue is empty, and offers a way out', async () => {
+    listOk([]);
+    await renderResults(parseOffersQuery({ review: 'needed' }));
+
+    expect(screen.getByText('Nothing needs review')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute(
+      'href',
+      '/admin/offers'
+    );
+  });
+
+  it('keeps the review queue in the pagination links', async () => {
+    listOk([offer()], 80);
+    await renderResults(parseOffersQuery({ review: 'needed', page: '2' }));
+
+    const pagination = screen.getByRole('navigation', { name: 'Pagination' });
+    expect(within(pagination).getByRole('link', { name: 'Previous' })).toHaveAttribute(
+      'href',
+      '/admin/offers?review=needed'
+    );
+    expect(within(pagination).getByRole('link', { name: 'Next' })).toHaveAttribute(
+      'href',
+      '/admin/offers?review=needed&page=3'
+    );
+  });
+
+  it('badges an imported offer, and "source changed" wins; a hand-made offer has no badge', async () => {
+    listOk([
+      offer({ id: 'o1', title: 'Hand made', import_provider: null }),
+      offer({ id: 'o2', title: 'Imported one', import_provider: 'awin' }),
+      offer({
+        id: 'o3',
+        title: 'Moved one',
+        import_provider: 'awin',
+        source_changed_at: '2026-03-04T10:00:00Z',
+      }),
+    ]);
+    await renderResults(parseOffersQuery({}));
+
+    const row = (title: string) =>
+      screen
+        .getAllByRole('row')
+        .find((candidate) => within(candidate).queryByRole('link', { name: title }))!;
+    expect(within(row('Hand made')).queryByTestId('offer-import-badge')).toBeNull();
+    const imported = within(row('Imported one')).getByTestId('offer-import-badge');
+    expect(imported).toHaveTextContent('Imported');
+    expect(imported).not.toHaveTextContent('Source changed');
+    const moved = within(row('Moved one')).getByTestId('offer-import-badge');
+    expect(moved).toHaveTextContent('Source changed');
+    expect(moved).not.toHaveTextContent(/^Imported/);
+    // Text and an icon, never colour alone: the icon is decorative.
+    expect(moved.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('links to the neighbouring pages, keeping the filters, and says which page this is', async () => {

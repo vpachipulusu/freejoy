@@ -728,3 +728,101 @@ async def test_the_real_entry_point_exits_2_without_settings_and_never_builds_a_
         and "AWIN_OAUTH_API_TOKEN" in finished.stderr
     )
     assert await scalar(engine, "SELECT count(*) FROM offers") == 0
+
+
+# --- the review queue: dismissing a source change and the next importer run ----------------------
+
+
+async def dismiss_through_the_service(engine: AsyncEngine, offer_id: str) -> None:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        service = editor_service(session)
+        detail = await service.get_offer(offer_id)
+        assert detail.provenance is not None
+        await service.dismiss_source_change(
+            EDITOR, offer_id, detail.review_token, detail.provenance.source_changed_at
+        )
+
+
+async def import_state(engine: AsyncEngine) -> Any:
+    return (
+        await rows(
+            engine,
+            "SELECT source_hash, applied_source_hash, applied_content_hash, applied_at,"
+            " source_changed_at, updated_at FROM offer_imports",
+        ),
+        await rows(engine, "SELECT * FROM offers"),
+        await rows(engine, "SELECT action FROM audit_logs ORDER BY created_at, id"),
+    )
+
+
+async def test_a_dismissed_source_change_is_not_flagged_again_but_a_newer_one_is(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1)])
+    offer_id = await first_offer(engine)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        await editor_service(session).update_offer(
+            EDITOR, offer_id, {"title": "An editor's title"}
+        )
+    day_two, day_three = NOW + timedelta(days=1), NOW + timedelta(days=2)
+    await run(engine, [raw_item(1, title="Source retitled")], now=day_two)
+    hashes = await rows(
+        engine, "SELECT source_hash, applied_source_hash FROM offer_imports"
+    )
+    assert (
+        await scalar(engine, "SELECT source_changed_at FROM offer_imports") == day_two
+    )
+
+    await dismiss_through_the_service(engine, offer_id)
+
+    assert await scalar(engine, "SELECT source_changed_at FROM offer_imports") is None
+    assert (
+        await rows(engine, "SELECT source_hash, applied_source_hash FROM offer_imports")
+        == hashes
+    )
+    audited = await rows(
+        engine,
+        "SELECT user_id, resource, resource_id FROM audit_logs"
+        " WHERE action = 'admin.offers.source_change_dismissed'",
+    )
+    assert [tuple(r) for r in audited] == [("editor-1", "offers", offer_id)]
+    settled = await import_state(engine)
+
+    again = await run(engine, [raw_item(1, title="Source retitled")], now=day_three)
+
+    assert again.tally.unchanged == 1 and again.tally.source_changed == 0
+    assert await import_state(engine) == settled
+
+    newer = await run(engine, [raw_item(1, title="Retitled twice")], now=day_three)
+
+    assert newer.tally.source_changed == 1 and newer.tally.updated == 0
+    assert (
+        await scalar(engine, "SELECT source_changed_at FROM offer_imports") == day_three
+    )
+    assert await scalar(engine, "SELECT title FROM offers") == "An editor's title"
+
+
+async def test_dismissing_leaves_the_offer_and_its_review_token_untouched(
+    engine: AsyncEngine,
+) -> None:
+    await run(engine, [raw_item(1)])
+    offer_id = await first_offer(engine)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as session:
+        await editor_service(session).update_offer(
+            EDITOR, offer_id, {"summary": "Mine"}
+        )
+    await run(engine, [raw_item(1, title="Moved")], now=NOW + timedelta(days=1))
+    offers_before = await rows(engine, "SELECT * FROM offers")
+    async with maker() as session:
+        token = (await editor_service(session).get_offer(offer_id)).review_token
+
+    await dismiss_through_the_service(engine, offer_id)
+
+    async with maker() as session:
+        after = await editor_service(session).get_offer(offer_id)
+    assert after.review_token == token
+    assert await rows(engine, "SELECT * FROM offers") == offers_before
+    assert after.provenance is not None and after.provenance.source_changed_at is None

@@ -13,6 +13,7 @@ from app.repositories.admin_offers import (
     AffiliateLinkRecord,
     OfferFilters,
     OfferPage,
+    OfferProvenance,
     OfferRecord,
     ReviewRefs,
 )
@@ -106,6 +107,17 @@ def offer(offer_id: str = "off1", **changes: Any) -> OfferRecord:
     return replace(base, **changes)
 
 
+def provenance(
+    *, source_changed_at: datetime | None = None, provider: str = "awin"
+) -> OfferProvenance:
+    return OfferProvenance(
+        provider=provider,
+        external_id="1001",
+        applied_at=EARLIER,
+        source_changed_at=source_changed_at,
+    )
+
+
 def link(
     link_id: str, offer_id: str = "off1", *, active: bool = True
 ) -> AffiliateLinkRecord:
@@ -134,13 +146,29 @@ class FakeOfferStore:
         self.category_short_names: dict[str, str] = {}
         self.locked: list[str] = []
         self.filters: list[tuple[OfferFilters, int, int]] = []
+        self.provenance: dict[str, OfferProvenance] = {}
+        self.provenance_locked: list[str] = []
 
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
     ) -> OfferPage:
         self.filters.append((filters, limit, offset))
         rows = list(self.offers.values())
-        return OfferPage(rows[offset : offset + limit], len(rows))
+        page = rows[offset : offset + limit]
+        found = {i.id: self.provenance[i.id] for i in page if i.id in self.provenance}
+        return OfferPage(page, len(rows), found)
+
+    async def get_provenance(
+        self, offer_id: str, *, lock: bool = False
+    ) -> OfferProvenance | None:
+        if lock:
+            self.provenance_locked.append(offer_id)
+        return self.provenance.get(offer_id)
+
+    async def clear_source_change(self, offer_id: str) -> None:
+        self.provenance[offer_id] = replace(
+            self.provenance[offer_id], source_changed_at=None
+        )
 
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None:
         if lock:

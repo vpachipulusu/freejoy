@@ -22,6 +22,7 @@ import {
 } from '@/lib/admin-catalogue/merchant-schema';
 import {
   fetchAdminOffer,
+  dismissAdminOfferSourceChange,
   fetchAdminOffers,
   fetchOfferStatusCounts,
   runAdminOfferAction,
@@ -61,10 +62,22 @@ const OFFER_SUMMARY = {
   end_at: null,
   last_verified_at: '2026-01-02T00:00:00Z',
   updated_at: '2026-01-03T00:00:00Z',
+  import_provider: null,
+  source_changed_at: null,
 };
+
+const PROVENANCE = {
+  provider: 'awin',
+  external_id: '1001',
+  applied_at: '2026-02-01T00:00:00Z',
+  source_changed_at: '2026-02-05T00:00:00Z',
+};
+
+const MARKER = '2026-02-05T09:00:00.123456Z';
 
 const OFFER_OUT = {
   ...OFFER_SUMMARY,
+  provenance: null,
   review_token: 'a1b2c3-review-token',
   summary: 'A sachet.',
   description: ['One'],
@@ -166,7 +179,44 @@ describe('admin catalogue wrappers', () => {
       expect(url.searchParams.has('search')).toBe(false);
       expect(url.searchParams.has('status')).toBe(false);
       expect(url.searchParams.has('category_id')).toBe(false);
+      expect(url.searchParams.has('needs_review')).toBe(false);
     });
+
+    it('asks for the review queue only when told to', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({ success: true, data: { offers: [], total_count: 0, limit: 25, offset: 0 } })
+      );
+
+      await fetchAdminOffers({ needsReview: true, status: 'DRAFT' });
+      await fetchAdminOffers({ needsReview: false });
+
+      const first = new URL(fetchMock.mock.calls[0][0].url);
+      expect(first.searchParams.get('needs_review')).toBe('true');
+      expect(first.searchParams.get('status')).toBe('DRAFT');
+      expect(new URL(fetchMock.mock.calls[1][0].url).searchParams.has('needs_review')).toBe(false);
+    });
+
+    it('posts the dismissal to its own route with the review token the admin loaded', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
+
+      const result = await dismissAdminOfferSourceChange('o1', 'tok-1', MARKER);
+
+      const sent = fetchMock.mock.calls[0][0];
+      expect(sent.method).toBe('POST');
+      expect(new URL(sent.url).pathname).toBe('/v1/admin/offers/o1/dismiss-source-change');
+      expect(await sent.json()).toEqual({ review_token: 'tok-1', source_changed_at: MARKER });
+      expect(sent.headers.get('X-Session-Token')).toBe('firebase-session-cookie');
+      expect(result.success).toBe(true);
+    });
+
+    it.each(['offer_changed', 'illegal_transition'])(
+      'hands the 409 %s code back from a dismissal',
+      async (code) => {
+        fetchMock.mockResolvedValue(jsonResponse({ success: false, error: 'words', code }, 409));
+        const result = await dismissAdminOfferSourceChange('o1', 'old', MARKER);
+        expect(result).toMatchObject({ success: false, status: 409, code });
+      }
+    );
 
     it('reads one offer by id', async () => {
       fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
@@ -221,23 +271,44 @@ describe('admin catalogue wrappers', () => {
         PUBLISHED: 4,
         EXPIRED: 2,
         ARCHIVED: 1,
+        queue: 5,
       };
       fetchMock.mockImplementation(async (request) => {
-        const status = new URL(request.url).searchParams.get('status') ?? '';
-        expect(status).not.toBe('');
+        const params = new URL(request.url).searchParams;
+        const key = params.get('needs_review') === 'true' ? 'queue' : (params.get('status') ?? '');
+        expect(key).not.toBe('');
         return jsonResponse({
           success: true,
-          data: { offers: [], total_count: totals[status], limit: 1, offset: 0 },
+          data: { offers: [], total_count: totals[key], limit: 1, offset: 0 },
         });
       });
 
       const result = await fetchOfferStatusCounts();
 
+      // The queue overlaps the statuses (an imported draft is in both), so it is never added to the total.
       expect(result).toEqual({
         success: true,
-        data: { TOTAL: 10, DRAFT: 3, PUBLISHED: 4, EXPIRED: 2, ARCHIVED: 1 },
+        data: { TOTAL: 10, DRAFT: 3, PUBLISHED: 4, EXPIRED: 2, ARCHIVED: 1, NEEDS_REVIEW: 5 },
       });
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      const queueCalls = fetchMock.mock.calls.filter(
+        ([request]) => new URL(request.url).searchParams.get('needs_review') === 'true'
+      );
+      expect(queueCalls).toHaveLength(1);
+      expect(new URL(queueCalls[0][0].url).searchParams.get('limit')).toBe('1');
+    });
+
+    it('fails the whole count read when the review queue count fails', async () => {
+      fetchMock.mockImplementation(async (request) =>
+        new URL(request.url).searchParams.get('needs_review') === 'true'
+          ? jsonResponse({ success: false, error: 'x' }, 500)
+          : jsonResponse({
+              success: true,
+              data: { offers: [], total_count: 1, limit: 1, offset: 0 },
+            })
+      );
+      const result = await fetchOfferStatusCounts();
+      expect(result.success).toBe(false);
     });
 
     it('fails the whole count read when one call fails', async () => {
@@ -271,6 +342,37 @@ describe('admin catalogue wrappers', () => {
         { id: 'l1', provider: 'awin', destinationUrl: 'https://example.com/go', active: true },
       ]);
       expect(JSON.stringify(detail)).not.toContain('secret-track');
+    });
+
+    it('maps the import fields of a row, null for an offer made by hand', () => {
+      expect(toOfferRow(OFFER_SUMMARY as never)).toMatchObject({
+        importProvider: null,
+        sourceChangedAt: null,
+      });
+      expect(
+        toOfferRow({
+          ...OFFER_SUMMARY,
+          import_provider: 'awin',
+          source_changed_at: '2026-02-05T00:00:00Z',
+        } as never)
+      ).toMatchObject({ importProvider: 'awin', sourceChangedAt: '2026-02-05T00:00:00Z' });
+    });
+
+    it('maps the provenance of an imported offer, and null for one made by hand', () => {
+      expect(toOfferDetail(OFFER_OUT as never).provenance).toBeNull();
+      expect(
+        toOfferDetail({
+          ...OFFER_OUT,
+          import_provider: 'awin',
+          source_changed_at: PROVENANCE.source_changed_at,
+          provenance: PROVENANCE,
+        } as never).provenance
+      ).toEqual({
+        provider: 'awin',
+        externalId: '1001',
+        appliedAt: '2026-02-01T00:00:00Z',
+        sourceChangedAt: '2026-02-05T00:00:00Z',
+      });
     });
 
     it('keeps an unknown status as UNKNOWN instead of guessing a draft', () => {

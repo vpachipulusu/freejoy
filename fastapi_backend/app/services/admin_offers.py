@@ -19,12 +19,19 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   their own row lock, so none can change what was compared before the transition commits.
   ``unpublish``, ``expire`` and ``archive`` only take content off the public site (or end an
   offer's life), claim nothing was reviewed and need no token.
+* ``dismiss_source_change`` is the review queue's one write: it clears the importer's
+  ``source_changed_at`` marker after the same token check and under the same offer lock, so an
+  editor can say "I have seen that the source moved on". The token does not cover the marker, so the
+  request also carries the marker the editor saw and a different stored one is refused with
+  ``OfferChanged`` (the importer noted a newer change since). It touches nothing else; in particular
+  it leaves the importer's hashes alone (see ``docs/developer/backend-awin-import.md``).
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -38,6 +45,7 @@ from app.repositories.admin_offers import (
     AffiliateLinkRecord,
     OfferFilters,
     OfferPage,
+    OfferProvenance,
     OfferRecord,
     ReviewRefs,
 )
@@ -55,6 +63,7 @@ from app.services.admin_catalogue_common import (
 )
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
+    IllegalTransition,
     InvalidInput,
     OfferChanged,
     PublishBlocked,
@@ -81,6 +90,7 @@ __all__ = ["AdminOfferService", "OfferDetail"]
 LINK_FIELDS = frozenset({"provider", "destination_url", "tracking_id", "active"})
 LINK_AUDITED = frozenset({"provider", "active"})
 RESOURCE = "offers"
+DISMISS_ACTION = "dismiss_source_change"
 LINK_RESOURCE = "affiliate_links"
 
 
@@ -92,6 +102,10 @@ class OfferStore(Protocol):
         self, category_id: str, merchant_id: str, *, share: bool = False
     ) -> ReviewRefs: ...
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None: ...
+    async def get_provenance(
+        self, offer_id: str, *, lock: bool = False
+    ) -> OfferProvenance | None: ...
+    async def clear_source_change(self, offer_id: str) -> None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
     async def update(self, offer_id: str, values: dict[str, Any]) -> OfferRecord: ...
@@ -117,6 +131,8 @@ class OfferDetail:
     # Writes only: the token of the stored state the write replaced, read under the same row lock. When it is
     # not the token the editor loaded, somebody else changed the offer first.
     previous_review_token: str | None = None
+    # Where an imported offer came from (None for a hand-made offer).
+    provenance: OfferProvenance | None = None
 
 
 def _host(url: str) -> str:
@@ -277,6 +293,44 @@ class AdminOfferService:
         await self.session.commit()
         return detail
 
+    async def dismiss_source_change(
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        review_token: str | None,
+        seen_marker: datetime,
+    ) -> OfferDetail:
+        """Clear the "source changed" marker of an imported offer, after the editor has seen it.
+
+        ``seen_marker`` is the ``source_changed_at`` the editor's page showed. Same order as ``verify``:
+        offer row lock, token check (409 ``offer_changed``), the archived refusal, then the provenance row
+        ``FOR UPDATE``. An archived offer, an offer that was never imported and a marker that is already
+        clear are "nothing to dismiss" (409 ``illegal_transition``); a stored marker other than the one the
+        editor saw (the importer noted a newer change meanwhile) is 409 ``offer_changed``, nothing written.
+        Only ``source_changed_at`` changes.
+        """
+        current = await self._locked(offer_id)
+        previous = await self._require_unchanged(current, review_token)
+        require_editable(current.status)
+        marked = await self.store.get_provenance(offer_id, lock=True)
+        if marked is None or marked.source_changed_at is None:
+            raise IllegalTransition(current.status.value, DISMISS_ACTION)
+        if marked.source_changed_at != seen_marker:
+            raise OfferChanged()
+        await self.store.clear_source_change(offer_id)
+        await self.auditor.record(
+            actor,
+            action="admin.offers.source_change_dismissed",
+            resource=RESOURCE,
+            resource_id=offer_id,
+            before={"source_changed_at": marked.source_changed_at},
+            after={"source_changed_at": None},
+            details={"provider": marked.provider, "external_id": marked.external_id},
+        )
+        detail = await self._detail(current, previous)
+        await self.session.commit()
+        return detail
+
     async def create_link(
         self, actor: AdminContext, offer_id: str, data: Mapping[str, Any]
     ) -> AffiliateLinkRecord:
@@ -375,8 +429,13 @@ class AdminOfferService:
         """
         links = await self.store.list_links(offer.id)
         refs = await self.store.review_refs(offer.category_id, offer.merchant_id)
+        provenance = await self.store.get_provenance(offer.id)
         return OfferDetail(
-            offer, links, compute_review_token(offer, links, refs), previous
+            offer,
+            links,
+            compute_review_token(offer, links, refs),
+            previous,
+            provenance,
         )
 
     async def _stored_token(self, locked: OfferRecord) -> str:

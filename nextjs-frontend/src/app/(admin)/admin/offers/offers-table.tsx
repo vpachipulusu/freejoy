@@ -10,6 +10,7 @@ import {
 import { offerTypeLabel } from '@/lib/admin-catalogue/offer-labels';
 import type { OfferRowView } from '@/lib/admin-catalogue/offer-view';
 import { formatAdminDate } from '../_components/format-admin-date';
+import { OfferImportBadge } from './_components/offer-import-badge';
 import { OfferRowActions } from './_components/offer-row-actions';
 import { OfferStatusPill } from './_components/offer-status-pill';
 
@@ -49,6 +50,10 @@ export function OffersTable({ rows }: { rows: OfferTableRow[] }) {
               <div className="text-muted-foreground">
                 {row.merchantName} · {offerTypeLabel(row.offerType)}
               </div>
+              <OfferImportBadge
+                importProvider={row.importProvider}
+                sourceChangedAt={row.sourceChangedAt}
+              />
             </TableCell>
             <TableCell label="Category" className="text-muted-foreground">
               {row.categoryName}

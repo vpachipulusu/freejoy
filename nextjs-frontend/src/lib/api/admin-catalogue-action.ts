@@ -31,6 +31,13 @@ export const resourceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 /** The opaque review token of an offer goes into a request body: only its plain characters are accepted. */
 export const reviewTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
+/**
+ * The `source_changed_at` the page showed, sent back unchanged when a source change is dismissed: an ISO timestamp
+ * with a zone. It is only ever passed through as the string the API sent, never parsed into a Date, so the
+ * microseconds the database stores survive the round trip.
+ */
+export const sourceChangedAtSchema = z.string().max(40).datetime({ offset: true });
+
 const SLUG_FOR_PATH = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Runs `action` only for a confirmed admin; everyone else gets the curated refusal and nothing is called. */

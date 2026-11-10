@@ -18,6 +18,18 @@ export interface OfferRowView {
   endAt: string | null;
   lastVerifiedAt: string | null;
   updatedAt: string;
+  /** The network an imported offer came from; null for an offer made by hand. */
+  importProvider: string | null;
+  /** Set while the source has moved on and nobody has reviewed the change (the review queue). */
+  sourceChangedAt: string | null;
+}
+
+/** Where an imported offer came from (the offer page's read-only Provenance panel). */
+export interface OfferProvenanceView {
+  provider: string;
+  externalId: string;
+  appliedAt: string;
+  sourceChangedAt: string | null;
 }
 
 export interface OfferLinkView {
@@ -49,6 +61,8 @@ export interface OfferDetailView extends OfferRowView {
   publisherNotes: string | null;
   createdAt: string;
   links: OfferLinkView[];
+  /** Null for an offer made by hand. */
+  provenance: OfferProvenanceView | null;
 }
 
 const LOCAL_DATE_TIME_LENGTH = 19;
