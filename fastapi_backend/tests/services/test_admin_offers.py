@@ -6,7 +6,12 @@ from datetime import timedelta
 import pytest
 
 from app.core.permissions import AdminContext
-from app.models.platform.offer import OfferStatus, OfferType, PostageKind
+from app.models.platform.offer import (
+    CommercialBasis,
+    OfferStatus,
+    OfferType,
+    PostageKind,
+)
 from app.repositories.admin_offers import OfferFilters
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
@@ -47,6 +52,7 @@ def new_data(**changes):
         "category_id": "cat1",
         "merchant_id": "mer1",
         "offer_type": OfferType.FREE_SAMPLE,
+        "commercial_basis": CommercialBasis.EDITORIAL,
         "summary": "A box",
         "description": ["One"],
         "featured": False,

@@ -25,6 +25,12 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   request also carries the marker the editor saw and a different stored one is refused with
   ``OfferChanged`` (the importer noted a newer change since). It touches nothing else; in particular
   it leaves the importer's hashes alone (see ``docs/developer/backend-awin-import.md``).
+* ``commercial_basis`` (``EDITORIAL``, ``AFFILIATE`` or ``SPONSORED``) is required on create, has no default
+  anywhere and is part of the review token. Publishing (and re-publishing an expired offer) an offer whose only
+  active links are ``direct`` also needs the editor's explicit confirmation of the basis in the publish
+  request; without it the publish is refused as ``commercial_basis_required``, and a confirmation that is not
+  the stored basis is ``OfferChanged``. Link changes on an already published offer never revisit that
+  confirmation: its stored basis stays in force and stays visible to the editor.
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
@@ -37,10 +43,14 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 
-from app.core.affiliate_hosts import destination_allowed, is_known_provider
+from app.core.affiliate_hosts import (
+    DIRECT_PROVIDER,
+    destination_allowed,
+    is_known_provider,
+)
 from app.core.config import settings
 from app.core.permissions import AdminContext
-from app.models.platform.offer import OfferStatus
+from app.models.platform.offer import CommercialBasis, OfferStatus
 from app.repositories.admin_offers import (
     AffiliateLinkRecord,
     OfferFilters,
@@ -147,6 +157,7 @@ def _snapshot(offer: OfferRecord) -> dict[str, Any]:
         "category_id": offer.category_id,
         "merchant_id": offer.merchant_id,
         "offer_type": offer.offer_type.value,
+        "commercial_basis": offer.commercial_basis.value,
         "status": offer.status.value,
     }
 
@@ -239,22 +250,29 @@ class AdminOfferService:
         offer_id: str,
         action: OfferAction,
         review_token: str | None = None,
+        commercial_basis: CommercialBasis | None = None,
     ) -> OfferDetail:
         """publish, unpublish, expire or archive (``verify`` has its own method).
 
         ``publish`` needs the ``review_token`` of the offer as the editor loaded it; the other
-        actions ignore it.
+        actions ignore it. ``commercial_basis`` is the basis the editor confirms when publishing: it
+        is required when the offer's only active links are ``direct`` and, whenever it is sent, must be
+        the stored one (``OfferChanged`` otherwise: what the editor saw is not what is stored).
         """
         if action is OfferAction.VERIFY:
             raise ValueError("Use verify")
         current = await self._locked(offer_id)
         if action is OfferAction.PUBLISH:
             previous = await self._require_unchanged(current, review_token)
+            if commercial_basis not in (None, current.commercial_basis):
+                raise OfferChanged()
         else:
             previous = await self._stored_token(current)
         target = next_status(current.status, action)
         if action is OfferAction.PUBLISH:
-            await self._require_publishable(current)
+            await self._require_publishable(
+                current, basis_confirmed=commercial_basis is not None
+            )
         updated = await self.store.update(offer_id, {"status": target})
         await self.auditor.record(
             actor,
@@ -465,8 +483,19 @@ class AdminOfferService:
         if await self.store.merchant_active(merchant_id) is None:
             raise InvalidInput("unknown_merchant")
 
+    async def _basis_unconfirmed(self, offer_id: str, *, confirmed: bool) -> bool:
+        """True when every active link is ``direct`` (at least one) and the editor confirmed no basis."""
+        if confirmed:
+            return False
+        active = [item for item in await self.store.list_links(offer_id) if item.active]
+        return bool(active) and all(item.provider == DIRECT_PROVIDER for item in active)
+
     async def _require_publishable(
-        self, offer: OfferRecord, *, check_end: bool = True
+        self,
+        offer: OfferRecord,
+        *,
+        check_end: bool = True,
+        basis_confirmed: bool = True,
     ) -> None:
         facts = PublishFacts(
             category_enabled=bool(await self.store.category_enabled(offer.category_id)),
@@ -475,6 +504,9 @@ class AdminOfferService:
             has_source_url=bool(offer.source_url),
             end_at=offer.end_at if check_end else None,
             last_verified_at=offer.last_verified_at,
+            basis_unconfirmed=await self._basis_unconfirmed(
+                offer.id, confirmed=basis_confirmed
+            ),
         )
         blockers = publish_blockers(facts, self.clock())
         if blockers:

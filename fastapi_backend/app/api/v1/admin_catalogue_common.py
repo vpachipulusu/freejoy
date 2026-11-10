@@ -103,6 +103,7 @@ PUBLISH_BLOCKERS = {
     "no_destination": "it has no active affiliate link or source URL",
     "end_date_passed": "its end date has passed",
     "not_verified": "it has not been verified",
+    "commercial_basis_required": "its commercial basis has not been confirmed",
 }
 
 

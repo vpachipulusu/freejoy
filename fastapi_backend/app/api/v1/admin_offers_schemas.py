@@ -21,6 +21,7 @@ from app.api.v1.admin_catalogue_common import (
     paragraph,
 )
 from app.models.platform.offer import (
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -79,6 +80,8 @@ class CreateOfferRequest(BaseModel):
     category_id: IdText
     merchant_id: IdText
     offer_type: OfferType
+    # Required, with no default: the editor states the commercial relationship for every new offer.
+    commercial_basis: CommercialBasis
     featured: bool = False
     image_tint: TintText
     image_label: Annotated[str, line(40)]
@@ -109,6 +112,7 @@ class UpdateOfferRequest(BaseModel):
     category_id: IdText | None = None
     merchant_id: IdText | None = None
     offer_type: OfferType | None = None
+    commercial_basis: CommercialBasis | None = None
     featured: bool | None = None
     image_tint: TintText | None = None
     image_label: Annotated[str, line(40)] | None = None
@@ -138,11 +142,17 @@ class UpdateOfferRequest(BaseModel):
 
 
 class PublishRequest(BaseModel):
-    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."""
+    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+
+    ``commercial_basis`` is the basis the editor confirms. It is required (422 ``publish_blocked``, reason
+    ``commercial_basis_required``) when the offer's only active links are ``direct``; whenever it is sent it must be
+    the stored one (409 ``offer_changed``).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     review_token: ReviewToken
+    commercial_basis: CommercialBasis | None = None
 
 
 class DismissSourceChangeRequest(BaseModel):
@@ -226,6 +236,7 @@ class OfferSummaryOut(BaseModel):
     category_id: str
     merchant_id: str
     offer_type: OfferType
+    commercial_basis: CommercialBasis
     status: OfferStatus
     featured: bool
     end_at: datetime | None

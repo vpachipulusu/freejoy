@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from app.models.platform.offer import (
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -37,6 +38,7 @@ KNOWN_OFFER = OfferRecord(
     category_id="cat_known",
     merchant_id="mer_known",
     offer_type=OfferType.FREE_SAMPLE,
+    commercial_basis=CommercialBasis.AFFILIATE,
     status=OfferStatus.DRAFT,
     featured=True,
     image_tint="sage",
@@ -108,9 +110,7 @@ def test_the_fingerprint_is_a_stable_sha256_of_the_offer_and_its_links() -> None
     assert len(first) == 64 and int(first, 16) >= 0
 
 
-@pytest.mark.parametrize(
-    "field", sorted(EDITABLE_FIELDS | {"status", "last_verified_at"})
-)
+@pytest.mark.parametrize("field", FINGERPRINT_FIELDS)
 def test_any_field_an_editor_can_change_changes_the_fingerprint(field: str) -> None:
     changed: dict[str, Any] = {
         "title": "Edited",
@@ -148,6 +148,15 @@ def test_any_field_an_editor_can_change_changes_the_fingerprint(field: str) -> N
     edited = dataclasses.replace(offer, **{field: changed[field]})
 
     assert fingerprint(edited, [make_link()]) != fingerprint(offer, [make_link()])
+
+
+def test_the_commercial_basis_is_editable_but_outside_the_fingerprint() -> None:
+    offer = make_offer()
+    sponsored = dataclasses.replace(offer, commercial_basis=CommercialBasis.SPONSORED)
+
+    assert "commercial_basis" in EDITABLE_FIELDS
+    assert "commercial_basis" not in FINGERPRINT_FIELDS
+    assert fingerprint(sponsored, [make_link()]) == fingerprint(offer, [make_link()])
 
 
 def test_bookkeeping_columns_do_not_change_the_fingerprint() -> None:
