@@ -138,8 +138,8 @@ async def seed_catalogue(
     await execute(
         engine,
         "INSERT INTO offers (id, title, slug, summary, category_id, merchant_id, offer_type,"
-        " image_tint, image_label, image_alt, postage_kind, eligibility, availability)"
-        " VALUES (:o, 't', :os, 's', :c, :m, 'VOUCHER', 'cream', 'l', 'a', 'CHECK_TERMS', 'e', 'a')",
+        " commercial_basis, image_tint, image_label, image_alt, postage_kind, eligibility, availability)"
+        " VALUES (:o, 't', :os, 's', :c, :m, 'VOUCHER', 'AFFILIATE', 'cream', 'l', 'a', 'CHECK_TERMS', 'e', 'a')",
         o=ids["offer"],
         os=f"offer-{ids['offer']}",
         c=ids["category"],

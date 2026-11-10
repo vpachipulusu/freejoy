@@ -156,6 +156,8 @@ describe('a publish or verify refused because the offer changed', () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         status="DRAFT"
@@ -171,6 +173,8 @@ describe('a publish or verify refused because the offer changed', () => {
 
     rerender(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         status="DRAFT"
@@ -191,6 +195,8 @@ describe('a server action call that throws', () => {
     const user = userEvent.setup();
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -212,6 +218,8 @@ describe('OfferLifecycleButtons', () => {
   it('shows the steps as buttons in a named group', () => {
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -230,6 +238,8 @@ describe('OfferLifecycleButtons', () => {
     const user = userEvent.setup();
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -245,6 +255,8 @@ describe('OfferLifecycleButtons', () => {
   it('says an archived offer cannot change and offers no button', () => {
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -354,6 +366,8 @@ describe('while an action is in flight', () => {
     const user = userEvent.setup();
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -380,6 +394,8 @@ describe('while an action is in flight', () => {
     const user = userEvent.setup();
     render(
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken="tok-1"
@@ -429,6 +445,8 @@ describe('beside a form with unsaved changes', () => {
       <DirtyFormProvider>
         <Reporter />
         <OfferLifecycleButtons
+          commercialBasis="EDITORIAL"
+          confirmBasisToPublish={false}
           offerId="o1"
           offerTitle="Free coffee"
           reviewToken="tok-1"

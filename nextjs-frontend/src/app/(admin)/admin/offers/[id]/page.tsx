@@ -101,6 +101,8 @@ export default async function EditOfferPage({ params }: { params: Params }) {
               offerTitle={offer.title}
               status={offer.status}
               reviewToken={offer.reviewToken}
+              commercialBasis={offer.commercialBasis}
+              confirmBasisToPublish={offer.needsBasisConfirmation}
             />
           </div>
 

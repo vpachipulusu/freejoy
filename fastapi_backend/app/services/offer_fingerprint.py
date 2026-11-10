@@ -1,6 +1,7 @@
 """Two hashes of an offer: the importer's edit fingerprint and the admin's review token.
 
-``fingerprint`` hashes every field an editor can change on an offer, its status and verification date,
+``fingerprint`` hashes every field an editor can change on an offer except ``commercial_basis`` (the importer
+writes that once, as AFFILIATE, and never refreshes it; see ``FINGERPRINT_FIELDS``), its status and verification date,
 and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids, slugs,
 timestamps of the row or click counters). The Awin importer stores it as ``applied_content_hash`` each
 time it writes an offer; a later mismatch means a person changed the offer, so it is no longer an untouched
@@ -18,7 +19,8 @@ the token inside the write's transaction, so such a failure would roll the write
 editor read (see ``admin_offers``). It covers more than the fingerprint, because a visitor sees more than the
 offer row: the offer content (the fingerprint of the offer alone), its links in click order with their ids,
 and the merchant's and category's public fields (the category's name and short name, as the public offer page
-shows them). It is separate so the importer's hashes stay as they are.
+shows them), and the commercial basis (a change to how an offer is paid for is a change the editor must see; it is
+outside the fingerprint, see ``FINGERPRINT_FIELDS``). It is separate so the importer's hashes stay as they are.
 Bump ``REVIEW_TOKEN_VERSION`` when what it covers changes: open tokens go stale and editors reload.
 """
 
@@ -36,8 +38,14 @@ from app.repositories.admin_offers import (
 from app.services.offer_rules import EDITABLE_FIELDS
 
 FINGERPRINT_VERSION = 1
-REVIEW_TOKEN_VERSION = 2
-FINGERPRINT_FIELDS = tuple(sorted(EDITABLE_FIELDS | {"status", "last_verified_at"}))
+REVIEW_TOKEN_VERSION = 3
+# ``commercial_basis`` is editable but deliberately NOT in the importer's fingerprint: the importer writes it
+# once, when it creates a draft, and never refreshes it, so an editor's change to it needs no "this is no longer
+# an untouched import" signal. Adding it here would also change the digest of every stored offer and mark every
+# existing import as edited. The review token covers it instead (see ``review_token``).
+FINGERPRINT_FIELDS = tuple(
+    sorted((EDITABLE_FIELDS - {"commercial_basis"}) | {"status", "last_verified_at"})
+)
 
 
 def _canonical(value: Any) -> Any:
@@ -82,6 +90,7 @@ def review_token(
         "v": REVIEW_TOKEN_VERSION,
         "offer_id": offer.id,
         "content": fingerprint(offer, ()),
+        "commercial_basis": offer.commercial_basis.value,
         "links": [
             [
                 link.id,

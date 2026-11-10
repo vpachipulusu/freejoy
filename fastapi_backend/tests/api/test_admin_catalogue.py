@@ -52,6 +52,7 @@ OFFER_BODY: dict[str, Any] = {
     "category_id": "cat1",
     "merchant_id": "mer1",
     "offer_type": "FREE_SAMPLE",
+    "commercial_basis": "EDITORIAL",
     "image_tint": "sage",
     "image_label": "Free",
     "image_alt": "A box",

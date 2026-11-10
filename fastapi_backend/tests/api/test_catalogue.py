@@ -23,6 +23,7 @@ from app.api.v1.catalogue_schemas import (
 from app.core.rate_limit import PUBLIC_CATALOGUE_POLICY
 from app.main import create_app
 from app.models.platform.offer import (
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -52,6 +53,7 @@ KEY = "test-only-internal-service-key-not-for-deployment"
 CACHE = "private, max-age=60"
 EDITORIAL_ONLY = {
     "publisher_notes",
+    "commercial_basis",
     "status",
     "destination_url",
     "tracking_id",
@@ -513,6 +515,7 @@ def test_public_offer_schema_is_an_explicit_allowlist() -> None:
         "category",
         "merchant",
         "offer_type",
+        "sponsored",
         "featured",
         "image",
         "postage",
@@ -529,7 +532,9 @@ def test_public_offer_schema_is_an_explicit_allowlist() -> None:
 
 
 def test_the_offer_record_the_routes_build_from_has_no_editorial_only_field() -> None:
-    assert set(OfferRecord.__dataclass_fields__).isdisjoint(EDITORIAL_ONLY - {"status"})
+    assert set(OfferRecord.__dataclass_fields__).isdisjoint(
+        EDITORIAL_ONLY - {"status", "commercial_basis"}
+    )
 
 
 async def test_responses_never_contain_editorial_field_names_or_values() -> None:
@@ -598,3 +603,52 @@ async def test_a_410_is_not_turned_into_a_304_by_a_matching_if_none_match() -> N
     assert second.status_code == 410
     assert second.json() == first.json()
     assert second.json()["expired"] is True
+
+
+@pytest.mark.parametrize(
+    ("basis", "sponsored"),
+    [
+        (CommercialBasis.EDITORIAL, False),
+        (CommercialBasis.AFFILIATE, False),
+        (CommercialBasis.SPONSORED, True),
+    ],
+)
+async def test_an_offer_is_sponsored_only_when_its_basis_is_sponsored(
+    basis: CommercialBasis, sponsored: bool
+) -> None:
+    offer = make_offer(commercial_basis=basis)
+    http, _ = build(FakeCatalogueRepository(offers=[offer], by_slug=offer))
+
+    async with http:
+        listed = (await http.get("/v1/catalogue/offers")).json()["data"]["items"][0]
+        detail = (await http.get("/v1/catalogue/offers/free-shampoo")).json()["data"]
+
+    assert listed["sponsored"] is sponsored
+    assert detail["sponsored"] is sponsored
+
+
+async def test_a_featured_sponsored_offer_is_both_on_the_card() -> None:
+    offer = make_offer(commercial_basis=CommercialBasis.SPONSORED, featured=True)
+    http, _ = build(FakeCatalogueRepository(offers=[offer]))
+
+    async with http:
+        item = (await http.get("/v1/catalogue/offers")).json()["data"]["items"][0]
+
+    assert (item["featured"], item["sponsored"]) == (True, True)
+
+
+@pytest.mark.parametrize("basis", list(CommercialBasis))
+async def test_the_three_way_basis_never_reaches_the_public_response(
+    basis: CommercialBasis,
+) -> None:
+    offer = make_offer(commercial_basis=basis)
+    http, _ = build(FakeCatalogueRepository(offers=[offer], by_slug=offer))
+
+    async with http:
+        bodies = [(await http.get(path)).text for path in ROUTES]
+
+    for text in bodies:
+        assert "commercial_basis" not in text
+        assert not {"EDITORIAL", "AFFILIATE", "SPONSORED"} & set(
+            text.replace('"', " ").replace(",", " ").split()
+        )

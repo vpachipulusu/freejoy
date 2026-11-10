@@ -16,6 +16,7 @@ from sqlalchemy import ColumnElement, Select, func, or_, select
 from app.models.platform.category import Category
 from app.models.platform.merchant import Merchant
 from app.models.platform.offer import (
+    CommercialBasis,
     Offer,
     OfferFreshness,
     OfferStatus,
@@ -61,6 +62,8 @@ class OfferRecord:
     merchant_name: str
     merchant_logo_url: str | None
     offer_type: OfferType
+    # Never serialised as it is: the public API only says whether it is ``SPONSORED``.
+    commercial_basis: CommercialBasis
     status: OfferStatus
     featured: bool
     image_tint: str
@@ -107,6 +110,7 @@ _OFFER_COLUMNS = (
     Merchant.name.label("merchant_name"),
     Merchant.logo_url.label("merchant_logo_url"),
     Offer.offer_type,
+    Offer.commercial_basis,
     Offer.status,
     Offer.featured,
     Offer.image_tint,

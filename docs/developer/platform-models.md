@@ -45,7 +45,7 @@ SQLAlchemy models for the platform database are in `fastapi_backend/app/models/p
 | `stripe_events` | Webhook idempotency (billing module). |
 | `categories` | Unique `slug`; `short_name`, `intro`, `tint`, `sort_order` (default 0) and `enabled` (default true) carry what the category pages show. |
 | `merchants` | Unique `slug`; `website` and `logo_url` are null until a licensed logo exists; `active` (default true). |
-| `offers` | Unique `slug`; `offer_type`, `status` (default `DRAFT`), `freshness` (editorial, nullable), `postage_kind`. Carries every field an offer page shows: image tint, label and alt, `steps`, `availability`, `eligibility`, `subscription_terms`, `requires_card`, `last_verified_at`. CHECKs: `postage_amount_minor` and `postage_currency` (an upper-case 3-letter code, `GBP`) are set exactly when `postage_kind` is `COST`; a `PUBLISHED` offer must have `last_verified_at` (the page always shows "Last checked"). `start_at` stays nullable: the Phase 2 mapper falls back to `created_at` for the frontend's `startAt`. `publisher_notes` is internal: the API never serialises it and it holds no personal contact data. Indexes `(status, end_at)`, `(category_id, status)` and `merchant_id`. |
+| `offers` | Unique `slug`; `offer_type`, `commercial_basis` (`EDITORIAL`, `AFFILIATE` or `SPONSORED`; not null, **no default**, CHECK `ck_offers_commercial_basis_valid`; added by migration `0006`, which backfills `AFFILIATE` for an offer with an active link on a network and `EDITORIAL` for the rest; every writer states it), `status` (default `DRAFT`), `freshness` (editorial, nullable), `postage_kind`. Carries every field an offer page shows: image tint, label and alt, `steps`, `availability`, `eligibility`, `subscription_terms`, `requires_card`, `last_verified_at`. CHECKs: `postage_amount_minor` and `postage_currency` (an upper-case 3-letter code, `GBP`) are set exactly when `postage_kind` is `COST`; a `PUBLISHED` offer must have `last_verified_at` (the page always shows "Last checked"). `start_at` stays nullable: the Phase 2 mapper falls back to `created_at` for the frontend's `startAt`. `publisher_notes` is internal: the API never serialises it and it holds no personal contact data. Indexes `(status, end_at)`, `(category_id, status)` and `merchant_id`. |
 | `affiliate_links` | Per-offer destination and `tracking_id` for a `provider`; `destination_url` is read server-side only. Index `(offer_id, active)`. |
 | `offer_imports`, `merchant_imports` | Provenance for the Awin importer (migration `0004`): which provider promotion an offer came from and which advertiser a merchant stands for, unique `(provider, external_id)`, FKs that cascade, plus the hashes that tell a change at the source from an edit by a person. See [backend-awin-import.md](backend-awin-import.md). |
 | `click_events` | One row per outbound click. See the privacy rule below. Indexes `(offer_id, occurred_at)`, `occurred_at` (migration `0003`, serves the retention job) and `affiliate_link_id` (the `SET NULL` delete runs on every link delete). |
@@ -126,3 +126,25 @@ run `upgrade head`, `alembic check` and `downgrade base` locally.
 `uv run alembic upgrade head` from `fastapi_backend/` against the production database (`DATABASE_URL_DIRECT`). Until
 then every query on the changed tables fails, and `GET /health/ready` (header `X-Internal-Key`) answers 503
 `migrations_pending` with `migrations.current` and `migrations.head`.
+
+## Rolling out migration 0006 (`offers.commercial_basis`)
+
+The column is NOT NULL with no default, so an old backend cannot insert an offer once `0006` has run. Roll out in this
+order:
+
+1. **Before `0006`**, check the providers the backfill will see: `SELECT DISTINCT provider FROM affiliate_links WHERE
+   active;`. The backfill recognises exactly `awin`, `cj`, `partnerize`, `rakuten` and `tradedoubler` (a list frozen in the
+   migration); any other string (a typo, a different case) backfills `EDITORIAL`. Fix those rows first if they are really
+   network links.
+2. **Pause offer creation and the Awin import** (`commands.import_awin_offers`), apply `0006`, and **deploy the backend at
+   once**: between the migration and the backend deploy the old code fails every insert into `offers`.
+3. **Check the API**: `/v1/catalogue/offers` items must carry `sponsored` before the frontend ships (the frontend drops an
+   offer that does not say, rather than show it unlabelled).
+4. **Deploy the frontend**, then resume creation and the import.
+5. **After `0006`**, list what nobody has confirmed: published offers with at least one active link and no active network
+   link (`needs_basis_confirmation`), whose basis was backfilled to `EDITORIAL`. An editor reviews each: a sponsorship the
+   backfill could not know about would otherwise show unlabelled.
+
+**Rollback:** frontend first, then backend. Never downgrade `0006` in production: it drops the column and discards every
+editor's choice, including every `SPONSORED` marking (a later upgrade backfills again from the links and never restores
+`SPONSORED`).

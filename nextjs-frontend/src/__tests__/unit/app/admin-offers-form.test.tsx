@@ -56,6 +56,7 @@ const merchants = [{ id: 'm1', name: 'Good Beans' }];
 
 const filled: OfferFormValues = {
   ...emptyOfferFormValues(),
+  commercialBasis: 'EDITORIAL',
   title: 'Free coffee sample',
   summary: 'A free tasting sachet.',
   categoryId: 'c1',
@@ -265,9 +266,11 @@ describe('OfferForm submit', SLOW, () => {
     const saved = await screen.findByRole('status');
     expect(saved).toHaveTextContent('Changes saved.');
     await waitFor(() => expect(saved).toHaveFocus());
+    // No review provider in this test, so no token travels; the real page's provider supplies it.
     expect(mocks.updateOfferAction).toHaveBeenCalledWith(
       'o1',
-      expect.objectContaining({ title: 'Free coffee sample' })
+      expect.objectContaining({ title: 'Free coffee sample' }),
+      undefined
     );
     expect(mocks.refresh).toHaveBeenCalled();
     expect(screen.getByLabelText(/^Slug/)).toHaveAttribute('readonly');
@@ -517,6 +520,8 @@ describe('edit page: the form and the status buttons together', () => {
     render(
       <DirtyFormProvider>
         <OfferLifecycleButtons
+          commercialBasis="EDITORIAL"
+          confirmBasisToPublish={false}
           offerId="o1"
           offerTitle="Free coffee"
           reviewToken="tok-1"
@@ -547,6 +552,8 @@ function editPage(token: string, values: Partial<OfferFormValues> = {}) {
   return (
     <DirtyFormProvider>
       <OfferLifecycleButtons
+        commercialBasis="EDITORIAL"
+        confirmBasisToPublish={false}
         offerId="o1"
         offerTitle="Free coffee"
         reviewToken={token}
@@ -658,6 +665,8 @@ describe('edit page: the notice when a save went over a foreign change', SLOW, (
       <DirtyFormProvider>
         <OfferReviewProvider>
           <OfferLifecycleButtons
+            commercialBasis="EDITORIAL"
+            confirmBasisToPublish={false}
             offerId="o1"
             offerTitle="Free coffee"
             reviewToken={token}

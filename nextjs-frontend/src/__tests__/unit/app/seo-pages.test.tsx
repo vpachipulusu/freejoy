@@ -259,14 +259,34 @@ describe('API offers that have ended', () => {
     await expect(OfferPage(offerParams)).rejects.toThrow('NEXT_NOT_FOUND');
   });
 
-  it('treats an offer it cannot read exactly like one that is not found', async () => {
+  it('treats an offer it cannot read as an outage, not as a missing page', async () => {
     mocks.lookup.mockResolvedValue({ kind: 'unreadable' });
 
     expect(await offerMetadata(offerParams)).toMatchObject({
-      title: 'Offer not found',
-      robots: { index: false },
+      title: 'Freebie unavailable',
+      robots: { index: false, follow: true },
     });
-    await expect(OfferPage(offerParams)).rejects.toThrow('NEXT_NOT_FOUND');
+    render(await OfferPage(offerParams));
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(mocks.notFound).not.toHaveBeenCalled();
+  });
+
+  it('puts "Sponsored listing." first in the description and the share text of a sponsored offer only', async () => {
+    mocks.lookup.mockResolvedValue(found(apiOffer({ sponsored: true })));
+    const sponsored = await offerMetadata(offerParams);
+    mocks.lookup.mockResolvedValue(found(apiOffer({ sponsored: false })));
+    const plain = await offerMetadata(offerParams);
+
+    expect(sponsored.description).toBe(`Sponsored listing. ${FIXTURE_LIVE.summary}`);
+    expect(sponsored.openGraph?.description).toBe(`Sponsored listing. ${FIXTURE_LIVE.summary}`);
+    expect(plain.description).toBe(FIXTURE_LIVE.summary);
+    expect(plain.openGraph?.description).toBe(FIXTURE_LIVE.summary);
+  });
+
+  it('leaves the ended page unlabelled: it has no outbound link', async () => {
+    mocks.lookup.mockResolvedValue(ended());
+
+    expect((await offerMetadata(offerParams)).description).not.toMatch(/sponsored/i);
   });
 });
 

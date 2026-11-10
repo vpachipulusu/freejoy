@@ -37,6 +37,8 @@ function page(token: string, status: Status = 'DRAFT'): ReactNode {
     <DirtyFormProvider>
       <OfferReviewProvider>
         <OfferLifecycleButtons
+          commercialBasis="EDITORIAL"
+          confirmBasisToPublish={false}
           offerId="o1"
           offerTitle="Free coffee"
           status={status}

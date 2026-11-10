@@ -23,7 +23,7 @@ const FAILURE_TITLES: Record<OfferAction, string> = {
 /**
  * Runs an offer lifecycle action through its server action (see `useOfferWrite` for how the outcome is
  * reported). The action refreshes the admin pages and the public catalogue. Publish and verify send the review
- * token of the offer as it was loaded.
+ * token of the offer as it was loaded; publish may also send the commercial basis the editor confirmed.
  */
 export function useOfferAction() {
   const { run: write, isPending } = useOfferWrite();
@@ -32,10 +32,15 @@ export function useOfferAction() {
     offerId: string,
     action: OfferAction,
     offerTitle: string,
-    reviewToken?: string
+    reviewToken?: string,
+    commercialBasis?: string
   ): void {
     write({
-      call: () => offerLifecycleAction(offerId, action, reviewToken),
+      // The basis is passed only when there is one, so every other step calls the action exactly as before.
+      call: () =>
+        commercialBasis === undefined
+          ? offerLifecycleAction(offerId, action, reviewToken)
+          : offerLifecycleAction(offerId, action, reviewToken, commercialBasis),
       successTitle: SUCCESS_TITLES[action],
       failureTitle: FAILURE_TITLES[action],
       description: offerTitle,

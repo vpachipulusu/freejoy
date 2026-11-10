@@ -72,6 +72,11 @@ export interface Offer {
   merchant?: Merchant;
   offerType: OfferType;
   status: OfferStatus;
+  /**
+   * True when the merchant pays or gives Freejoy a benefit for the listing or where it appears. Shown as a
+   * "Sponsored" label on the card and the page. The editor's three-way basis is never public; only this flag is.
+   */
+  sponsored: boolean;
   featured: boolean;
   image: OfferImage;
   postage: Postage;
@@ -158,6 +163,7 @@ export type CardOffer = Pick<
   | 'slug'
   | 'title'
   | 'offerType'
+  | 'sponsored'
   | 'image'
   | 'postage'
   | 'freshness'
@@ -174,6 +180,7 @@ export function toCardOffer(offer: Offer): CardOffer {
     slug: offer.slug,
     title: offer.title,
     offerType: offer.offerType,
+    sponsored: offer.sponsored,
     image: offer.image,
     postage: offer.postage,
     freshness: offer.freshness,

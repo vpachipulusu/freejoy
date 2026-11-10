@@ -6,7 +6,12 @@ from datetime import timedelta
 import pytest
 
 from app.core.permissions import AdminContext
-from app.models.platform.offer import OfferStatus, OfferType, PostageKind
+from app.models.platform.offer import (
+    CommercialBasis,
+    OfferStatus,
+    OfferType,
+    PostageKind,
+)
 from app.repositories.admin_offers import OfferFilters
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
@@ -47,6 +52,7 @@ def new_data(**changes):
         "category_id": "cat1",
         "merchant_id": "mer1",
         "offer_type": OfferType.FREE_SAMPLE,
+        "commercial_basis": CommercialBasis.EDITORIAL,
         "summary": "A box",
         "description": ["One"],
         "featured": False,
@@ -294,7 +300,8 @@ async def test_publish_succeeds_when_every_rule_holds_and_audits_the_transition(
     (row,) = auditor.rows
     assert row["action"] == "admin.offers.publish"
     assert row["before"] == {"status": "DRAFT"} and row["after"] == {
-        "status": "PUBLISHED"
+        "status": "PUBLISHED",
+        "commercial_basis": "EDITORIAL",
     }
     assert session.commits == 1 and store.locked == ["off1"]
 

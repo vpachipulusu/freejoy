@@ -47,6 +47,8 @@ const OFFER = {
   category_id: 'c1',
   merchant_id: 'm1',
   offer_type: 'FREE_SAMPLE',
+  commercial_basis: 'SPONSORED',
+  needs_basis_confirmation: false,
   status: 'DRAFT',
   featured: false,
   end_at: null,
@@ -101,6 +103,26 @@ describe('edit offer page', () => {
       props: { offerId: string; reviewToken: string };
     }[];
     expect(buttons.props).toMatchObject({ offerId: 'o1', reviewToken: 'token-from-this-read' });
+  });
+
+  it('hands the buttons the saved basis and what the API says about needing its confirmation', async () => {
+    const props = async (needs: boolean) => {
+      mocks.fetchAdminOffer.mockResolvedValue({
+        success: true,
+        data: { ...OFFER, needs_basis_confirmation: needs },
+      });
+      const page = await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) });
+      const [buttons] = findAll(page as ReactNode, OfferLifecycleButtons) as {
+        props: Record<string, unknown>;
+      }[];
+      return buttons.props;
+    };
+
+    expect(await props(true)).toMatchObject({
+      commercialBasis: 'SPONSORED',
+      confirmBasisToPublish: true,
+    });
+    expect(await props(false)).toMatchObject({ confirmBasisToPublish: false });
   });
 
   it('shows the provenance panel of an imported offer, with the token it read and the status', async () => {

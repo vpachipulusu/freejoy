@@ -13,6 +13,7 @@ from app.models.platform.catalogue_import import OfferImport
 from app.models.platform.category import Category
 from app.models.platform.merchant import Merchant
 from app.models.platform.offer import (
+    CommercialBasis,
     Offer,
     OfferFreshness,
     OfferStatus,
@@ -33,6 +34,7 @@ class OfferRecord:
     category_id: str
     merchant_id: str
     offer_type: OfferType
+    commercial_basis: CommercialBasis
     status: OfferStatus
     featured: bool
     image_tint: str

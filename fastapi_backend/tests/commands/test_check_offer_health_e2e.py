@@ -107,6 +107,7 @@ async def add_offer(
         "category_id": refs[0],
         "merchant_id": refs[1],
         "offer_type": "FREE_SAMPLE",
+        "commercial_basis": "EDITORIAL",
         "image_tint": "mint",
         "image_label": "l",
         "image_alt": "a",

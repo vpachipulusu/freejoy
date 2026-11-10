@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { logger } from '@/lib/logger';
-import { offerFormSchema } from '@/lib/admin-catalogue/offer-schema';
+import { isCommercialBasis, offerFormSchema } from '@/lib/admin-catalogue/offer-schema';
 import {
   isOfferAction,
   isReviewedOfferAction,
@@ -85,18 +85,32 @@ export async function createOfferAction(
   });
 }
 
+/**
+ * Saves an edit. `reviewToken` is the token of the version the form shows: the API needs it when the commercial
+ * basis changes and answers 409 `offer_changed` when it is missing or stale (nothing is written). That refusal
+ * gets the curated "review it again" message and refreshes the page so it shows the current version.
+ */
 export async function updateOfferAction(
   offerId: string,
-  input: unknown
+  input: unknown,
+  reviewToken?: string
 ): Promise<CatalogueActionResult<OfferWrittenData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     const parsed = offerFormSchema.safeParse(input);
     if (!parsed.success) return invalidForm(parsed.error);
 
-    const result = await patchAdminOffer(offerId, toUpdateOfferBody(parsed.data));
-    if (!result.success)
-      return failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
+    const token = reviewTokenSchema.safeParse(reviewToken);
+    const result = await patchAdminOffer(
+      offerId,
+      toUpdateOfferBody(parsed.data, token.success ? token.data : undefined)
+    );
+    if (!result.success) {
+      const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
+      if (result.code !== 'offer_changed') return refusal;
+      refreshAdminPages(offerId);
+      return { ...refusal, reason: 'offer_changed' };
+    }
 
     refreshAdminPages(offerId);
     const { id, slug, status } = result.data;
@@ -120,11 +134,25 @@ function plainToken(value: unknown): string | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-/** What the API call needs for `action`, or null when a reviewed step has no usable review token. */
-function toActionRequest(action: OfferAction, reviewToken: unknown): OfferActionRequest | null {
+/**
+ * What the API call needs for `action`, or null when a reviewed step has no usable review token. Only publish
+ * carries a commercial basis, and only a known one: anything else is left out, so the API answers that the basis
+ * must be confirmed.
+ */
+function toActionRequest(
+  action: OfferAction,
+  reviewToken: unknown,
+  commercialBasis: unknown
+): OfferActionRequest | null {
   if (!isReviewedOfferAction(action)) return { action };
   const token = reviewTokenSchema.safeParse(reviewToken);
-  return token.success ? { action, reviewToken: token.data } : null;
+  if (!token.success) return null;
+  if (action === 'publish') {
+    return isCommercialBasis(commercialBasis)
+      ? { action, reviewToken: token.data, commercialBasis }
+      : { action, reviewToken: token.data };
+  }
+  return { action, reviewToken: token.data };
 }
 
 /**
@@ -187,16 +215,20 @@ export async function dismissSourceChangeAction(
  * Publish and verify must carry the `reviewToken` of the offer the admin loaded. Without a usable one nothing is
  * sent. When the API says the offer changed since (409 `offer_changed`) the admin pages are refreshed so the next
  * load shows the new content and a fresh token, and the admin gets the curated "review it again" message.
+ *
+ * Publish may also carry `commercialBasis`, the basis the admin confirmed for an offer whose only active links
+ * are `direct` (the API refuses to publish that without it).
  */
 export async function offerLifecycleAction(
   offerId: string,
   action: OfferAction,
-  reviewToken?: string
+  reviewToken?: string,
+  commercialBasis?: string
 ): Promise<CatalogueActionResult<OfferActionData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     if (!isOfferAction(action)) return { success: false, error: ADMIN_REQUEST_FAILED_MESSAGE };
-    const request = toActionRequest(action, reviewToken);
+    const request = toActionRequest(action, reviewToken, commercialBasis);
     if (request === null) {
       // Only the action name: never the token value.
       logger.warn('Admin offer action: review token missing or malformed', { action });

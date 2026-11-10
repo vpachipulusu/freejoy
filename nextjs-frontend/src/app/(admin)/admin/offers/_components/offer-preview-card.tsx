@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useWatch, type Control } from 'react-hook-form';
 import { ExternalLink } from 'lucide-react';
 import { OfferArt } from '@/components/catalogue/offer-art';
+import { SponsoredBadge } from '@/components/catalogue/sponsored-badge';
 import { offerTypeLabel } from '@/lib/admin-catalogue/offer-labels';
 import { poundsToMinor, type OfferFormValues } from '@/lib/admin-catalogue/offer-schema';
 import { publicOfferPath, type OfferRowStatus } from '@/lib/admin-catalogue/offer-status';
@@ -57,6 +58,11 @@ export function OfferPreviewCard({ control, merchants, status, slug }: OfferPrev
         {merchant?.name ?? 'Merchant not chosen'}
         {values.offerType ? ` · ${offerTypeLabel(values.offerType)}` : ''}
       </p>
+      {values.commercialBasis === 'SPONSORED' ? (
+        <div>
+          <SponsoredBadge />
+        </div>
+      ) : null}
       <p className="font-display text-base font-bold leading-snug">
         {values.title || 'Title not written yet'}
       </p>

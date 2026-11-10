@@ -1,7 +1,8 @@
 """Public response models for the catalogue routes.
 
 These are the whole public surface of an offer: a field exists here only when a public page
-shows it. ``publisher_notes``, ``status``, affiliate links and every internal id except the
+shows it. ``publisher_notes``, ``status``, the three-way ``commercial_basis`` (only
+``sponsored``, true for ``SPONSORED``, is public), affiliate links and every internal id except the
 offer id (the future ``/go/[id]`` redirect) are deliberately absent. Enum values are the
 lower-case form the frontend contract uses (``nextjs-frontend/src/lib/catalogue/types.ts``).
 """
@@ -11,6 +12,7 @@ from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, Field
 
+from app.models.platform.offer import CommercialBasis
 from app.repositories.catalogue import CategoryRecord, OfferRecord
 from app.services.catalogue import ExpiredOffer, OfferPage
 
@@ -60,6 +62,8 @@ class OfferData(BaseModel):
     category: CategoryRef
     merchant: MerchantData
     offer_type: OfferTypeValue
+    # True only when the merchant pays or gives a benefit for the listing: shown as a "Sponsored" label.
+    sponsored: bool
     featured: bool
     image: ImageData
     postage: PostageData
@@ -150,6 +154,7 @@ def offer_data(record: OfferRecord) -> OfferData:
             logo_url=record.merchant_logo_url,
         ),
         offer_type=cast(OfferTypeValue, record.offer_type.value.lower()),
+        sponsored=record.commercial_basis is CommercialBasis.SPONSORED,
         featured=record.featured,
         image=ImageData(
             tint=record.image_tint, label=record.image_label, alt=record.image_alt

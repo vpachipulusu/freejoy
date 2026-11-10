@@ -21,6 +21,7 @@ from app.api.v1.admin_catalogue_common import (
     paragraph,
 )
 from app.models.platform.offer import (
+    CommercialBasis,
     OfferFreshness,
     OfferStatus,
     OfferType,
@@ -32,6 +33,7 @@ from app.repositories.admin_offers import (
     OfferRecord,
 )
 from app.services.admin_offers import OfferDetail
+from app.services.offer_rules import needs_basis_confirmation
 
 MAX_PARAGRAPHS = 20
 MAX_STEPS = 20
@@ -79,6 +81,8 @@ class CreateOfferRequest(BaseModel):
     category_id: IdText
     merchant_id: IdText
     offer_type: OfferType
+    # Required, with no default: the editor states the commercial relationship for every new offer.
+    commercial_basis: CommercialBasis
     featured: bool = False
     image_tint: TintText
     image_label: Annotated[str, line(40)]
@@ -99,9 +103,16 @@ class CreateOfferRequest(BaseModel):
 
 
 class UpdateOfferRequest(BaseModel):
-    """Partial update: send only the fields to change. The slug and status cannot be changed."""
+    """Partial update: send only the fields to change. The slug and status cannot be changed.
+
+    ``review_token`` is the token of the offer the editor loaded. It is needed only when the request changes
+    ``commercial_basis`` (409 ``offer_changed`` without it or when it is stale, so an old form cannot undo a
+    sponsorship); any other edit works without it. It is not a field of the offer.
+    """
 
     model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken | None = None
 
     title: Title | None = None
     summary: Summary | None = None
@@ -109,6 +120,7 @@ class UpdateOfferRequest(BaseModel):
     category_id: IdText | None = None
     merchant_id: IdText | None = None
     offer_type: OfferType | None = None
+    commercial_basis: CommercialBasis | None = None
     featured: bool | None = None
     image_tint: TintText | None = None
     image_label: Annotated[str, line(40)] | None = None
@@ -129,20 +141,27 @@ class UpdateOfferRequest(BaseModel):
 
     @model_validator(mode="after")
     def supply_values(self) -> "UpdateOfferRequest":
-        if not self.model_fields_set:
+        fields = self.model_fields_set - {"review_token"}
+        if not fields:
             raise ValueError("Supply at least one field")
-        for name in self.model_fields_set - NULLABLE_ON_UPDATE:
+        for name in fields - NULLABLE_ON_UPDATE:
             if getattr(self, name) is None:
                 raise ValueError("This field cannot be null")
         return self
 
 
 class PublishRequest(BaseModel):
-    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."""
+    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+
+    ``commercial_basis`` is the basis the editor confirms. It is required (422 ``publish_blocked``, reason
+    ``commercial_basis_required``) when the offer's only active links are ``direct``; whenever it is sent it must be
+    the stored one (409 ``offer_changed``).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     review_token: ReviewToken
+    commercial_basis: CommercialBasis | None = None
 
 
 class DismissSourceChangeRequest(BaseModel):
@@ -226,6 +245,7 @@ class OfferSummaryOut(BaseModel):
     category_id: str
     merchant_id: str
     offer_type: OfferType
+    commercial_basis: CommercialBasis
     status: OfferStatus
     featured: bool
     end_at: datetime | None
@@ -238,6 +258,8 @@ class OfferSummaryOut(BaseModel):
 
 class OfferOut(OfferSummaryOut):
     review_token: str
+    # True when publishing needs the editor to confirm the commercial basis (see ``needs_basis_confirmation``).
+    needs_basis_confirmation: bool
     provenance: OfferProvenanceOut | None
     summary: str
     description: list[str]
@@ -321,6 +343,9 @@ def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
         **_import_fields(provenance),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
+        "needs_basis_confirmation": needs_basis_confirmation(
+            (link.provider, link.active) for link in detail.links
+        ),
         "provenance": OfferProvenanceOut(**provenance.__dict__) if provenance else None,
     }
 

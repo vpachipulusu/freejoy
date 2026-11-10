@@ -655,6 +655,16 @@ export type ClickResponse = {
 };
 
 /**
+ * CommercialBasis
+ *
+ * The commercial relationship behind a listing, stated honestly to the editor.
+ *
+ * ``SPONSORED`` is the only value visitors are told about (a "Sponsored" label); the three-way
+ * value itself is never public.
+ */
+export type CommercialBasis = 'EDITORIAL' | 'AFFILIATE' | 'SPONSORED';
+
+/**
  * ConfirmResponse
  */
 export type ConfirmResponse = {
@@ -790,6 +800,7 @@ export type CreateOfferRequest = {
      */
     merchant_id: string;
     offer_type: OfferType;
+    commercial_basis: CommercialBasis;
     /**
      * Featured
      */
@@ -1786,6 +1797,10 @@ export type OfferData = {
      */
     offer_type: 'free_sample' | 'free_trial' | 'cashback' | 'voucher' | 'competition';
     /**
+     * Sponsored
+     */
+    sponsored: boolean;
+    /**
      * Featured
      */
     featured: boolean;
@@ -1894,6 +1909,7 @@ export type OfferOut = {
      */
     merchant_id: string;
     offer_type: OfferType;
+    commercial_basis: CommercialBasis;
     status: OfferStatus;
     /**
      * Featured
@@ -1923,6 +1939,10 @@ export type OfferOut = {
      * Review Token
      */
     review_token: string;
+    /**
+     * Needs Basis Confirmation
+     */
+    needs_basis_confirmation: boolean;
     provenance: OfferProvenanceOut | null;
     /**
      * Summary
@@ -2055,6 +2075,7 @@ export type OfferSummaryOut = {
      */
     merchant_id: string;
     offer_type: OfferType;
+    commercial_basis: CommercialBasis;
     status: OfferStatus;
     /**
      * Featured
@@ -2117,6 +2138,7 @@ export type OfferWriteOut = {
      */
     merchant_id: string;
     offer_type: OfferType;
+    commercial_basis: CommercialBasis;
     status: OfferStatus;
     /**
      * Featured
@@ -2146,6 +2168,10 @@ export type OfferWriteOut = {
      * Review Token
      */
     review_token: string;
+    /**
+     * Needs Basis Confirmation
+     */
+    needs_basis_confirmation: boolean;
     provenance: OfferProvenanceOut | null;
     /**
      * Summary
@@ -2671,12 +2697,17 @@ export type ProfileResponse = {
  * PublishRequest
  *
  * Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+ *
+ * ``commercial_basis`` is the basis the editor confirms. It is required (422 ``publish_blocked``, reason
+ * ``commercial_basis_required``) when the offer's only active links are ``direct``; whenever it is sent it must be
+ * the stored one (409 ``offer_changed``).
  */
 export type PublishRequest = {
     /**
      * Review Token
      */
     review_token: string;
+    commercial_basis?: CommercialBasis | null;
 };
 
 /**
@@ -3403,8 +3434,16 @@ export type UpdateMerchantRequest = {
  * UpdateOfferRequest
  *
  * Partial update: send only the fields to change. The slug and status cannot be changed.
+ *
+ * ``review_token`` is the token of the offer the editor loaded. It is needed only when the request changes
+ * ``commercial_basis`` (409 ``offer_changed`` without it or when it is stale, so an old form cannot undo a
+ * sponsorship); any other edit works without it. It is not a field of the offer.
  */
 export type UpdateOfferRequest = {
+    /**
+     * Review Token
+     */
+    review_token?: string | null;
     /**
      * Title
      */
@@ -3426,6 +3465,7 @@ export type UpdateOfferRequest = {
      */
     merchant_id?: string | null;
     offer_type?: OfferType | null;
+    commercial_basis?: CommercialBasis | null;
     /**
      * Featured
      */
