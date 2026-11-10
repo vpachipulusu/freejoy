@@ -28,7 +28,7 @@ of them.
   `archived`), `category` (an id), `review` (only `needed` means anything, every other value is ignored), `page`. The
   search and category select are a plain GET form (no script needed), like `/admin/users`; `status` and `review`
   travel in hidden inputs so a search keeps them. The status chips are links; the current one carries
-  `aria-current` (the code sets `"true"` on every chip, which is what the unit tests pin). Archived is a fifth chip
+  `aria-current="true"` (only on the current chip; the unit tests pin it). Archived is a fifth chip
   next to the four in the design so an archived offer can be found; the offers there cannot be edited.
 * **Review queue chip.** "Needs review" is the last chip (`?review=needed`) and asks the API for `needs_review=true`:
   imported offers that are drafts or whose source changed since the importer last applied it, never an archived
@@ -94,7 +94,7 @@ Unpublish, Expire and Archive.
 No), dates through `formatAdminDate`. While the source has moved on and nobody has reviewed it, the panel says so in
 words and, when the status allows any step (not archived, not unknown), offers **Dismiss source change**
 (`dismiss-source-change-button.tsx`). The button asks for confirmation, then calls `dismissSourceChangeAction`, wired
-like Mark verified: it sends the review token the page loaded, `OfferReviewProvider` is told how the write ended
+like Mark verified: it sends the review token the page loaded and the `source_changed_at` the panel showed (the token does not cover the marker, so a newer one the importer noted meanwhile is refused as a stale page), `OfferReviewProvider` is told how the write ended
 (`recordWrite(token, previousToken)`, or `recordFailure('offer_changed')` for a stale token, which raises the same
 lasting notice and shows "This offer changed since you opened it. Review it again."), a toast announces the outcome and
 `router.refresh()` loads the result. It waits like the other status buttons while the form holds unsaved edits or a save

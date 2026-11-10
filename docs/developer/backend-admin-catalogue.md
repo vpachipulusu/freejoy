@@ -46,7 +46,7 @@ plus a stable `code` (below). Lists take `limit` (1 to 100) and `offset`.
 | `POST /v1/admin/offers/{id}/expire` | `offers.publish` | `PUBLISHED` to `EXPIRED`. No body |
 | `POST /v1/admin/offers/{id}/archive` | `offers.publish` | Terminal. No body |
 | `POST /v1/admin/offers/{id}/verify` | `offers.publish` | Sets `last_verified_at` to now. Body `{"review_token", "note"?}` (`review_token` required; the note is audit only) |
-| `POST /v1/admin/offers/{id}/dismiss-source-change` | `offers.publish` | Clears the importer's "source changed" marker. Body `{"review_token"}` (required, like `verify`). Answers like the other writes (`review_token`, `previous_review_token`). See [the review queue](#review-queue) |
+| `POST /v1/admin/offers/{id}/dismiss-source-change` | `offers.publish` | Clears the importer's "source changed" marker. Body `{"review_token", "source_changed_at"}`, both required (`source_changed_at` is the marker the page showed, with a time zone). Answers like the other writes (`review_token`, `previous_review_token`). See [the review queue](#review-queue) |
 | `POST /v1/admin/offers/{id}/links` | `offers.write` | 201. `provider`, `destination_url`, `tracking_id?`, `active?` |
 | `PATCH /v1/admin/offers/{id}/links/{link_id}` | `offers.write` | Links are deactivated, never deleted (click counts keep their link) |
 | `GET /v1/admin/categories`, `GET .../{id}` | `offers.read` | `search`, `enabled` |
@@ -202,8 +202,9 @@ an `offer_imports` row **and** (`status = DRAFT` **or** `source_changed_at IS NO
 `ARCHIVED`. An offer made by hand (no `offer_imports` row) is never in the queue, even as a draft.
 
 **Filter.** `GET /v1/admin/offers?needs_review=true` returns exactly that set; `needs_review=false` returns everything
-else (the complement, so the two halves always partition the list); omitting it applies no filter. Anything that is not
-a boolean is 422. It combines with `status`, `search` and `category_id` (all are ANDed) and the paging. It is a
+else (the complement, so the two halves always partition the list); omitting it applies no filter. Any value pydantic cannot read
+as a boolean is 422; it reads `true`, `t`, `yes`, `y`, `on`, `1` as true and `false`, `f`, `no`, `n`, `off`, `0` as false
+(in any letter case), so the admin UI sends only `true`. It combines with `status`, `search` and `category_id` (all are ANDed) and the paging. It is a
 `LEFT JOIN` on `offer_imports` (one row per offer, `offer_id` is unique), so the page and the count see the same rule.
 
 **Rows and the offer read.** The list selects the join's columns in the same query (no query per row): each row
@@ -213,21 +214,25 @@ carries `import_provider` (null for an offer made by hand) and `source_changed_a
 `review_token`: the importer sets and clears the marker without changing the offer's content, so the token does not
 change with it.
 
-**Dismissing** (`POST /v1/admin/offers/{id}/dismiss-source-change`, `offers.publish`, body `{review_token}` validated
-like `VerifyRequest`): the editor says "I have seen that the source changed". In the service
+**Dismissing** (`POST /v1/admin/offers/{id}/dismiss-source-change`, `offers.publish`, body `{review_token, source_changed_at}`, the token
+validated like `VerifyRequest` and the marker an aware datetime): the editor says "I have seen that the source changed". In the service
 (`AdminOfferService.dismiss_source_change`) the order is the one of `verify`: offer row lock, `_require_unchanged`
 (409 `offer_changed`, nothing written), then the provenance row is read `FOR UPDATE` and, if there is none or its marker
-is already null (or the offer is archived), **409 `illegal_transition`**, nothing written. Otherwise
+is already null, **409 `illegal_transition`**, nothing written (an archived offer is refused the same way before the
+provenance row is read, by `require_editable`). Then the stored marker must equal the request's `source_changed_at`
+(compared as aware datetimes, so the zone it is written in does not matter), else **409 `offer_changed`**, nothing
+written. Otherwise
 `source_changed_at` becomes NULL, one audit row `admin.offers.source_change_dismissed` (resource `offers`, `before` and
 `after` hold `source_changed_at`, `details` the provider and external id) is staged on the same session and the
 transaction commits once. The response carries `review_token` and `previous_review_token` computed before the commit;
 the two are equal, since the offer itself did not change. Only that one column changes. What it leaves alone, and why,
 is in [backend-awin-import.md](backend-awin-import.md#the-review-queue-and-the-importers-hashes).
 
-**Not covered.** The token does not include the marker, so a dismissal clears whatever marker is set when it runs: if
-the importer noted a newer source change between the editor's page load and the click, that newer one is cleared too
-(the next run only flags a source that differs from the one recorded). A body field naming the marker's timestamp would
-close that gap; it is not in the contract.
+**Why the request carries the marker.** The review token does not include `source_changed_at` (the importer sets and
+clears it without changing the offer's content). Without the marker in the request, an editor who loaded the page and
+then clicked Dismiss would clear a newer source change the importer noted in between. The page sends back the
+`provenance.source_changed_at` it loaded, unchanged, and a stored marker that differs is the same 409 `offer_changed` a
+stale token gets.
 
 ## Slugs
 
