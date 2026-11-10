@@ -208,6 +208,19 @@ describe('affiliate disclosure page: sponsored listings', () => {
     expect(container.textContent).toMatch(/marked as a paid link for search engines/i);
   });
 
+  it('explains both labels and says a sponsored listing with an affiliate link shows both', () => {
+    const { container } = render(<AffiliatePage />);
+
+    expect(screen.getByRole('heading', { name: 'Two labels, two meanings' })).toBeInTheDocument();
+    expect(container.textContent).toMatch(
+      /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled “Sponsored”/i
+    );
+    expect(container.textContent).toMatch(
+      /links that earn Freejoy a commission through an affiliate network carry an “Ad” label/i
+    );
+    expect(container.textContent).toMatch(/also has an affiliate link shows both labels/i);
+  });
+
   it('no longer says paid placements are not planned, and claims nothing about sponsors being held to other standards', () => {
     const { container } = render(<AffiliatePage />);
     const section: string[] = [];

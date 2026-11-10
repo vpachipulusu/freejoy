@@ -126,7 +126,7 @@ domain outside the allowed research list; it is treated here as a product decisi
 
 - **Rule:** Any placement a brand pays for beyond commission is advertising and must be labelled as such (CAP 2.1; S6 says any reward including commission counts as payment).
 - **Source:** S1 rule 2.1; S6.
-- **Freejoy:** No paid placement exists; the affiliate page now says none is planned and that any would be labelled.
+- **Freejoy:** Paid listings exist as a data model and a label (FREEJ-53): an offer whose commercial basis is `SPONSORED` (the retailer pays, or gives Freejoy any other benefit, for the listing or its placement) carries a text "Sponsored" badge on its card and page (role `note`, named "Sponsored listing", visible at 320px) and a sentence beside the button. Links that earn commission through a network keep the separate "Ad" label. A sponsored offer with an affiliate link shows both. The label cannot be hidden by any setting, and a featured offer can still be sponsored. `/affiliate-disclosure` has a "Sponsored listings" section. Whether any sponsorship is actually sold, and the exact wording, are for the reviewer.
 - **Status:** `Needs professional review`
 
 ---
@@ -577,7 +577,7 @@ these. Engineers must not.
 
 1. Final wording of the "Ad" label and the commission sentence next to each affiliate link (A2), and whether
    non-commission listings need any label.
-2. Whether any paid placement, sponsorship or network-specific disclosure terms apply (A6, affiliate network contract).
+2. Whether the Sponsored label and the sponsored listings wording are sufficient, and whether network-specific disclosure terms apply (A6, affiliate network contract).
 3. The replacement wording for the "zero spend", "for £0" and "no spend" slogans (B7) and the other FREEJ-30 rewordings listed in I.3 (D-01 to D-09, D-11 to D-13).
 4. How the DMCC Act subscription-contract rules affect the way trial offers are described (B3).
 5. Whether the soft opt-in is unavailable for alerts, as reasoned in D1, and the final consent wording (D2).

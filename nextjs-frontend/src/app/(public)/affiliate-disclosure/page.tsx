@@ -61,6 +61,20 @@ export default function AffiliateDisclosurePage() {
         like every other link to a brand. A listing without the &ldquo;Sponsored&rdquo; label is not
         sponsored.
       </p>
+      <h2>Two labels, two meanings</h2>
+      <ul>
+        <li>
+          &ldquo;Sponsored&rdquo;: a listing that a retailer pays for, or gives Freejoy any other
+          benefit for, is labelled &ldquo;Sponsored&rdquo;.
+        </li>
+        <li>
+          &ldquo;Ad&rdquo;: links that earn Freejoy a commission through an affiliate network carry
+          an &ldquo;Ad&rdquo; label.
+        </li>
+      </ul>
+      <p>
+        The two are separate. A sponsored listing that also has an affiliate link shows both labels.
+      </p>
       <h2>What we aim to keep separate</h2>
       <p>
         We do not plan to let commission change the terms, price or postage shown for an offer. A
