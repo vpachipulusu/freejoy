@@ -27,6 +27,21 @@ The unauthenticated auth actions and the `/api/auth/signup`, `/api/auth/login` a
 - Store real values in the team's secret store. Validate required secrets at startup.
 - If a secret is exposed, rotate it immediately.
 
+## Partner API keys
+
+The partner API ([ADR-013](../adr/0013-partner-api.md), [backend-partner-api.md](backend-partner-api.md)) is the one public caller of the backend that
+is not our Next.js server and not a signed-in user. Rules for keys:
+
+- A key is `fj_<env>_<key_id>_<secret>` with a 256-bit secret from `secrets`. It is shown once, in the response that creates it, and is
+  never stored (only its SHA-256), logged, audited, put in a toast or a URL. The backend logs the key id only, never the `Authorization`
+  header, the key or its hash. The audit redaction recognises the key prefix, so a key pasted into free text is redacted.
+- Only `Authorization: Bearer` carries it. A key sent together with `X-Internal-Key`, `X-Session-Token` or a `Cookie` is rejected. A partner
+  key opens nothing outside `/partner/v1` (a test calls every main-app route with one).
+- Authentication comes before routing and before the body, so an unauthenticated caller learns nothing about which routes exist.
+- The partner surface connects to the database as the restricted role `freejoy_partner` (`PARTNER_DATABASE_URL`), never the owner. Create it
+  from `fastapi_backend/commands/sql/partner_role.sql` (an owner step); the grants are listed in that file and proved by a Postgres test.
+- Treat a leaked key as compromised: revoke it on the merchant page (it stops on the next request) and issue another.
+
 ## E2E test accounts
 
 - `npm run test:setup` generates random emails and passwords, and writes them only to `.env.e2e.local`.

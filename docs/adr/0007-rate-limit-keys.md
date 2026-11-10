@@ -45,6 +45,12 @@ many IPs.
 - Keys: `rl:{scope}:{user|org}:{id}` for authenticated routes; sign-in, sign-up and password reset use
   `rl:auth:ip:{X-Client-IP}` and `rl:auth:email:{sha256(lowercased email)}`. Limits: auth 5 per 15 minutes,
   API 100 per minute, webhook 200 per minute (sliding window).
+- Partner API (FREEJ-57, [ADR-013](0013-partner-api.md)): keys `rl:partner_read:key:{key id}` (120 per minute, fails open),
+  `rl:partner_write:key:{key id}` (30 per minute, fails closed) and, for failed authentications,
+  `rl:partner_auth_failure:key:{presented key id}` or `rl:partner_auth_failure:malformed` (30 per minute, fails closed; counted only on
+  failure, so a valid key is never held up). Never keyed by client address: partner code does not read forwarded client-IP headers. The
+  enforcement helpers and the limiter singleton live in `app/core` (`rate_limit_enforcement.py`, `rate_limiter_provider.py`) so the partner
+  package, which imports only `app.core`, uses them; `app.api.rate_limit` and `app.api.deps` re-export the names.
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.
   Fail-closed policies (sign-in, data export, admin sync) get a 1 s deadline per identifier, because a cold
   connection to a distant region can exceed 200 ms and a fail-closed timeout locks users out. A fail-closed call

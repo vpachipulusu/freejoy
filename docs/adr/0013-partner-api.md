@@ -1,6 +1,6 @@
 # ADR-013: Partner API inside the backend
 
-- **Status:** Proposed (the decisions below were made by the product owner; this record awaits sign-off)
+- **Status:** Proposed (the decisions below were made by the product owner; this record awaits sign-off; updated by FREEJ-57)
 - **Date:** 2026-11-10
 - **Deciders:** product owner (pending)
 - **Amends:** [ADR-003](0003-nextjs-to-fastapi-authentication.md), [ADR-004](0004-backend-layering.md),
@@ -16,8 +16,9 @@ A separate partner project was considered and decided against: the owner wants o
 and one set of models. So partner endpoints live inside `fastapi_backend`. The risk this creates is the one this
 record manages: a retailer who holds a partner URL and a key must reach partner endpoints and nothing else.
 
-This story (FREEJ-56) builds the **empty, switched-off surface** and the proofs that keep it confined. There is
-no retailer-facing endpoint, no key, no authentication, no database role and no table yet.
+FREEJ-56 built the **empty, switched-off surface** and the proofs that keep it confined. FREEJ-57 added **per-merchant keys,
+partner authentication, the rate limits and the restricted database role**, with one harmless endpoint, `GET /partner/v1/me`,
+that proves the path. No offer can be touched yet (FREEJ-58, FREEJ-59).
 
 ## Decision
 
@@ -38,21 +39,26 @@ no retailer-facing endpoint, no key, no authentication, no database role and no 
   (a 307). The string match takes both, and compares the full path as well as the path below a `root_path`, so a
   runtime that serves the app under `root_path=/partner/v1` cannot slide `/partner/v1/health` into a main-app
   route. Being first, no main-app pattern such as `/{a}/v1/{b}` or `/{rest:path}` is tried before it.
-- **Authentication attached at the sub-app, not per route** (planned, FREEJ-57/58). A route added to the
-  sub-app cannot forget it.
-- **A credential and a store distinct from `X-Internal-Key`** (planned). A partner key is never accepted by an
-  internal route and the internal key is never accepted by a partner one. A request that carries both kinds of
-  credential is rejected, not resolved in favour of one.
+- **Authentication before routing, and attached at the sub-app** (FREEJ-57). `PartnerSurface` runs `PartnerAuthenticator` for every
+  request under the prefix while the switch is on, before routing and before the body, so an unknown path, a wrong method or a raw route gets
+  the same 401 as a real one and nothing about which routes exist is learned without a key (a FastAPI dependency alone does not run for a
+  404 or 405). While the switch is off the answer is the same 404 as before: the switch is checked first. `require_partner_key` is also a
+  dependency of the sub-app itself: it hands each route the `PartnerContext` the surface established, and a route added to the sub-app
+  cannot forget it.
+- **A credential and a store distinct from `X-Internal-Key`** (FREEJ-57). A partner key is never accepted by an
+  internal route and the internal key is never accepted by a partner one. A request that carries a partner key together with
+  `X-Internal-Key`, `X-Session-Token` or a `Cookie` is rejected, not resolved in favour of one. Unknown, revoked, malformed and wrong-environment
+  keys all give the same 401.
 - **No docs, no schema route and no CORS on the sub-app.** The partner contract is a committed file
   (`docs/partner/openapi.json`), not a served one. A retailer calls from a server, so no browser origin is allowed.
 - **`Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `X-Freejoy-Surface: partner`** on
   every partner response, errors and 404s included. Never `Set-Cookie`.
 - **The shared error envelope, with fixed messages.** Errors use `{"success": false, "error": "<message>"}`
-  (ADR-008). Not repeating the request back is a **convention, not something enforced**: the shared handler
+  (ADR-008). The shared handler
   (`app/core/errors.py`) passes a string `detail` and the exception's `headers` through unchanged, so code that
-  puts request text in a message or a header would echo it, and a 405 carries an `Allow` header. The surface
-  tests check the fixed messages of the cases that exist today (404, 413, 422, 500); a reviewer has to check new
-  handlers.
+  puts request text in a message or a header would echo it, and a 405 carries an `Allow` header. `tests/api/partner/test_partner_errors.py`
+  (FREEJ-57) checks every partner error body (401, 404, 405, 413, 422, 429, 500, 503) against a closed set of fixed messages and that none
+  echoes the path, a header, the key or the body.
 - **A body-size cap that the surface owns** (256 KiB, `app/partner/surface.py`), by the declared `Content-Length`
   and again by counting the bytes actually received. A missing or false length is not trusted and the surface
   does not buffer the body. Crossing the cap raises a private `BaseException` from `receive`, so application code
@@ -76,10 +82,10 @@ middleware, so a 500 would otherwise skip the headers.
 | Root `vercel.json`: one extra rewrite, `/partner/v1/(.*)` to the backend, before the catch-all | A request to the public domain reaching any backend path other than `/webhooks/stripe` and the partner prefix. `/partner/v1` itself, `/partner/v2/...`, `/partnerx/...`, `/v1/...`, `/docs` and `/openapi.json` go to the frontend. |
 | One mount, first in the route table, matching by string; no main-app route under `/partner` or able to match it | A request under the prefix being dispatched to an internal handler. The app never normalises `..`, `%2e%2e`, `%0A` or `//`; they stay inside the prefix and meet the sub-app's 404. |
 | `require_internal_key` on every main-app route (or an explicit allowlist) | A caller who reaches a main-app route by some other path, because a rewrite was widened or a hostname falls through, and has no internal key. |
-| A distinct credential, checked at the sub-app (planned) | A partner key doing anything on an internal route, and a stolen internal key doing anything as a partner. |
+| A distinct credential, checked before routing and at the sub-app (FREEJ-57) | A partner key doing anything on an internal route, and a stolen internal key doing anything as a partner. |
 | The surface wrapper | Cookies, CORS, caching, docs and oversized bodies on the partner surface; a switched-off surface answering anything but 404. |
 | Scoping every partner query to the key's merchant (planned) | One merchant reading or changing another's data. This is the second half of the invariant. |
-| A restricted database role through a separate session provider and `PARTNER_DATABASE_URL` (planned) | A bug in a partner handler reading or writing tables a partner never needs (users, sessions, billing). |
+| A restricted database role through a separate session provider and `PARTNER_DATABASE_URL` (FREEJ-57) | A bug in a partner handler reading or writing tables a partner never needs (users, sessions, billing). |
 
 ### The proofs that stay in the gate
 
@@ -107,8 +113,15 @@ All run in the normal `pytest` run, so `scripts/gate.sh` and CI carry them:
   middleware or streaming responses that read or ignore the body) and one error log per failing request. The
   surface test also pins the main app's middleware list (see the residual risks).
 - `tests/api/partner/test_partner_isolation.py` reads the source of every module in `app/partner/` and fails on any
-  import from `app` other than `app.core` and `app.partner`, on dynamic imports, and on a relative import that
-  climbs out of the package; and checks the mounted sub-app has the same routes the schema is generated from.
+  import from `app` other than `app.core` and `app.partner`, on dynamic imports, on a relative import that
+  climbs out of the package, and on any use of the internal credentials, the client-IP helpers or the owner session; and checks the
+  mounted sub-app has the same routes the schema is generated from. Because `app/partner` may not import models, the key format, the
+  rate-limit enforcement helpers and the limiter singleton live in `app/core`, and the key lookup uses SQLAlchemy Core table definitions
+  in `app/partner/keys.py` that `test_partner_table_definitions.py` checks against the ORM metadata.
+- FREEJ-57 added `test_partner_auth_attached.py`, `test_partner_credentials.py`, `test_partner_auth.py`, `test_partner_limits.py`,
+  `test_partner_errors.py`, `tests/api/test_partner_key_rejected_elsewhere.py` (a valid partner key opens nothing on any main-app route),
+  the key lifecycle e2e tests and `tests/core/test_partner_role_e2e.py` (the restricted role, on Postgres). See
+  [backend-partner-api.md](../developer/backend-partner-api.md).
 - `tests/commands/test_partner_openapi_schema.py` and `commands/check_partner_openapi_schema.py` (pre-commit and
   `scripts/gate.sh`): every path of the partner schema starts with `/partner/v1/`; the internal schema has no
   `/partner` path; the committed partner schema is current.
@@ -125,7 +138,7 @@ at the boundary, and the triggers below.
 
 **Unauthenticated traffic reaches the backend function even while the surface is off.** The rewrite sends every
 `/partner/v1/...` request to the backend, which answers 404 itself. That costs function time and concurrency shared
-with the internal API, and nothing rate-limits it (the partner rate-limit policies come with FREEJ-57/58). The first
+with the internal API, and nothing rate-limits it with the switch (the partner rate-limit policies, keyed by key id, came with FREEJ-57; a failed-authentication limit bounds lookups per key id, and the edge rule covers a caller that rotates ids). The first
 mitigation is a Vercel Firewall rate rule on `/partner/v1/` (a launch precondition below).
 
 **The body is buffered by Vercel before the cap runs.** The surface does not buffer it, but the platform may hold the
@@ -149,8 +162,9 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
    surface is off. It fails if the backend answers a request under or around the prefix without the
    `X-Freejoy-Surface` header. Read the first production run, because it is the first time these paths meet
    Vercel's edge (below).
-4. Do not set `PARTNER_API_ENABLED=true` in production until the key, scoping and role stories (FREEJ-57 to 59)
-   are in and reviewed.
+4. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`).
+   Startup refuses `PARTNER_API_ENABLED=true` without it.
+5. Do not set `PARTNER_API_ENABLED=true` in production until the scoping story (FREEJ-58) and the submissions story (FREEJ-59) are in and reviewed.
 
 ### Amendments to earlier records
 
@@ -162,8 +176,10 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
 - **ADR-004.** The layering gains `app/partner/`, a package that imports only `app.core` and itself (checked by a
   test). The lint rule ADR-004 described (`TID251`) was not configured when this record was written; FREEJ-56
   configured it, and ADR-004's text now says exactly what it bans.
-- **ADR-007.** Partner endpoints get their own rate-limit policies, keyed by key id (and, where relevant,
-  merchant), not by user or organisation. None exist yet (FREEJ-57/58).
+- **ADR-007.** Partner endpoints get their own rate-limit policies, keyed by key id, never by user, organisation or client address
+  (partner code does not read forwarded client-IP headers): `PARTNER_READ_POLICY` (fails open), `PARTNER_WRITE_POLICY` (fails closed) and
+  `PARTNER_AUTH_FAILURE_POLICY` (failed authentications, per presented key id, one shared bucket for malformed keys; fails closed). The
+  enforcement helpers and the limiter singleton moved to `app/core` so the partner package can use them.
 - **ADR-008.** The partner contract is a separate, versioned document (`docs/partner/openapi.json`,
   prefix `/partner/v1`) and is not part of `nextjs-frontend/openapi.json` or the generated client. The envelope is
   the same. A breaking change to it is a new prefix (`/partner/v2`), not an edit.
@@ -171,13 +187,16 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   names an exact prefix, and the service receives the original path, so the sub-app is mounted under the same
   prefix.
 
-### Planned design for later stories (not built here)
+### Keys and the restricted role (FREEJ-57), and the design still to come
 
-- **Key format:** `Authorization: Bearer fj_<env>_<key_id>_<secret>`. Only the SHA-256 of the secret is stored; the
-  key id selects the row, and the comparison is constant time.
-- **Restricted database role:** a role that can touch only the partner tables, reached through a separate
-  `SessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam).
-- **Tables:** `partner_api_keys` and `partner_submissions`.
+- **Key format (built):** `Authorization: Bearer fj_<env>_<key_id>_<secret>`; `key_id` and `secret` from fixed alphabets without `_` and
+  fixed lengths, one anchored ASCII pattern, an `<env>` that is not the running environment is refused. The secret is 32 bytes from
+  `secrets`. The SHA-256 of the **whole key** is stored (the secret is 256 bits from a CSPRNG, so nothing needs a slow hash or a salt), the key id
+  selects the row, the comparison is constant time, and an unknown id costs the same comparison against a dummy.
+- **Restricted database role (built):** `freejoy_partner`, created from `fastapi_backend/commands/sql/partner_role.sql` by the owner, reached through
+  `PartnerSessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam; required when the switch is on). `SELECT` and `UPDATE (last_used_at)` on
+  `partner_api_keys`, `SELECT` on `merchants`, `INSERT` only on `audit_logs`; nothing else, no DDL.
+- **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (FREEJ-58).
 - **Submissions create drafts only.** A partner can never publish; the existing review and publish rules stay
   ours.
 
