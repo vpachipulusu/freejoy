@@ -9,6 +9,16 @@ Rules enforced here, not only in the router (see ``offer_lifecycle`` for the sta
   ``ck_offers_published_is_verified`` is the backstop.
 * A published offer keeps meeting the publish rules: edits and link changes that would break
   them (category disabled, no destination left, ``end_at`` in the past) are refused.
+* ``verify`` and ``publish`` are the steps that say "a person reviewed this": they need the
+  ``review_token`` the admin read returned (``offer_fingerprint.review_token``: a hash of the
+  offer's content, its links in click order and its merchant's and category's public fields) and
+  refuse with ``OfferChanged`` when it no longer matches. The token is recomputed after the offer
+  row is locked and the category and merchant are read FOR SHARE (lock order: offer, category,
+  merchant, as in publish). Writers of the offer or its links (editor edits, link edits, the Awin
+  importer, the expiry job) take the offer lock first and edits of the category or merchant take
+  their own row lock, so none can change what was compared before the transition commits.
+  ``unpublish``, ``expire`` and ``archive`` only take content off the public site (or end an
+  offer's life), claim nothing was reviewed and need no token.
 * URLs are validated here (https only, see ``app.core.catalogue_urls``); the slug is derived
   from the title unless the editor supplies one, and cannot be changed afterwards.
 """
@@ -29,6 +39,7 @@ from app.repositories.admin_offers import (
     OfferFilters,
     OfferPage,
     OfferRecord,
+    ReviewRefs,
 )
 from app.services.admin_catalogue_common import (
     AuditRecorder,
@@ -45,9 +56,11 @@ from app.services.admin_catalogue_common import (
 from app.services.admin_catalogue_errors import (
     CatalogueNotFound,
     InvalidInput,
+    OfferChanged,
     PublishBlocked,
     SlugTaken,
 )
+from app.services.offer_fingerprint import review_token as compute_review_token
 from app.services.offer_lifecycle import (
     OfferAction,
     PublishFacts,
@@ -75,6 +88,9 @@ class OfferStore(Protocol):
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
     ) -> OfferPage: ...
+    async def review_refs(
+        self, category_id: str, merchant_id: str, *, share: bool = False
+    ) -> ReviewRefs: ...
     async def get(self, offer_id: str, *, lock: bool = False) -> OfferRecord | None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
@@ -97,6 +113,10 @@ class OfferStore(Protocol):
 class OfferDetail:
     offer: OfferRecord
     links: list[AffiliateLinkRecord]
+    review_token: str
+    # Writes only: the token of the stored state the write replaced, read under the same row lock. When it is
+    # not the token the editor loaded, somebody else changed the offer first.
+    previous_review_token: str | None = None
 
 
 def _host(url: str) -> str:
@@ -135,7 +155,7 @@ class AdminOfferService:
         offer = await self.store.get(offer_id)
         if offer is None:
             raise CatalogueNotFound("offer")
-        return OfferDetail(offer, await self.store.list_links(offer_id))
+        return await self._detail(offer)
 
     async def create_offer(
         self, actor: AdminContext, data: Mapping[str, Any]
@@ -161,8 +181,9 @@ class AdminOfferService:
             resource_id=created.id,
             after=_snapshot(created),
         )
+        detail = await self._detail(created)
         await self.session.commit()
-        return OfferDetail(created, [])
+        return detail
 
     async def update_offer(
         self, actor: AdminContext, offer_id: str, changes: Mapping[str, Any]
@@ -170,6 +191,7 @@ class AdminOfferService:
         if not changes or not changes.keys() <= EDITABLE_FIELDS:
             raise ValueError("Invalid offer fields")
         current = await self._locked(offer_id)
+        previous = await self._stored_token(current)
         require_editable(current.status)
         values = clean_urls(changes, URL_FIELDS)
         merged = replace(current, **values)
@@ -191,16 +213,29 @@ class AdminOfferService:
             after=after,
             details={"fields": sorted(values)},
         )
+        detail = await self._detail(updated, previous)
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return detail
 
     async def transition(
-        self, actor: AdminContext, offer_id: str, action: OfferAction
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        action: OfferAction,
+        review_token: str | None = None,
     ) -> OfferDetail:
-        """publish, unpublish, expire or archive (``verify`` has its own method)."""
+        """publish, unpublish, expire or archive (``verify`` has its own method).
+
+        ``publish`` needs the ``review_token`` of the offer as the editor loaded it; the other
+        actions ignore it.
+        """
         if action is OfferAction.VERIFY:
             raise ValueError("Use verify")
         current = await self._locked(offer_id)
+        if action is OfferAction.PUBLISH:
+            previous = await self._require_unchanged(current, review_token)
+        else:
+            previous = await self._stored_token(current)
         target = next_status(current.status, action)
         if action is OfferAction.PUBLISH:
             await self._require_publishable(current)
@@ -213,13 +248,19 @@ class AdminOfferService:
             before={"status": current.status.value},
             after={"status": target.value},
         )
+        detail = await self._detail(updated, previous)
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return detail
 
     async def verify(
-        self, actor: AdminContext, offer_id: str, note: str | None
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        note: str | None,
+        review_token: str | None,
     ) -> OfferDetail:
         current = await self._locked(offer_id)
+        previous = await self._require_unchanged(current, review_token)
         next_status(current.status, OfferAction.VERIFY)  # refuses an archived offer
         verified_at = self.clock()
         updated = await self.store.update(offer_id, {"last_verified_at": verified_at})
@@ -232,8 +273,9 @@ class AdminOfferService:
             after={"last_verified_at": verified_at},
             details={"note": note} if note else None,
         )
+        detail = await self._detail(updated, previous)
         await self.session.commit()
-        return OfferDetail(updated, await self.store.list_links(offer_id))
+        return detail
 
     async def create_link(
         self, actor: AdminContext, offer_id: str, data: Mapping[str, Any]
@@ -323,6 +365,40 @@ class AdminOfferService:
         if offer is None:
             raise CatalogueNotFound("offer")
         return offer
+
+    async def _detail(
+        self, offer: OfferRecord, previous: str | None = None
+    ) -> OfferDetail:
+        """The offer with its links and the review token of exactly that snapshot.
+
+        Write paths call it before ``commit()``, inside the transaction, so a failure rolls the write back.
+        """
+        links = await self.store.list_links(offer.id)
+        refs = await self.store.review_refs(offer.category_id, offer.merchant_id)
+        return OfferDetail(
+            offer, links, compute_review_token(offer, links, refs), previous
+        )
+
+    async def _stored_token(self, locked: OfferRecord) -> str:
+        """The token of the state stored now, read under the offer's row lock.
+
+        Order: links (the offer lock covers every writer of them), then the category and the merchant
+        FOR SHARE, so an edit of either waits for this transaction.
+        """
+        links = await self.store.list_links(locked.id)
+        refs = await self.store.review_refs(
+            locked.category_id, locked.merchant_id, share=True
+        )
+        return compute_review_token(locked, links, refs)
+
+    async def _require_unchanged(self, locked: OfferRecord, token: str | None) -> str:
+        """The editor's token must match what is stored now; returns it (the state the write replaces)."""
+        if not token:
+            raise InvalidInput("review_token_required")
+        current = await self._stored_token(locked)
+        if current != token:
+            raise OfferChanged()
+        return current
 
     async def _require_references(self, category_id: str, merchant_id: str) -> None:
         if await self.store.category_enabled(category_id) is None:

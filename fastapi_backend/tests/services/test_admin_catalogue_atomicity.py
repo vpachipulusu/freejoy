@@ -146,8 +146,11 @@ async def test_a_failing_audit_write_means_no_commit_for_create_transition_and_t
 
     with pytest.raises(RuntimeError):
         await offer_service.create_offer(ACTOR, OFFER_DATA)
+    token = (await offer_service.get_offer("off1")).review_token
     with pytest.raises(RuntimeError):
-        await offer_service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+        await offer_service.transition(
+            ACTOR, "off1", OfferAction.PUBLISH, review_token=token
+        )
     with pytest.raises(RuntimeError):
         await categories.set_enabled(ACTOR, "cat1", False)
 

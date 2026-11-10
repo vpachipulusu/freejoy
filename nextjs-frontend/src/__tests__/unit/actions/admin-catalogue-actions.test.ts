@@ -22,13 +22,14 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   revalidateCatalogue: vi.fn(),
   logError: vi.fn(),
+  logWarn: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath, revalidateTag: vi.fn() }));
 vi.mock('@/lib/catalogue/revalidate', () => ({ revalidateCatalogue: mocks.revalidateCatalogue }));
 vi.mock('@/lib/api/admin-guard', () => ({ requireAdminSession: mocks.requireAdminSession }));
 vi.mock('@/lib/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: mocks.logError },
+  logger: { info: vi.fn(), warn: mocks.logWarn, error: mocks.logError },
 }));
 vi.mock('@/lib/api/admin-offers', async () => {
   const actual =
@@ -82,7 +83,11 @@ import { emptyOfferFormValues } from '@/lib/admin-catalogue/offer-schema';
 import { emptyCategoryFormValues } from '@/lib/admin-catalogue/category-schema';
 import { emptyMerchantFormValues } from '@/lib/admin-catalogue/merchant-schema';
 import { ADMIN_FORBIDDEN_MESSAGE, ADMIN_UNAVAILABLE_MESSAGE } from '@/lib/api/admin-errors';
-import { INVALID_FORM_MESSAGE, OFFER_NOT_FOUND_MESSAGE } from '@/lib/api/admin-catalogue-errors';
+import {
+  INVALID_FORM_MESSAGE,
+  OFFER_CHANGED_MESSAGE,
+  OFFER_NOT_FOUND_MESSAGE,
+} from '@/lib/api/admin-catalogue-errors';
 
 const ok = <T>(data: T) => ({ success: true as const, data });
 const fail = (status?: number, code?: string, error = SECRET) => ({
@@ -97,7 +102,11 @@ const OFFER = {
   slug: 'free-coffee',
   status: 'PUBLISHED',
   last_verified_at: '2026-01-02T00:00:00Z',
+  review_token: 'f'.repeat(64),
+  previous_review_token: 'e'.repeat(64),
 };
+
+const TOKEN = 'tok-1_ABC';
 
 const offerInput = {
   ...emptyOfferFormValues(),
@@ -122,7 +131,7 @@ const merchantInput = { ...emptyMerchantFormValues(), name: 'Acme' };
 const ALL_ACTIONS: ReadonlyArray<[string, () => Promise<unknown>]> = [
   ['createOfferAction', () => createOfferAction(offerInput)],
   ['updateOfferAction', () => updateOfferAction('o1', offerInput)],
-  ['offerLifecycleAction', () => offerLifecycleAction('o1', 'publish')],
+  ['offerLifecycleAction', () => offerLifecycleAction('o1', 'publish', TOKEN)],
   ['createCategoryAction', () => createCategoryAction(categoryInput)],
   ['updateCategoryAction', () => updateCategoryAction('c1', categoryInput)],
   ['setCategoryEnabledAction', () => setCategoryEnabledAction('c1', false)],
@@ -255,7 +264,15 @@ describe('offer actions', () => {
 
     const result = await updateOfferAction('o1', offerInput);
 
-    expect(result).toMatchObject({ success: true, data: { id: 'o1', status: 'PUBLISHED' } });
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        id: 'o1',
+        status: 'PUBLISHED',
+        reviewToken: 'f'.repeat(64),
+        previousReviewToken: 'e'.repeat(64),
+      },
+    });
     expect(mocks.patchAdminOffer.mock.calls[0][0]).toBe('o1');
     expect('slug' in mocks.patchAdminOffer.mock.calls[0][1]).toBe(false);
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers');
@@ -287,7 +304,7 @@ describe('offer actions', () => {
     async (action) => {
       mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
 
-      const result = await offerLifecycleAction('o1', action);
+      const result = await offerLifecycleAction('o1', action, TOKEN);
 
       expect(result).toEqual({
         success: true,
@@ -295,9 +312,14 @@ describe('offer actions', () => {
           id: 'o1',
           slug: 'free-coffee',
           status: 'PUBLISHED',
+          reviewToken: 'f'.repeat(64),
+          previousReviewToken: 'e'.repeat(64),
         },
       });
-      expect(mocks.runAdminOfferAction).toHaveBeenCalledWith('o1', action);
+      expect(mocks.runAdminOfferAction).toHaveBeenCalledWith(
+        'o1',
+        action === 'publish' || action === 'verify' ? { action, reviewToken: TOKEN } : { action }
+      );
       expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers');
       expect(mocks.revalidateCatalogue).toHaveBeenCalledWith([
         '/freebies',
@@ -326,7 +348,7 @@ describe('offer actions', () => {
       fail(422, 'publish_blocked', 'The offer cannot be published yet: it has not been verified')
     );
 
-    const result = await offerLifecycleAction('o1', 'publish');
+    const result = await offerLifecycleAction('o1', 'publish', TOKEN);
 
     expect(result).toEqual({
       success: false,
@@ -343,14 +365,14 @@ describe('offer actions', () => {
     expect(JSON.stringify(refused)).not.toContain('SECRET');
 
     mocks.runAdminOfferAction.mockResolvedValueOnce(fail(500));
-    await offerLifecycleAction('o1', 'publish');
+    await offerLifecycleAction('o1', 'publish', TOKEN);
     expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain('SECRET');
     expect(mocks.logError).toHaveBeenCalledTimes(1);
   });
 
   it('reports a missing offer with the curated not-found message', async () => {
     mocks.runAdminOfferAction.mockResolvedValue(fail(404, 'not_found'));
-    await expect(offerLifecycleAction('o1', 'verify')).resolves.toEqual({
+    await expect(offerLifecycleAction('o1', 'verify', TOKEN)).resolves.toEqual({
       success: false,
       error: OFFER_NOT_FOUND_MESSAGE,
     });
@@ -362,7 +384,7 @@ describe('offer actions', () => {
       throw new Error(SECRET);
     });
 
-    const result = await offerLifecycleAction('o1', 'publish');
+    const result = await offerLifecycleAction('o1', 'publish', TOKEN);
 
     expect(result.success).toBe(true);
     expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain('SECRET');
@@ -370,9 +392,168 @@ describe('offer actions', () => {
 
   it('skips the offer page refresh for a slug that is not a plain path segment', async () => {
     mocks.runAdminOfferAction.mockResolvedValue(ok({ ...OFFER, slug: 'Bad Slug/../' }));
-    await offerLifecycleAction('o1', 'publish');
+    await offerLifecycleAction('o1', 'publish', TOKEN);
     expect(mocks.revalidateCatalogue).toHaveBeenCalledWith(['/freebies']);
   });
+});
+
+describe('the tokens a write returns', () => {
+  it('hands back the token of the state a save replaced, for the page to compare', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok(OFFER));
+
+    const result = await updateOfferAction('o1', offerInput);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { reviewToken: 'f'.repeat(64), previousReviewToken: 'e'.repeat(64) },
+    });
+  });
+
+  it.each(['has space', 'x;y', '', 'z'.repeat(129), 5, null])(
+    'drops a token from the API that is not made of plain characters (%j)',
+    async (bad) => {
+      mocks.runAdminOfferAction.mockResolvedValue(
+        ok({ ...OFFER, review_token: bad, previous_review_token: bad })
+      );
+      mocks.patchAdminOffer.mockResolvedValue(
+        ok({ ...OFFER, review_token: bad, previous_review_token: bad })
+      );
+
+      const step = await offerLifecycleAction('o1', 'expire');
+      const save = await updateOfferAction('o1', offerInput);
+
+      for (const result of [step, save]) {
+        expect(result).toMatchObject({ success: true });
+        if (result.success) {
+          expect(result.data.reviewToken).toBeUndefined();
+          expect(result.data.previousReviewToken).toBeUndefined();
+        }
+      }
+    }
+  );
+});
+
+describe('the review token on publish and verify', () => {
+  it.each(['publish', 'verify'] as const)(
+    '%s without a token sends nothing and says to review the offer again',
+    async (action) => {
+      const result = await offerLifecycleAction('o1', action);
+
+      expect(result).toEqual({ success: false, error: OFFER_CHANGED_MESSAGE });
+      expect(mocks.runAdminOfferAction).not.toHaveBeenCalled();
+      expect(mocks.revalidateCatalogue).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['', ' ', 'a b', '../x', 'x'.repeat(129), 'tok;drop', 5, null, {}])(
+    'refuses the token %j before any backend call',
+    async (token) => {
+      const result = await offerLifecycleAction('o1', 'publish', token as never);
+
+      expect(result).toEqual({ success: false, error: OFFER_CHANGED_MESSAGE });
+      expect(mocks.runAdminOfferAction).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['unpublish', 'expire', 'archive'] as const)(
+    '%s needs no token and sends none',
+    async (action) => {
+      mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
+
+      const result = await offerLifecycleAction('o1', action);
+
+      expect(result.success).toBe(true);
+      expect(mocks.runAdminOfferAction).toHaveBeenCalledWith('o1', { action });
+    }
+  );
+
+  it.each(['publish', 'verify'] as const)(
+    'on 409 offer_changed %s shows the curated message, refreshes the admin pages and never the public site',
+    async (action) => {
+      mocks.runAdminOfferAction.mockResolvedValue(fail(409, 'offer_changed'));
+
+      const result = await offerLifecycleAction('o1', action, TOKEN);
+
+      expect(result).toEqual({
+        success: false,
+        error: 'This offer changed since you opened it. Review it again.',
+        reason: 'offer_changed',
+      });
+      expect(JSON.stringify(result)).not.toContain('SECRET');
+      expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers');
+      expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/offers/o1');
+      expect(mocks.revalidateCatalogue).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not refresh the admin pages for a refusal that is not offer_changed', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(fail(409, 'illegal_transition'));
+
+    await offerLifecycleAction('o1', 'publish', TOKEN);
+
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('answers a 422 from the backend with a curated message and no backend text', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(fail(422));
+
+    const result = await offerLifecycleAction('o1', 'publish', TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Some values were rejected. Check the form and try again.',
+    });
+  });
+
+  it('maps a review_token_required answer to the same review-again message, without a reason', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(fail(422, 'review_token_required'));
+
+    const result = await offerLifecycleAction('o1', 'verify', TOKEN);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'This offer changed since you opened it. Review it again.',
+    });
+  });
+
+  it('logs a missing or malformed token as a warning with the action only, never the token', async () => {
+    await offerLifecycleAction('o1', 'publish', 'bad token;DROP');
+    await offerLifecycleAction('o1', 'verify');
+
+    expect(mocks.logWarn).toHaveBeenCalledTimes(2);
+    expect(mocks.logWarn).toHaveBeenNthCalledWith(
+      1,
+      'Admin offer action: review token missing or malformed',
+      { action: 'publish' }
+    );
+    expect(JSON.stringify(mocks.logWarn.mock.calls)).not.toContain('DROP');
+  });
+
+  it('accepts a realistic 64-character hex token', async () => {
+    mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
+    const token = '0123456789abcdef'.repeat(4);
+
+    const result = await offerLifecycleAction('o1', 'publish', token);
+
+    expect(result.success).toBe(true);
+    expect(mocks.runAdminOfferAction).toHaveBeenCalledWith('o1', {
+      action: 'publish',
+      reviewToken: token,
+    });
+  });
+
+  it.each(['unpublish', 'expire', 'archive'] as const)(
+    'ignores a garbage token passed with %s and sends the call without one',
+    async (action) => {
+      mocks.runAdminOfferAction.mockResolvedValue(ok(OFFER));
+
+      const result = await offerLifecycleAction('o1', action, 'garbage token;;' as string);
+
+      expect(result.success).toBe(true);
+      expect(mocks.runAdminOfferAction).toHaveBeenCalledWith('o1', { action });
+      expect(mocks.logWarn).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe('category actions', () => {

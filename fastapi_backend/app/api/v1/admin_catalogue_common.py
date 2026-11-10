@@ -19,6 +19,7 @@ from app.services.admin_catalogue_errors import (
     CatalogueError,
     CatalogueNotFound,
     IllegalTransition,
+    OfferChanged,
     PublishBlocked,
 )
 
@@ -90,9 +91,11 @@ INVALID_MESSAGES = {
     "unknown_merchant": "The merchant does not exist",
     "unknown_provider": "The provider is not recognised",
     "destination_not_allowed": "Destination host is not allowed for this provider",
+    "review_token_required": "Send the review token from the offer you reviewed",
 }
 SLUG_TAKEN = "That slug is already in use"
 ILLEGAL_TRANSITION = "Operation not allowed in the current state"
+OFFER_CHANGED = "The offer changed after it was loaded: review it again"
 PUBLISH_BLOCKED = "The offer cannot be published yet"
 PUBLISH_BLOCKERS = {
     "category_disabled": "its category is disabled",
@@ -111,6 +114,8 @@ def catalogue_http_error(exc: CatalogueError) -> HTTPException:
         )
     if isinstance(exc, IllegalTransition):
         return CodedHTTPException(409, ILLEGAL_TRANSITION, exc.code)
+    if isinstance(exc, OfferChanged):
+        return CodedHTTPException(409, OFFER_CHANGED, exc.code)
     if isinstance(exc, PublishBlocked):
         reasons = "; ".join(
             PUBLISH_BLOCKERS.get(reason, reason) for reason in exc.reasons

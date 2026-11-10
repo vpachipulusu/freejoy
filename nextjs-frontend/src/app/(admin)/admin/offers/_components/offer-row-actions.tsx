@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { MoreHorizontal, Pencil } from 'lucide-react';
+import { ClipboardCheck, MoreHorizontal, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import {
   availableOfferActions,
   OFFER_ACTION_LABELS,
   type OfferAction,
+  isReviewedOfferAction,
   type OfferStatus,
 } from '@/lib/admin-catalogue/offer-status';
 import { ArchiveDialog } from './archive-dialog';
@@ -36,7 +37,11 @@ export function OfferRowActions({ offerId, offerTitle, status }: OfferRowActions
   const { run, isPending } = useOfferAction();
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const actions = availableOfferActions(status);
+  // Publish and Mark verified approve an offer, which needs the whole offer in front of the editor (description,
+  // steps, links, source URL). This list shows none of them, so those steps live on the offer's own page.
+  const allowed = availableOfferActions(status);
+  const actions = allowed.filter((action) => !isReviewedOfferAction(action));
+  const canReview = allowed.some(isReviewedOfferAction);
 
   function choose(action: OfferAction): void {
     if (isPending) return;
@@ -70,6 +75,14 @@ export function OfferRowActions({ offerId, offerTitle, status }: OfferRowActions
               Edit
             </Link>
           </DropdownMenuItem>
+          {canReview ? (
+            <DropdownMenuItem asChild className="min-h-11">
+              <Link href={`/admin/offers/${offerId}`} className="flex items-center">
+                <ClipboardCheck aria-hidden="true" className="mr-2 h-4 w-4" />
+                Review
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
           {actions.length > 0 ? <DropdownMenuSeparator /> : null}
           {actions.map((action) => (
             <DropdownMenuItem

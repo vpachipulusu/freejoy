@@ -17,12 +17,15 @@ type FailedResult = Extract<ApiResult<unknown>, { success: false }>;
 export const OFFER_NOT_FOUND_MESSAGE = 'That offer no longer exists. Go back to the list.';
 export const CATEGORY_NOT_FOUND_MESSAGE = 'That category no longer exists. Go back to the list.';
 export const MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists. Go back to the list.';
+export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Wait a minute and try again.';
 export const INVALID_INPUT_MESSAGE = 'Some values were rejected. Check the form and try again.';
 export const INVALID_FORM_MESSAGE = 'Check the highlighted fields and try again.';
 
 const CODE_MESSAGES: Record<string, string> = {
   slug_taken: 'That slug is already in use. Choose another.',
+  offer_changed: OFFER_CHANGED_MESSAGE,
+  review_token_required: OFFER_CHANGED_MESSAGE,
   illegal_transition:
     'That change is not allowed for an offer in its current status. Refresh the page and try again.',
   invalid_url: 'A web address was rejected. Use a full https:// address.',

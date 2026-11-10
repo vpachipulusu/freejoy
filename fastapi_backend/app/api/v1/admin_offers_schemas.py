@@ -32,6 +32,9 @@ from app.services.admin_offers import OfferDetail
 MAX_PARAGRAPHS = 20
 MAX_STEPS = 20
 MAX_POSTAGE_MINOR = 1_000_000
+ReviewToken = Annotated[
+    str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+]
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 Title = Annotated[str, line(200)]
 Summary = Annotated[str, line(300)]
@@ -130,9 +133,18 @@ class UpdateOfferRequest(BaseModel):
         return self
 
 
+class PublishRequest(BaseModel):
+    """Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken
+
+
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    review_token: ReviewToken
     note: Annotated[str, line(500)] | None = None
 
 
@@ -191,6 +203,7 @@ class OfferSummaryOut(BaseModel):
 
 
 class OfferOut(OfferSummaryOut):
+    review_token: str
     summary: str
     description: list[str]
     image_tint: str
@@ -212,6 +225,16 @@ class OfferOut(OfferSummaryOut):
     links: list[AffiliateLinkOut]
 
 
+class OfferWriteOut(OfferOut):
+    """The offer after a write, plus the token of the state the write replaced.
+
+    Read under the same row lock, before the write. If it is not the token the editor loaded, somebody else
+    changed the offer first and the response already contains their change.
+    """
+
+    previous_review_token: str
+
+
 class OffersPage(BaseModel):
     offers: list[OfferSummaryOut]
     total_count: int
@@ -229,6 +252,11 @@ class OfferResponse(BaseModel):
     data: OfferOut
 
 
+class OfferWriteResponse(BaseModel):
+    success: Literal[True] = True
+    data: OfferWriteOut
+
+
 class LinkResponse(BaseModel):
     success: Literal[True] = True
     data: AffiliateLinkOut
@@ -242,6 +270,21 @@ def summary_out(record: OfferRecord) -> OfferSummaryOut:
     return OfferSummaryOut.model_validate(record, from_attributes=True)
 
 
+def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
+    return {
+        **detail.offer.__dict__,
+        "links": [link_out(i) for i in detail.links],
+        "review_token": detail.review_token,
+    }
+
+
 def offer_out(detail: OfferDetail) -> OfferOut:
-    fields = {**detail.offer.__dict__, "links": [link_out(i) for i in detail.links]}
-    return OfferOut(**fields)
+    return OfferOut(**_offer_fields(detail))
+
+
+def offer_write_out(detail: OfferDetail) -> OfferWriteOut:
+    if detail.previous_review_token is None:
+        raise ValueError("a write response needs the token of the state it replaced")
+    return OfferWriteOut(
+        **_offer_fields(detail), previous_review_token=detail.previous_review_token
+    )

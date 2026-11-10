@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger';
 import { offerFormSchema } from '@/lib/admin-catalogue/offer-schema';
 import {
   isOfferAction,
+  isReviewedOfferAction,
   type OfferAction,
   type OfferStatus,
 } from '@/lib/admin-catalogue/offer-status';
@@ -15,10 +16,16 @@ import {
   notFound,
   refreshPublicCatalogue,
   resourceIdSchema,
+  reviewTokenSchema,
   type CatalogueActionResult,
 } from '@/lib/api/admin-catalogue-action';
-import { OFFER_NOT_FOUND_MESSAGE } from '@/lib/api/admin-catalogue-errors';
-import { createAdminOffer, patchAdminOffer, runAdminOfferAction } from '@/lib/api/admin-offers';
+import { OFFER_CHANGED_MESSAGE, OFFER_NOT_FOUND_MESSAGE } from '@/lib/api/admin-catalogue-errors';
+import {
+  createAdminOffer,
+  patchAdminOffer,
+  runAdminOfferAction,
+  type OfferActionRequest,
+} from '@/lib/api/admin-offers';
 import { toCreateOfferBody, toUpdateOfferBody } from '@/lib/api/admin-offers-body';
 import { ADMIN_REQUEST_FAILED_MESSAGE } from '@/lib/api/admin-errors';
 
@@ -31,7 +38,16 @@ import { ADMIN_REQUEST_FAILED_MESSAGE } from '@/lib/api/admin-errors';
  */
 
 export type OfferSavedData = { id: string; slug: string; status: OfferStatus };
-export type OfferActionData = OfferSavedData;
+/**
+ * What an edit or a status action returns: the saved offer, the review token of the version now stored and the
+ * token of the version the write replaced (when they differ from the one the editor loaded, somebody else changed
+ * the offer first). Either is absent when the API sent something that is not a plain token.
+ */
+export type OfferWrittenData = OfferSavedData & {
+  reviewToken?: string;
+  previousReviewToken?: string;
+};
+export type OfferActionData = OfferWrittenData;
 
 const ADMIN_OFFERS_PATH = '/admin/offers';
 
@@ -66,7 +82,7 @@ export async function createOfferAction(
 export async function updateOfferAction(
   offerId: string,
   input: unknown
-): Promise<CatalogueActionResult<OfferSavedData>> {
+): Promise<CatalogueActionResult<OfferWrittenData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     const parsed = offerFormSchema.safeParse(input);
@@ -79,27 +95,74 @@ export async function updateOfferAction(
     refreshAdminPages(offerId);
     const { id, slug, status } = result.data;
     if (status === 'PUBLISHED') refreshPublicCatalogue(slug);
-    return { success: true, data: { id, slug, status: status as OfferStatus } };
+    return {
+      success: true,
+      data: {
+        id,
+        slug,
+        status: status as OfferStatus,
+        reviewToken: plainToken(result.data.review_token),
+        previousReviewToken: plainToken(result.data.previous_review_token),
+      },
+    };
   });
 }
 
-/** Publish, unpublish, expire, archive or verify. Every one can change what visitors see, so all refresh it. */
+/** A review token from the API, only if it is made of the plain characters tokens have. */
+function plainToken(value: unknown): string | undefined {
+  const parsed = reviewTokenSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** What the API call needs for `action`, or null when a reviewed step has no usable review token. */
+function toActionRequest(action: OfferAction, reviewToken: unknown): OfferActionRequest | null {
+  if (!isReviewedOfferAction(action)) return { action };
+  const token = reviewTokenSchema.safeParse(reviewToken);
+  return token.success ? { action, reviewToken: token.data } : null;
+}
+
+/**
+ * Publish, unpublish, expire, archive or verify. Every one can change what visitors see, so all refresh it.
+ *
+ * Publish and verify must carry the `reviewToken` of the offer the admin loaded. Without a usable one nothing is
+ * sent. When the API says the offer changed since (409 `offer_changed`) the admin pages are refreshed so the next
+ * load shows the new content and a fresh token, and the admin gets the curated "review it again" message.
+ */
 export async function offerLifecycleAction(
   offerId: string,
-  action: OfferAction
+  action: OfferAction,
+  reviewToken?: string
 ): Promise<CatalogueActionResult<OfferActionData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
     if (!isOfferAction(action)) return { success: false, error: ADMIN_REQUEST_FAILED_MESSAGE };
+    const request = toActionRequest(action, reviewToken);
+    if (request === null) {
+      // Only the action name: never the token value.
+      logger.warn('Admin offer action: review token missing or malformed', { action });
+      return { success: false, error: OFFER_CHANGED_MESSAGE };
+    }
 
-    const result = await runAdminOfferAction(offerId, action);
+    const result = await runAdminOfferAction(offerId, request);
     if (!result.success) {
-      return failed(result, OFFER_NOT_FOUND_MESSAGE, `Admin offer ${action} failed`);
+      const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, `Admin offer ${action} failed`);
+      if (result.code !== 'offer_changed') return refusal;
+      refreshAdminPages(offerId);
+      return { ...refusal, reason: 'offer_changed' };
     }
 
     refreshAdminPages(offerId);
     refreshPublicCatalogue(result.data.slug);
     const { id, slug, status } = result.data;
-    return { success: true, data: { id, slug, status: status as OfferStatus } };
+    return {
+      success: true,
+      data: {
+        id,
+        slug,
+        status: status as OfferStatus,
+        reviewToken: plainToken(result.data.review_token),
+        previousReviewToken: plainToken(result.data.previous_review_token),
+      },
+    };
   });
 }

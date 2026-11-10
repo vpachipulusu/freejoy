@@ -52,6 +52,31 @@ of them.
    (`admin-catalogue-errors.ts`), for example "This offer cannot be published yet: it has not been verified."
 4. **Unpublish** returns it to draft; **Expire** marks a published offer ended; **Archive** is terminal.
 
+**Verify and publish act on what you loaded.** The offer page arrives with a `review_token` (`reviewToken` in the
+detail view) and **Mark verified** and **Publish** send it back. The API compares it under the offer's row lock and
+answers 409 `offer_changed` if the offer, its links, its merchant or its category changed since the page was loaded
+(the Awin importer, another admin, an expiry). Then nothing is written, the toast says **"This offer changed since you
+opened it. Review it again."**, the page reloads (`router.refresh()` after every action, plus `revalidatePath` of the
+list and the offer page on that code) and **the form reloads too**: it follows the new data (`values` with
+`keepDirtyValues`), so it never shows the old content beside the new token, and a field the editor has typed in keeps
+what they typed. A lasting notice (`role="alert"`, beside the buttons) says "This offer changed since you opened it. This
+page now shows the latest version: review it again." until the editor's next successful action. The page tracks one
+`seen` token, the last version the editor was shown (the token the page first loaded with). A save or a status step
+returns `reviewToken` (after it) and `previousReviewToken` (the state it replaced): when `previousReviewToken` is not
+`seen`, somebody else changed the offer first and the notice appears, then `seen` becomes `reviewToken`. A reload that
+brings a token other than `seen` (a refused step, a link edited elsewhere, a change while no write was in flight) raises it
+too. The editor's own save with nothing foreign in between raises nothing. Save is a full-form write, so a foreign
+offer-field edit made before the editor's Save is overwritten by it; the notice is how the editor learns it was there.
+After a save the form's saved values become its defaults with no field marked as typed in, so a later change to a field the
+editor saved earlier shows up in the form instead of the old text being kept. The buttons wait while a save is
+reloading into the page (they would hold the old token). The server action validates the token with Zod
+(`reviewTokenSchema`: plain characters, at most 128) and, without a usable one, sends nothing, logs a warning (the action
+name only, never the token) and shows the same message. Unpublish, Expire and Archive carry no token: taking an offer
+off the site is never blocked by staleness. (See [backend-admin-catalogue.md](backend-admin-catalogue.md#the-review-token).)
+**The list's row menu has no Publish or Mark verified**: it shows none of an offer's description, steps, links or source
+URL, so approving from it would approve unseen content. It offers Edit and **Review** (both open the offer's page), then
+Unpublish, Expire and Archive.
+
 **Preview.** A draft has no public page, so the editor shows a card preview drawn from the form as it is typed
 (`offer-preview-card.tsx`), labelled "Not public". The link to the live page (`/freebies/<slug>`) appears only when the
 status is `PUBLISHED`; it opens in a new tab. Status actions act on the last **saved** version, so while the form beside
@@ -83,7 +108,7 @@ mid-request deploy) into the same curated failure, so a form or toast always ans
 
 **Errors never carry backend text.** `callBackend` now also returns the backend's stable `code` (an optional
 `code` on the failure result, added for this story); `catalogueErrorMessage` picks the wording from the code
-(`slug_taken`, `illegal_transition`, `publish_blocked`, `invalid_url`, ...), then from the status. A refused publish
+(`slug_taken`, `illegal_transition`, `offer_changed`, `publish_blocked`, `invalid_url`, ...), then from the status. A refused publish
 names its unmet rules only from a fixed table. Unknown codes are ignored. Unexpected failures (5xx, unreachable) are
 logged with status and code only.
 
@@ -129,7 +154,9 @@ unarchiving, and optimistic concurrency on edits (a save is last-write-wins, as 
 * Unit (Vitest): `src/__tests__/unit/lib/admin-catalogue/` (schemas, status table), `unit/api/admin-catalogue-wrappers.test.ts`
   (URLs, bodies, views, counts), `unit/api/admin-guard-errors.test.ts` (the admin gate and message mapping),
   `unit/actions/admin-catalogue-actions.test.ts` (authorisation failures for every action, validation, refresh),
-  `unit/app/admin-offers-list.test.tsx`, `admin-offers-actions-ui.test.tsx`, `admin-offers-form.test.tsx`.
+  `unit/app/admin-offers-list.test.tsx`, `admin-offers-actions-ui.test.tsx` (including the changed-since-opened toast and reload),
+  `admin-offers-form.test.tsx` (the form follows new data; the buttons wait for a save's reload),
+  `admin-offer-review-notice.test.tsx` (the lasting notice, verify then publish, focus), `admin-offer-edit-page-review-token.test.tsx`.
 * Backend: `fastapi_backend/tests/test_e2e_identity_server.py` (the journey server's guards).
 * Playwright: `src/__tests__/e2e/admin-offers.spec.ts` (Journey 4 and layout checks).
 

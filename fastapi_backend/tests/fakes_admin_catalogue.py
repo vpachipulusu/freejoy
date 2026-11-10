@@ -14,6 +14,7 @@ from app.repositories.admin_offers import (
     OfferFilters,
     OfferPage,
     OfferRecord,
+    ReviewRefs,
 )
 
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
@@ -127,6 +128,10 @@ class FakeOfferStore:
         self.categories = {"cat1": True}
         self.merchants = {"mer1": True}
         self.websites: dict[str, str | None] = {"mer1": "https://www.acme.example"}
+        self.merchant_names: dict[str, str] = {}
+        self.merchant_logos: dict[str, str | None] = {}
+        self.category_names: dict[str, str] = {}
+        self.category_short_names: dict[str, str] = {}
         self.locked: list[str] = []
         self.filters: list[tuple[OfferFilters, int, int]] = []
 
@@ -165,6 +170,33 @@ class FakeOfferStore:
 
     async def list_links(self, offer_id: str) -> list[AffiliateLinkRecord]:
         return [item for item in self.links.values() if item.offer_id == offer_id]
+
+    async def review_refs(
+        self, category_id: str, merchant_id: str, *, share: bool = False
+    ) -> ReviewRefs:
+        enabled = self.categories.get(category_id)
+        active = self.merchants.get(merchant_id)
+        return ReviewRefs(
+            category_name=(
+                None
+                if enabled is None
+                else self.category_names.get(category_id, category_id)
+            ),
+            category_short_name=(
+                None
+                if enabled is None
+                else self.category_short_names.get(category_id, category_id)
+            ),
+            category_enabled=enabled,
+            merchant_name=(
+                None
+                if active is None
+                else self.merchant_names.get(merchant_id, merchant_id)
+            ),
+            merchant_website=self.websites.get(merchant_id),
+            merchant_logo_url=self.merchant_logos.get(merchant_id),
+            merchant_active=active,
+        )
 
     async def count_active_links(self, offer_id: str) -> int:
         return sum(1 for item in await self.list_links(offer_id) if item.active)

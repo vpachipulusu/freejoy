@@ -1892,6 +1892,10 @@ export type OfferOut = {
      */
     updated_at: string;
     /**
+     * Review Token
+     */
+    review_token: string;
+    /**
      * Summary
      */
     summary: string;
@@ -2018,6 +2022,146 @@ export type OfferSummaryOut = {
  * OfferType
  */
 export type OfferType = 'FREE_SAMPLE' | 'FREE_TRIAL' | 'CASHBACK' | 'VOUCHER' | 'COMPETITION';
+
+/**
+ * OfferWriteOut
+ *
+ * The offer after a write, plus the token of the state the write replaced.
+ *
+ * Read under the same row lock, before the write. If it is not the token the editor loaded, somebody else
+ * changed the offer first and the response already contains their change.
+ */
+export type OfferWriteOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Slug
+     */
+    slug: string;
+    /**
+     * Category Id
+     */
+    category_id: string;
+    /**
+     * Merchant Id
+     */
+    merchant_id: string;
+    offer_type: OfferType;
+    status: OfferStatus;
+    /**
+     * Featured
+     */
+    featured: boolean;
+    /**
+     * End At
+     */
+    end_at: string | null;
+    /**
+     * Last Verified At
+     */
+    last_verified_at: string | null;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Review Token
+     */
+    review_token: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Description
+     */
+    description: Array<string>;
+    /**
+     * Image Tint
+     */
+    image_tint: string;
+    /**
+     * Image Label
+     */
+    image_label: string;
+    /**
+     * Image Alt
+     */
+    image_alt: string;
+    /**
+     * Source Url
+     */
+    source_url: string | null;
+    postage_kind: PostageKind;
+    /**
+     * Postage Amount Minor
+     */
+    postage_amount_minor: number | null;
+    /**
+     * Postage Currency
+     */
+    postage_currency: string | null;
+    /**
+     * Requires Card
+     */
+    requires_card: boolean;
+    /**
+     * Subscription Terms
+     */
+    subscription_terms: string | null;
+    /**
+     * Eligibility
+     */
+    eligibility: string;
+    /**
+     * Availability
+     */
+    availability: string;
+    /**
+     * Steps
+     */
+    steps: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Start At
+     */
+    start_at: string | null;
+    freshness: OfferFreshness | null;
+    /**
+     * Publisher Notes
+     */
+    publisher_notes: string | null;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Links
+     */
+    links: Array<AffiliateLinkOut>;
+    /**
+     * Previous Review Token
+     */
+    previous_review_token: string;
+};
+
+/**
+ * OfferWriteResponse
+ */
+export type OfferWriteResponse = {
+    /**
+     * Success
+     */
+    success?: true;
+    data: OfferWriteOut;
+};
 
 /**
  * OffersPage
@@ -2448,6 +2592,18 @@ export type ProfileResponse = {
      */
     success?: true;
     data: ProfileData;
+};
+
+/**
+ * PublishRequest
+ *
+ * Publish needs the ``review_token`` of the offer the editor loaded (409 ``offer_changed`` if stale).
+ */
+export type PublishRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
 };
 
 /**
@@ -3417,6 +3573,10 @@ export type VerificationRequest = {
  * VerifyRequest
  */
 export type VerifyRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
     /**
      * Note
      */
@@ -6663,13 +6823,13 @@ export type AdminUpdateOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminUpdateOfferResponse = AdminUpdateOfferResponses[keyof AdminUpdateOfferResponses];
 
 export type AdminPublishOfferData = {
-    body?: never;
+    body: PublishRequest;
     headers?: {
         /**
          * X-Internal-Key
@@ -6723,7 +6883,7 @@ export type AdminPublishOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminPublishOfferResponse = AdminPublishOfferResponses[keyof AdminPublishOfferResponses];
@@ -6783,7 +6943,7 @@ export type AdminUnpublishOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminUnpublishOfferResponse = AdminUnpublishOfferResponses[keyof AdminUnpublishOfferResponses];
@@ -6843,7 +7003,7 @@ export type AdminExpireOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminExpireOfferResponse = AdminExpireOfferResponses[keyof AdminExpireOfferResponses];
@@ -6903,16 +7063,13 @@ export type AdminArchiveOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminArchiveOfferResponse = AdminArchiveOfferResponses[keyof AdminArchiveOfferResponses];
 
 export type AdminVerifyOfferData = {
-    /**
-     * Body
-     */
-    body?: VerifyRequest | null;
+    body: VerifyRequest;
     headers?: {
         /**
          * X-Internal-Key
@@ -6966,7 +7123,7 @@ export type AdminVerifyOfferResponses = {
     /**
      * Successful Response
      */
-    200: AppApiV1AdminOffersSchemasOfferResponse;
+    200: OfferWriteResponse;
 };
 
 export type AdminVerifyOfferResponse = AdminVerifyOfferResponses[keyof AdminVerifyOfferResponses];

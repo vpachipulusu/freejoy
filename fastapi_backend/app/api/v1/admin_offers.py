@@ -2,7 +2,9 @@
 
 Permissions: ``offers.read`` for reads, ``offers.write`` for create, update and links,
 ``offers.publish`` for publish, unpublish, expire, archive and verify (they change what the
-public sees or the "Last checked" claim). Every write stages its audit row in the same
+public sees or the "Last checked" claim). The offer read (and every write's response) returns a ``review_token``; ``verify`` and
+``publish`` require the one the editor loaded and answer 409 ``offer_changed`` when the offer or
+its links changed since (the other transitions do not need it). Every write stages its audit row in the same
 transaction (``AdminOfferService``). Status table: ``app.services.offer_lifecycle``.
 """
 
@@ -26,11 +28,14 @@ from app.api.v1.admin_offers_schemas import (
     OfferResponse,
     OffersPage,
     OffersPageResponse,
+    OfferWriteResponse,
+    PublishRequest,
     UpdateLinkRequest,
     UpdateOfferRequest,
     VerifyRequest,
     link_out,
     offer_out,
+    offer_write_out,
     summary_out,
 )
 from app.core.permissions import AdminContext
@@ -61,13 +66,14 @@ async def _transition(
     action: OfferAction,
     response: Response,
     service: AdminOfferService,
-) -> OfferResponse:
+    review_token: str | None = None,
+) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.transition(admin, offer_id, action)
+        detail = await service.transition(admin, offer_id, action, review_token)
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
-    return OfferResponse(data=offer_out(detail))
+    return OfferWriteResponse(data=offer_write_out(detail))
 
 
 @router.get("", response_model=OffersPageResponse)
@@ -122,14 +128,14 @@ async def admin_read_offer(
     return OfferResponse(data=offer_out(detail))
 
 
-@router.patch("/{offer_id}", response_model=OfferResponse)
+@router.patch("/{offer_id}", response_model=OfferWriteResponse)
 async def admin_update_offer(
     offer_id: ResourceId,
     body: UpdateOfferRequest,
     response: Response,
     admin: WriteAdmin,
     service: ServiceDep,
-) -> OfferResponse:
+) -> OfferWriteResponse:
     no_store(response)
     try:
         detail = await service.update_offer(
@@ -137,51 +143,57 @@ async def admin_update_offer(
         )
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
-    return OfferResponse(data=offer_out(detail))
+    return OfferWriteResponse(data=offer_write_out(detail))
 
 
-@router.post("/{offer_id}/publish", response_model=OfferResponse)
+@router.post("/{offer_id}/publish", response_model=OfferWriteResponse)
 async def admin_publish_offer(
-    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
-) -> OfferResponse:
-    return await _transition(admin, offer_id, OfferAction.PUBLISH, response, service)
-
-
-@router.post("/{offer_id}/unpublish", response_model=OfferResponse)
-async def admin_unpublish_offer(
-    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
-) -> OfferResponse:
-    return await _transition(admin, offer_id, OfferAction.UNPUBLISH, response, service)
-
-
-@router.post("/{offer_id}/expire", response_model=OfferResponse)
-async def admin_expire_offer(
-    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
-) -> OfferResponse:
-    return await _transition(admin, offer_id, OfferAction.EXPIRE, response, service)
-
-
-@router.post("/{offer_id}/archive", response_model=OfferResponse)
-async def admin_archive_offer(
-    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
-) -> OfferResponse:
-    return await _transition(admin, offer_id, OfferAction.ARCHIVE, response, service)
-
-
-@router.post("/{offer_id}/verify", response_model=OfferResponse)
-async def admin_verify_offer(
     offer_id: ResourceId,
+    body: PublishRequest,
     response: Response,
     admin: PublishAdmin,
     service: ServiceDep,
-    body: VerifyRequest | None = None,
-) -> OfferResponse:
+) -> OfferWriteResponse:
+    return await _transition(
+        admin, offer_id, OfferAction.PUBLISH, response, service, body.review_token
+    )
+
+
+@router.post("/{offer_id}/unpublish", response_model=OfferWriteResponse)
+async def admin_unpublish_offer(
+    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
+) -> OfferWriteResponse:
+    return await _transition(admin, offer_id, OfferAction.UNPUBLISH, response, service)
+
+
+@router.post("/{offer_id}/expire", response_model=OfferWriteResponse)
+async def admin_expire_offer(
+    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
+) -> OfferWriteResponse:
+    return await _transition(admin, offer_id, OfferAction.EXPIRE, response, service)
+
+
+@router.post("/{offer_id}/archive", response_model=OfferWriteResponse)
+async def admin_archive_offer(
+    offer_id: ResourceId, response: Response, admin: PublishAdmin, service: ServiceDep
+) -> OfferWriteResponse:
+    return await _transition(admin, offer_id, OfferAction.ARCHIVE, response, service)
+
+
+@router.post("/{offer_id}/verify", response_model=OfferWriteResponse)
+async def admin_verify_offer(
+    offer_id: ResourceId,
+    response: Response,
+    body: VerifyRequest,
+    admin: PublishAdmin,
+    service: ServiceDep,
+) -> OfferWriteResponse:
     no_store(response)
     try:
-        detail = await service.verify(admin, offer_id, body.note if body else None)
+        detail = await service.verify(admin, offer_id, body.note, body.review_token)
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None
-    return OfferResponse(data=offer_out(detail))
+    return OfferWriteResponse(data=offer_write_out(detail))
 
 
 @router.post("/{offer_id}/links", response_model=LinkResponse, status_code=201)

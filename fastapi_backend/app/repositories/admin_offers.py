@@ -66,6 +66,19 @@ class AffiliateLinkRecord:
 
 
 @dataclass(frozen=True)
+class ReviewRefs:
+    """What a visitor sees of an offer's category and merchant (a field is None when the row is missing)."""
+
+    category_name: str | None
+    category_short_name: str | None
+    category_enabled: bool | None
+    merchant_name: str | None
+    merchant_website: str | None
+    merchant_logo_url: str | None
+    merchant_active: bool | None
+
+
+@dataclass(frozen=True)
 class OfferFilters:
     search: str | None = None
     status: OfferStatus | None = None
@@ -168,6 +181,37 @@ class AdminOfferRepository(BaseRepository):
             select(Merchant.active)
             .where(Merchant.id == merchant_id)
             .with_for_update(read=True)
+        )
+
+    async def review_refs(
+        self, category_id: str, merchant_id: str, *, share: bool = False
+    ) -> ReviewRefs:
+        """The category and merchant fields a visitor sees, category first (the lock order).
+
+        With ``share`` both rows are read FOR SHARE, so a concurrent edit of either waits for this
+        transaction and the token compared under the offer's row lock cannot go stale before the commit.
+        """
+        category = select(Category.name, Category.short_name, Category.enabled).where(
+            Category.id == category_id
+        )
+        merchant = select(
+            Merchant.name, Merchant.website, Merchant.logo_url, Merchant.active
+        ).where(Merchant.id == merchant_id)
+        if share:
+            category, merchant = (
+                category.with_for_update(read=True),
+                merchant.with_for_update(read=True),
+            )
+        found_category = (await self._session.execute(category)).first()
+        found_merchant = (await self._session.execute(merchant)).first()
+        return ReviewRefs(
+            category_name=found_category.name if found_category else None,
+            category_short_name=found_category.short_name if found_category else None,
+            category_enabled=found_category.enabled if found_category else None,
+            merchant_name=found_merchant.name if found_merchant else None,
+            merchant_website=found_merchant.website if found_merchant else None,
+            merchant_logo_url=found_merchant.logo_url if found_merchant else None,
+            merchant_active=found_merchant.active if found_merchant else None,
         )
 
     async def merchant_website(self, merchant_id: str) -> str | None:

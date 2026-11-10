@@ -1,7 +1,7 @@
-"""Promotion to offer, link and merchant values; slugs; and the fingerprint that detects human edits."""
+"""Promotion to offer, link and merchant values, and slugs."""
 
 import dataclasses
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -12,7 +12,6 @@ from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
 from app.services.awin_offer_mapping import (
     IMPORT_CATEGORY_SLUG,
     PROVIDER,
-    fingerprint,
     import_category_values,
     link_values,
     merchant_slug_candidates,
@@ -300,98 +299,3 @@ def test_a_very_long_advertiser_name_still_gives_a_valid_suffixed_slug() -> None
 
     assert slug.endswith("-77") and len(slug) <= 80
     assert validate_catalogue_slug(slug) == slug
-
-
-# --- the fingerprint -----------------------------------------------------------------------
-
-
-def test_the_fingerprint_is_a_stable_sha256_of_the_offer_and_its_links() -> None:
-    first = fingerprint(make_offer(), [make_link()])
-
-    assert first == fingerprint(make_offer(), [make_link()])
-    assert len(first) == 64 and int(first, 16) >= 0
-
-
-@pytest.mark.parametrize(
-    "field", sorted(EDITABLE_FIELDS | {"status", "last_verified_at"})
-)
-def test_any_field_an_editor_can_change_changes_the_fingerprint(field: str) -> None:
-    changed: dict[str, Any] = {
-        "title": "Edited",
-        "summary": "Edited",
-        "description": ["Edited"],
-        "category_id": "cat-2",
-        "merchant_id": "mer-2",
-        "offer_type": OfferType.FREE_SAMPLE,
-        "featured": True,
-        "image_tint": "mint",
-        "image_label": "Edited",
-        "image_alt": "Edited",
-        "source_url": "https://other.example/",
-        "postage_kind": PostageKind.FREE,
-        "postage_amount_minor": 100,
-        "postage_currency": "GBP",
-        "requires_card": True,
-        "subscription_terms": "Edited",
-        "eligibility": "Edited",
-        "availability": "Edited",
-        "steps": [{"title": "t", "detail": "d"}],
-        "start_at": START + timedelta(days=1),
-        "end_at": END + timedelta(days=1),
-        "freshness": None,
-        "publisher_notes": "Edited",
-        "status": OfferStatus.PUBLISHED,
-        "last_verified_at": START,
-    }
-    offer = make_offer(freshness=None)
-    if field == "freshness":
-        from app.models.platform.offer import OfferFreshness
-
-        changed["freshness"] = OfferFreshness.POPULAR
-
-    edited = dataclasses.replace(offer, **{field: changed[field]})
-
-    assert fingerprint(edited, [make_link()]) != fingerprint(offer, [make_link()])
-
-
-def test_bookkeeping_columns_do_not_change_the_fingerprint() -> None:
-    offer = make_offer()
-    touched = dataclasses.replace(
-        offer, updated_at=END, created_at=END, id="other", slug="another-slug"
-    )
-
-    assert fingerprint(touched, [make_link()]) == fingerprint(offer, [make_link()])
-
-
-def test_the_same_instant_in_another_time_zone_is_the_same_fingerprint() -> None:
-    offer = make_offer()
-    shifted = dataclasses.replace(
-        offer, start_at=START.astimezone(timezone(timedelta(hours=5)))
-    )
-
-    assert fingerprint(shifted, [make_link()]) == fingerprint(offer, [make_link()])
-
-
-@pytest.mark.parametrize(
-    "links",
-    [
-        [],
-        [make_link(destination_url="https://www.awin1.com/other")],
-        [make_link(active=False)],
-        [make_link(provider="direct")],
-        [make_link(tracking_id="t1")],
-        [make_link(), make_link(id="link-2")],
-    ],
-)
-def test_a_change_to_the_links_changes_the_fingerprint(
-    links: list[AffiliateLinkRecord],
-) -> None:
-    assert fingerprint(make_offer(), links) != fingerprint(make_offer(), [make_link()])
-
-
-def test_link_ids_and_timestamps_do_not_change_the_fingerprint() -> None:
-    renamed = make_link(id="zzz", updated_at=END, created_at=END)
-
-    assert fingerprint(make_offer(), [renamed]) == fingerprint(
-        make_offer(), [make_link()]
-    )

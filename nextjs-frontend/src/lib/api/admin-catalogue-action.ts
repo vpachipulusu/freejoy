@@ -15,12 +15,21 @@ import type { ApiResult } from './server';
 
 export type CatalogueActionResult<T = undefined> =
   | { success: true; data: T }
-  | { success: false; error: string; fieldErrors?: Record<string, string> };
+  | {
+      success: false;
+      error: string;
+      fieldErrors?: Record<string, string>;
+      /** Set when the refusal means the offer changed since it was loaded: the page shows a lasting notice. */
+      reason?: 'offer_changed';
+    };
 
 type FailedResult = Extract<ApiResult<unknown>, { success: false }>;
 
 /** Resource ids go into URL paths: only the characters real ids contain are accepted. */
 export const resourceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+
+/** The opaque review token of an offer goes into a request body: only its plain characters are accepted. */
+export const reviewTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
 const SLUG_FOR_PATH = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

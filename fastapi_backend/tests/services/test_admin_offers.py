@@ -70,6 +70,11 @@ def new_data(**changes):
     return {**data, **changes}
 
 
+async def token(service, offer_id="off1"):
+    """The review token the admin read would have handed the editor."""
+    return (await service.get_offer(offer_id)).review_token
+
+
 def verified(**changes):
     return offer(
         last_verified_at=EARLIER, source_url="https://shop.example.com", **changes
@@ -268,7 +273,9 @@ async def test_publish_requires_verification_and_never_stamps_it():
     )
 
     with pytest.raises(PublishBlocked) as raised:
-        await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+        await service.transition(
+            ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+        )
 
     assert raised.value.reasons == ["not_verified"]
     assert store.offers["off1"].last_verified_at is None
@@ -278,7 +285,9 @@ async def test_publish_requires_verification_and_never_stamps_it():
 async def test_publish_succeeds_when_every_rule_holds_and_audits_the_transition():
     service, store, auditor, session = build(verified(id="off1"))
 
-    detail = await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+    detail = await service.transition(
+        ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+    )
 
     assert detail.offer.status is OfferStatus.PUBLISHED
     assert detail.offer.last_verified_at == EARLIER
@@ -293,7 +302,9 @@ async def test_publish_succeeds_when_every_rule_holds_and_audits_the_transition(
 async def test_publish_with_an_active_link_instead_of_a_source_url():
     service, *_ = build(offer("off1", last_verified_at=EARLIER), links=[link("l1")])
 
-    detail = await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+    detail = await service.transition(
+        ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+    )
 
     assert detail.offer.status is OfferStatus.PUBLISHED
 
@@ -304,7 +315,9 @@ async def test_publish_with_only_inactive_links_and_no_source_is_blocked():
     )
 
     with pytest.raises(PublishBlocked) as raised:
-        await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+        await service.transition(
+            ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+        )
 
     assert raised.value.reasons == ["no_destination"]
 
@@ -315,7 +328,9 @@ async def test_publish_blocked_by_disabled_category_inactive_merchant_and_past_e
     store.merchants["mer1"] = False
 
     with pytest.raises(PublishBlocked) as raised:
-        await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+        await service.transition(
+            ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+        )
 
     assert raised.value.reasons == [
         "category_disabled",
@@ -327,7 +342,9 @@ async def test_publish_blocked_by_disabled_category_inactive_merchant_and_past_e
 async def test_expired_offers_republish_after_the_rules_are_met_again():
     service, *_ = build(verified(id="off1", status=OfferStatus.EXPIRED, end_at=LATER))
 
-    detail = await service.transition(ACTOR, "off1", OfferAction.PUBLISH)
+    detail = await service.transition(
+        ACTOR, "off1", OfferAction.PUBLISH, review_token=await token(service)
+    )
 
     assert detail.offer.status is OfferStatus.PUBLISHED
 
@@ -347,7 +364,9 @@ async def test_illegal_transitions_change_and_audit_nothing(status, action):
     service, store, auditor, session = build(verified(id="off1", status=status))
 
     with pytest.raises(IllegalTransition):
-        await service.transition(ACTOR, "off1", action)
+        await service.transition(
+            ACTOR, "off1", action, review_token=await token(service)
+        )
 
     assert store.offers["off1"].status is status
     assert auditor.rows == [] and session.commits == 0
@@ -365,7 +384,9 @@ async def test_illegal_transitions_change_and_audit_nothing(status, action):
 async def test_other_lifecycle_actions_move_the_status(start, action, end):
     service, _, auditor, _ = build(verified(id="off1", status=start))
 
-    detail = await service.transition(ACTOR, "off1", action)
+    detail = await service.transition(
+        ACTOR, "off1", action, review_token=await token(service)
+    )
 
     assert detail.offer.status is end
     assert auditor.rows[0]["action"] == f"admin.offers.{action.value}"
@@ -375,7 +396,7 @@ async def test_transition_of_a_missing_offer_is_not_found_and_verify_is_not_a_tr
     service, *_ = build()
 
     with pytest.raises(CatalogueNotFound):
-        await service.transition(ACTOR, "ghost", OfferAction.PUBLISH)
+        await service.transition(ACTOR, "ghost", OfferAction.PUBLISH, review_token="x")
     with pytest.raises(ValueError, match="verify"):
         await service.transition(ACTOR, "ghost", OfferAction.VERIFY)
 
@@ -383,7 +404,12 @@ async def test_transition_of_a_missing_offer_is_not_found_and_verify_is_not_a_tr
 async def test_verify_stamps_the_clock_and_audits_the_note():
     service, _, auditor, session = build(offer("off1"))
 
-    detail = await service.verify(ACTOR, "off1", "Checked terms on the merchant site")
+    detail = await service.verify(
+        ACTOR,
+        "off1",
+        "Checked terms on the merchant site",
+        review_token=await token(service),
+    )
 
     assert detail.offer.last_verified_at == NOW
     (row,) = auditor.rows
@@ -396,7 +422,7 @@ async def test_verify_stamps_the_clock_and_audits_the_note():
 async def test_verify_without_a_note_records_no_details():
     service, _, auditor, _ = build(offer("off1"))
 
-    await service.verify(ACTOR, "off1", None)
+    await service.verify(ACTOR, "off1", None, review_token=await token(service))
 
     assert auditor.rows[0]["details"] is None
 
@@ -405,9 +431,11 @@ async def test_verify_refuses_archived_and_missing_offers():
     service, *_ = build(offer("gone", status=OfferStatus.ARCHIVED))
 
     with pytest.raises(IllegalTransition):
-        await service.verify(ACTOR, "gone", None)
+        await service.verify(
+            ACTOR, "gone", None, review_token=await token(service, "gone")
+        )
     with pytest.raises(CatalogueNotFound):
-        await service.verify(ACTOR, "ghost", None)
+        await service.verify(ACTOR, "ghost", None, review_token="x")
 
 
 async def test_create_link_validates_the_url_and_audits_only_the_host():
