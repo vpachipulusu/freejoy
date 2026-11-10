@@ -20,7 +20,7 @@ uv run alembic upgrade head                      # only against a database you o
 ```
 
 - **Coverage floor.** `[tool.coverage.report] fail_under` in `pyproject.toml` fails `pytest --cov` below the
-  floor (89.0: about 1 point under the 89.9% measured without the database; 95.6% with it). It is a ratchet:
+  floor (90.0: about 1 point under the 91.3% measured without the database; 96.2% with it). It is a ratchet:
   raise it when coverage rises, never lower it.
 - **OpenAPI and the client.** After any change to routes, schemas or `ERROR_RESPONSES`, regenerate the schema and
   the TypeScript client:
