@@ -14,7 +14,7 @@ appending it here.
 from dataclasses import dataclass
 
 # Every platform revision, oldest first; the last one is the head this build expects.
-PLATFORM_REVISIONS: tuple[str, ...] = ("0001", "0002", "0003", "0004")
+PLATFORM_REVISIONS: tuple[str, ...] = ("0001", "0002", "0003", "0004", "0005")
 PLATFORM_HEAD = PLATFORM_REVISIONS[-1]
 
 
