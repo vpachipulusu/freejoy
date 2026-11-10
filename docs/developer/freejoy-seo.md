@@ -37,6 +37,7 @@ server starts) once an email provider is configured. The page has no catalogue d
 | any of the above, **while the page shows its outage state** | unchanged (`noindex`) | unchanged: the normal robots for that URL |
 | `/alerts` | `noindex` | `noindex` until the form is live |
 | `/saved` | `noindex, follow` | `noindex, follow` always: the list lives in the visitor's browser, so the page is the same empty shell for a crawler. Not in the sitemap; not disallowed in `robots.txt`, so the `noindex` can be read |
+| `/partners` | `noindex` | `noindex` while it carries the draft banner. Not in the sitemap while draft. When `LegalPage` stops showing the draft banner for this page (needs a `LegalPage` change, the banner is unconditional today), switch to `INDEXABLE_ROBOTS` and add `entry('/partners', undefined)` to `lib/seo/sitemap.ts` in the same change |
 | Legal pages | not part of this story | not part of this story |
 
 Every refined view canonicalises to its base path (`/freebies`, `/category/<slug>`), so the filter
