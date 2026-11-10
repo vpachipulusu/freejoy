@@ -614,6 +614,20 @@ export type ClaimStep = {
 };
 
 /**
+ * ClickBasis
+ */
+export type ClickBasis = {
+    /**
+     * Definition
+     */
+    definition: string;
+    /**
+     * Bot Rule
+     */
+    bot_rule: string;
+};
+
+/**
  * ClickData
  */
 export type ClickData = {
@@ -623,6 +637,64 @@ export type ClickData = {
      * Stored https destination; never logged
      */
     destination_url: string;
+};
+
+/**
+ * ClickDayData
+ */
+export type ClickDayData = {
+    /**
+     * Date
+     */
+    date: string;
+    /**
+     * Clicks
+     */
+    clicks: number;
+};
+
+/**
+ * ClickMerchant
+ */
+export type ClickMerchant = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Slug
+     */
+    slug: string;
+};
+
+/**
+ * ClickOfferData
+ */
+export type ClickOfferData = {
+    /**
+     * Offer Id
+     */
+    offer_id: string;
+    /**
+     * Slug
+     */
+    slug: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Total Clicks
+     */
+    total_clicks: number;
+    /**
+     * Days
+     */
+    days: Array<ClickDayData>;
 };
 
 /**
@@ -652,6 +724,24 @@ export type ClickResponse = {
      */
     success?: true;
     data: ClickData;
+};
+
+/**
+ * ClickRetention
+ */
+export type ClickRetention = {
+    /**
+     * Days
+     */
+    days: number;
+    /**
+     * Earliest Complete Date
+     */
+    earliest_complete_date: string;
+    /**
+     * Starts Before Retention
+     */
+    starts_before_retention: boolean;
 };
 
 /**
@@ -1554,6 +1644,58 @@ export type MarkAllReadResponse = {
  * MembershipRole
  */
 export type MembershipRole = 'OWNER' | 'ADMIN' | 'STAFF';
+
+/**
+ * MerchantClicksData
+ */
+export type MerchantClicksData = {
+    merchant: ClickMerchant;
+    /**
+     * From Date
+     */
+    from_date: string;
+    /**
+     * To Date
+     */
+    to_date: string;
+    /**
+     * Total Clicks
+     */
+    total_clicks: number;
+    /**
+     * Excluded Bot Clicks
+     */
+    excluded_bot_clicks: number;
+    /**
+     * Offers Total
+     */
+    offers_total: number;
+    /**
+     * Max Offers
+     */
+    max_offers: number;
+    /**
+     * Offers Truncated
+     */
+    offers_truncated: boolean;
+    /**
+     * Offers
+     */
+    offers: Array<ClickOfferData>;
+    retention: ClickRetention;
+    basis: ClickBasis;
+};
+
+/**
+ * MerchantClicksResponse
+ */
+export type MerchantClicksResponse = {
+    /**
+     * Success
+     */
+    success?: true;
+    data: MerchantClicksData;
+};
 
 /**
  * MerchantData
@@ -5856,6 +5998,78 @@ export type AdminSystemStatsResponses = {
 };
 
 export type AdminSystemStatsResponse = AdminSystemStatsResponses[keyof AdminSystemStatsResponses];
+
+export type AdminMerchantClicksData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path?: never;
+    query: {
+        /**
+         * Merchant Id
+         */
+        merchant_id: string;
+        /**
+         * From
+         */
+        from: string;
+        /**
+         * To
+         */
+        to: string;
+    };
+    url: '/v1/admin/analytics/clicks';
+};
+
+export type AdminMerchantClicksErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Rate limit exceeded
+     */
+    429: ErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+    /**
+     * Rate limiter unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type AdminMerchantClicksError = AdminMerchantClicksErrors[keyof AdminMerchantClicksErrors];
+
+export type AdminMerchantClicksResponses = {
+    /**
+     * Successful Response
+     */
+    200: MerchantClicksResponse;
+};
+
+export type AdminMerchantClicksResponse = AdminMerchantClicksResponses[keyof AdminMerchantClicksResponses];
 
 export type AdminSyncSubscriptionsData = {
     body?: never;

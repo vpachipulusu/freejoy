@@ -3,25 +3,32 @@
 Every route is ``require_admin(<permission>)``: authentication first (401), then the
 admin record and permission (403, one generic body). The overview needs ``users.read``,
 revenue ``subscriptions.read``, system stats ``settings.read`` and the Stripe sync
-``subscriptions.sync``. Responses carry counts and money totals only, never personal
+``subscriptions.sync``, the merchant click report ``offers.read`` (it is about a merchant's offers, like the
+merchants API the picker reads). Responses carry counts and money totals only, never personal
 data, and are never cached. The sync reports drift and writes one audit row; see
 ``SubscriptionSyncService``.
 """
 
 from collections.abc import AsyncIterator
+from datetime import date
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.api.admin import AuditorDep, require_admin
 from app.api.auth import require_internal_key
 from app.api.deps import SessionDep
 from app.api.rate_limit import RATE_LIMIT_FAIL_CLOSED_RESPONSES, limit_by_subject
+from app.api.v1.admin_analytics_clicks import MerchantClicksResponse, clicks_response
+from app.api.v1.admin_catalogue_common import (
+    CatalogueErrorResponse,
+    catalogue_http_error,
+)
 from app.api.v1.auth import current_subject
 from app.core.config import settings
-from app.core.errors import ErrorResponse
+from app.core.errors import CodedHTTPException, ErrorResponse
 from app.core.permissions import AdminContext
 from app.core.plans import PlanKey
 from app.core.rate_limit import ADMIN_SYNC_POLICY, API_POLICY
@@ -32,11 +39,17 @@ from app.core.stripe_sync import (
 )
 from app.repositories.admin_analytics import AdminAnalyticsRepository
 from app.repositories.app_settings import AppSettingsRepository
+from app.repositories.merchant_clicks import MerchantClickRepository
 from app.services.admin_analytics import AdminAnalyticsService, PriceEntry
+from app.services.admin_catalogue_errors import CatalogueError
 from app.services.admin_subscription_sync import (
     SubscriptionSyncService,
     SyncNotConfigured,
     SyncUnavailable,
+)
+from app.services.merchant_click_report import (
+    InvalidClickRange,
+    MerchantClickReportService,
 )
 from app.services.price_cache import SHARED_PRICE_CACHE, CachedPriceReader
 from app.services.public_settings import PublicSettingsService
@@ -61,6 +74,7 @@ SubscriptionsAdmin = Annotated[
 ]
 SettingsAdmin = Annotated[AdminContext, Depends(require_admin("settings.read"))]
 SyncAdmin = Annotated[AdminContext, Depends(require_admin("subscriptions.sync"))]
+OffersAdmin = Annotated[AdminContext, Depends(require_admin("offers.read"))]
 
 
 class UsersOverview(BaseModel):
@@ -218,7 +232,14 @@ def get_sync_service(
     )
 
 
+def get_click_report_service(session: SessionDep) -> MerchantClickReportService:
+    return MerchantClickReportService(MerchantClickRepository(session))
+
+
 AnalyticsDep = Annotated[AdminAnalyticsService, Depends(get_analytics_service)]
+ClickReportDep = Annotated[
+    MerchantClickReportService, Depends(get_click_report_service)
+]
 SyncDep = Annotated[SubscriptionSyncService, Depends(get_sync_service)]
 
 
@@ -286,6 +307,42 @@ async def admin_system_stats(
     _no_store(response)
     counts = await service.system()
     return SystemResponse(data=SystemData(**vars(counts)))
+
+
+@router.get(
+    "/clicks",
+    response_model=MerchantClicksResponse,
+    summary="Clicks per offer per day for one merchant",
+    description=(
+        "Outbound clicks on one merchant's offers over a range of UTC days (inclusive, from <= to, at "
+        "most 366 days), per offer and per day, for sending to a retailer. A click is a visitor sent "
+        "to the destination: not a sale, not a unique person. Bot-classed clicks are left out and "
+        "counted apart. At most 100 offers are returned (offers_truncated says when more exist). "
+        "Click records are kept for 395 days; the answer says when a range reaches past them."
+    ),
+    responses={
+        404: {"model": CatalogueErrorResponse},
+        422: {"model": CatalogueErrorResponse, "description": "Invalid request"},
+    },
+)
+async def admin_merchant_clicks(
+    response: Response,
+    _admin: OffersAdmin,
+    service: ClickReportDep,
+    merchant_id: Annotated[
+        str, Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    ],
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
+) -> MerchantClicksResponse:
+    _no_store(response)
+    try:
+        report = await service.report(merchant_id, date_from, date_to)
+    except InvalidClickRange as exc:
+        raise CodedHTTPException(422, str(exc), "invalid_range") from None
+    except CatalogueError as exc:
+        raise catalogue_http_error(exc) from None
+    return clicks_response(report)
 
 
 @router.post(

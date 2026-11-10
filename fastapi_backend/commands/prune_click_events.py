@@ -23,9 +23,10 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.core.click_retention import CLICK_RETENTION_DAYS
 from app.models.platform.click_event import ClickEvent
 
-DEFAULT_RETENTION_DAYS = 395
+DEFAULT_RETENTION_DAYS = CLICK_RETENTION_DAYS
 DEFAULT_BATCH_SIZE = 10_000
 MIN_VALUE = 1
 
