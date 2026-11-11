@@ -12,11 +12,14 @@ import { catalogueErrorMessage } from '@/lib/api/admin-catalogue-errors';
 import { logCatalogueFailure } from '@/lib/api/admin-catalogue-log';
 import { fetchAdminPartnerKeys, toPartnerKeyView } from '@/lib/api/admin-partner-keys';
 import { formatAdminDateTime } from '../../_components/format-admin-date';
+import { InlineError } from '../../_components/inline-error';
 import { CreatePartnerKeyDialog } from './create-partner-key-dialog';
-import { PARTNER_KEYS_HEADING_ID, RevokePartnerKeyButton } from './revoke-partner-key-button';
+import { PARTNER_KEYS_HEADING_ID } from './partner-keys-ids';
+import { RevokePartnerKeyButton } from './revoke-partner-key-button';
 
 export const NO_WEBSITE_NOTICE = 'Add the merchant website before issuing a key.';
 export const INACTIVE_NOTICE = 'Activate the merchant before issuing a key.';
+export const NO_PERMISSION_NOTICE = 'You do not have permission to manage partner keys.';
 export const KEYS_NOT_FOUND_MESSAGE = 'Partner keys could not be found. Refresh the page.';
 
 type Props = {
@@ -36,19 +39,24 @@ export function issueBlocker(website: string | null, active: boolean): string | 
 function KeyRow({ merchantId, item }: { merchantId: string; item: PartnerKeyView }) {
   return (
     <TableRow>
-      <TableCell className="break-words font-medium">{item.label}</TableCell>
-      <TableCell>{formatAdminDateTime(item.createdAt)}</TableCell>
-      <TableCell>
+      <TableCell label="Label" className="font-medium [overflow-wrap:anywhere] max-sm:w-full">
+        {item.label}
+      </TableCell>
+      <TableCell label="Created">{formatAdminDateTime(item.createdAt)}</TableCell>
+      <TableCell label="Last used">
         {item.lastUsedAt ? (
           formatAdminDateTime(item.lastUsedAt)
         ) : (
           <span className="text-muted-foreground">Never</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell label="Status">
         <StatusPill variant={item.revokedAt ? 'neutral' : 'good'}>
-          {item.revokedAt ? `Revoked ${formatAdminDateTime(item.revokedAt)}` : 'Active'}
+          {item.revokedAt ? 'Revoked' : 'Active'}
         </StatusPill>
+        {item.revokedAt ? (
+          <span className="ms-2 text-muted-foreground">{formatAdminDateTime(item.revokedAt)}</span>
+        ) : null}
       </TableCell>
       <TableCell className="text-right">
         {item.revokedAt ? null : (
@@ -61,11 +69,13 @@ function KeyRow({ merchantId, item }: { merchantId: string; item: PartnerKeyView
 
 /**
  * The partner API keys of one merchant: label, created, last used, status, with "Create key" (a show-once
- * dialog) and "Revoke" (with a confirmation). The list never holds a key or its hash: the API does not return them.
+ * dialog) and "Revoke" (with a confirmation). The list never holds a key or its hash: the API does not return
+ * them. An admin without `partner_keys.read` sees a plain note and no "Create key" button.
  */
 export async function PartnerKeysSection({ merchantId, merchantName, website, active }: Props) {
   const result = await fetchAdminPartnerKeys(merchantId);
   if (!result.success) logCatalogueFailure('Admin merchant page: partner keys failed', result);
+  const forbidden = !result.success && result.status === 403;
   const blocker = issueBlocker(website, active);
 
   return (
@@ -83,16 +93,20 @@ export async function PartnerKeysSection({ merchantId, merchantName, website, ac
             Keys let {merchantName} call the partner API. A key is shown once, when it is created.
           </p>
         </div>
-        {blocker ? null : (
+        {blocker || forbidden ? null : (
           <CreatePartnerKeyDialog merchantId={merchantId} merchantName={merchantName} />
         )}
       </div>
-      {blocker ? <p className="text-sm text-muted-foreground">{blocker}</p> : null}
+      {forbidden ? (
+        <p className="text-sm text-muted-foreground">{NO_PERMISSION_NOTICE}</p>
+      ) : blocker ? (
+        <p className="text-sm text-muted-foreground">{blocker}</p>
+      ) : null}
       {result.success ? (
         result.data.length === 0 ? (
           <p className="text-sm text-muted-foreground">No keys yet.</p>
         ) : (
-          <Table>
+          <Table stacked aria-labelledby={PARTNER_KEYS_HEADING_ID}>
             <TableHeader>
               <TableRow>
                 <TableHead>Label</TableHead>
@@ -111,10 +125,11 @@ export async function PartnerKeysSection({ merchantId, merchantName, website, ac
             </TableBody>
           </Table>
         )
-      ) : (
-        <p role="alert" className="text-sm font-medium text-destructive">
-          {catalogueErrorMessage(result, KEYS_NOT_FOUND_MESSAGE)}
-        </p>
+      ) : forbidden ? null : (
+        <InlineError
+          message={catalogueErrorMessage(result, KEYS_NOT_FOUND_MESSAGE)}
+          retryHref={`/admin/merchants/${merchantId}`}
+        />
       )}
     </section>
   );

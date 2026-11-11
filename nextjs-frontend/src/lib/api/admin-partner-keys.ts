@@ -11,7 +11,7 @@ import {
 
 /**
  * Server-only calls to the admin partner keys API (`/v1/admin/merchants/{id}/partner-keys`). Listing needs
- * `merchants.read`, issuing and revoking `merchants.write`; the backend checks both and writes the audit log.
+ * `partner_keys.read`, issuing and revoking `partner_keys.write`; the backend checks both and writes the audit log.
  * The key value comes back from `adminCreatePartnerKey` once; nothing here stores or logs it.
  */
 

@@ -6,7 +6,7 @@ import { isSingleLine } from './text-rules';
 export const PARTNER_KEY_LABEL_MAX = 80;
 
 /** A label that carries a key (or the start of one) would keep the secret in plain text, so it is refused. */
-const KEY_LOOKING = /fj_[a-z0-9]{1,16}_[a-z0-9]{8,}/i;
+export const KEY_LOOKING = /fj_[a-z0-9]{1,16}_[a-z0-9]{8,}/i;
 
 export const partnerKeyFormSchema = z.object({
   label: z

@@ -7625,6 +7625,10 @@ export type AdminCreatePartnerKeyErrors = {
      * Internal server error
      */
     500: ErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: CatalogueErrorResponse;
 };
 
 export type AdminCreatePartnerKeyError = AdminCreatePartnerKeyErrors[keyof AdminCreatePartnerKeyErrors];

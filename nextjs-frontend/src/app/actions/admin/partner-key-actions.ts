@@ -23,7 +23,7 @@ import {
 
 /**
  * Admin partner key actions: same contract as the merchant actions (admin gate first, Zod validation, the
- * wrapper, curated messages). The API needs `merchants.write`. The key value is returned to the browser once, by
+ * wrapper, curated messages). The API needs `partner_keys.write` (a dedicated permission). The key value is returned to the browser once, by
  * `createPartnerKeyAction`, and appears nowhere else: not in a log, not in a failure message, not in a path.
  */
 
@@ -41,7 +41,15 @@ export async function createPartnerKeyAction(
 
     const result = await createAdminPartnerKey(merchantId, parsed.data.label);
     if (!result.success) {
-      return failed(result, PARTNER_KEY_NOT_FOUND_MESSAGE, 'Admin create partner key failed');
+      const outcome = failed(
+        result,
+        PARTNER_KEY_NOT_FOUND_MESSAGE,
+        'Admin create partner key failed'
+      );
+      // A label the API refuses as key-looking belongs to the label field, not to a line above the form.
+      return result.code === 'invalid_label'
+        ? { ...outcome, fieldErrors: { label: outcome.error } }
+        : outcome;
     }
     revalidatePath(`${MERCHANT_PATH}/${merchantId}`);
     return {

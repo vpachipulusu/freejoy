@@ -121,7 +121,6 @@ describe('createPartnerKeyAction', () => {
     ['merchant_no_website', 409, 'Add the merchant website before issuing a key.'],
     ['merchant_inactive', 409, 'Activate the merchant before issuing a key.'],
     ['keys_unavailable', 503, 'Partner keys cannot be issued in this environment.'],
-    ['invalid_label', 422, 'A label is a name, not a key. Do not paste a key.'],
   ])('maps the code %s to a curated message, never backend text', async (code, status, message) => {
     mocks.createAdminPartnerKey.mockResolvedValue(fail(status, code));
 
@@ -129,6 +128,37 @@ describe('createPartnerKeyAction', () => {
 
     expect(result).toEqual({ success: false, error: message });
     expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('puts a refused key-looking label on the label field', async () => {
+    mocks.createAdminPartnerKey.mockResolvedValue(fail(422, 'invalid_label'));
+
+    const result = await createPartnerKeyAction('m1', { label: 'Feed' });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'A label is a name, not a key. Do not paste a key.',
+      fieldErrors: { label: 'A label is a name, not a key. Do not paste a key.' },
+    });
+  });
+
+  it.each([
+    ['a 403', fail(403), 'You do not have permission to do that'],
+    ['a 404', fail(404, 'not_found'), PARTNER_KEY_NOT_FOUND_MESSAGE],
+    ['an uncoded 409', fail(409), 'Something went wrong. Please try again.'],
+    ['an uncoded 422', fail(422), 'Some values were rejected. Check the form and try again.'],
+    [
+      'an unreachable backend',
+      fail(undefined),
+      'The admin service is unavailable. Please try again later.',
+    ],
+  ])('maps %s on create to a curated message', async (_name, outcome, message) => {
+    mocks.createAdminPartnerKey.mockResolvedValue(outcome);
+
+    await expect(createPartnerKeyAction('m1', { label: 'Feed' })).resolves.toEqual({
+      success: false,
+      error: message,
+    });
   });
 
   it('maps a rate limit to the curated message', async () => {
@@ -196,6 +226,19 @@ describe('revokePartnerKeyAction', () => {
       error: PARTNER_KEY_NOT_FOUND_MESSAGE,
     });
     expect(mocks.revokeAdminPartnerKey).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a 403', fail(403), 'You do not have permission to do that'],
+    ['a 429', fail(429), RATE_LIMITED_MESSAGE],
+    ['a 500', fail(500), 'Something went wrong. Please try again.'],
+  ])('maps %s on revoke to a curated message', async (_name, outcome, message) => {
+    mocks.revokeAdminPartnerKey.mockResolvedValue(outcome);
+
+    await expect(revokePartnerKeyAction('m1', KEY_ID)).resolves.toEqual({
+      success: false,
+      error: message,
+    });
   });
 
   it('maps a 404 to the curated not-found message', async () => {

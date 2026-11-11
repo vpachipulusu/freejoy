@@ -8425,6 +8425,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -15394,7 +15404,7 @@
               "maxLength": 64
             },
             "type": "array",
-            "maxItems": 26,
+            "maxItems": 27,
             "minItems": 1,
             "title": "Permissions"
           }
