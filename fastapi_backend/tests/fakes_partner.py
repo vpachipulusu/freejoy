@@ -3,10 +3,15 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from app.core.partner_keys import GeneratedKey, generate_key
+from app.partner.clicks_store import (
+    PartnerDayClicks,
+    PartnerOffer,
+    PartnerOfferPage,
+)
 from app.partner.keys import KeyProfile, StoredKey
 from app.repositories.admin_partner_keys import PartnerKeyRecord
 
@@ -85,6 +90,94 @@ class FakeKeyStore:
 
     async def profile(self, key_id: str) -> KeyProfile | None:
         return self.profiles.get(key_id)
+
+
+@dataclass(frozen=True)
+class FakeOffer:
+    """One listed offer of a merchant and its counted clicks per UTC day."""
+
+    merchant_id: str
+    offer_id: str
+    slug: str
+    title: str
+    days: dict[date, int] = field(default_factory=dict)
+
+
+class FakeClickStore:
+    """The partner click store over in-memory offers. Every read filters by the merchant it is given.
+
+    calls records (method, merchant id, ...) so a test can see which merchant a read was made for.
+    """
+
+    def __init__(self) -> None:
+        self.offers_by_id: list[FakeOffer] = []
+        self.calls: list[tuple[Any, ...]] = []
+        # An error to raise from ``offers``, as a database that cannot answer would.
+        self.error: Exception | None = None
+
+    def add(
+        self,
+        merchant_id: str,
+        slug: str,
+        days: dict[date, int] | None = None,
+        title: str | None = None,
+    ) -> FakeOffer:
+        offer = FakeOffer(
+            merchant_id,
+            f"internal-{slug}",
+            slug,
+            title or slug.title(),
+            days or {},
+        )
+        self.offers_by_id.append(offer)
+        return offer
+
+    @staticmethod
+    def _counted(offer: FakeOffer, start: datetime, end: datetime) -> dict[date, int]:
+        return {d: n for d, n in offer.days.items() if start.date() <= d < end.date()}
+
+    async def offers(
+        self, merchant_id: str, start: datetime, end: datetime, limit: int
+    ) -> PartnerOfferPage:
+        self.calls.append(("offers", merchant_id, start, end, limit))
+        if self.error is not None:
+            raise self.error
+        mine = [o for o in self.offers_by_id if o.merchant_id == merchant_id]
+        ranked = sorted(
+            mine,
+            key=lambda o: (
+                -sum(self._counted(o, start, end).values()),
+                o.title,
+                o.offer_id,
+            ),
+        )
+        return PartnerOfferPage(
+            offers=[
+                PartnerOffer(
+                    o.offer_id,
+                    o.slug,
+                    o.title,
+                    sum(self._counted(o, start, end).values()),
+                )
+                for o in ranked[:limit]
+            ],
+            total_offers=len(mine),
+        )
+
+    async def daily(
+        self,
+        merchant_id: str,
+        offer_ids: list[str],
+        start: datetime,
+        end: datetime,
+    ) -> list[PartnerDayClicks]:
+        self.calls.append(("daily", merchant_id, tuple(offer_ids)))
+        return [
+            PartnerDayClicks(o.offer_id, day, n)
+            for o in self.offers_by_id
+            if o.merchant_id == merchant_id and o.offer_id in offer_ids
+            for day, n in sorted(self._counted(o, start, end).items())
+        ]
 
 
 ADMIN_NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)

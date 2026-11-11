@@ -24,7 +24,6 @@ from app.core.rate_limit import (
 )
 from app.core.rate_limit_enforcement import (
     FAIL_CLOSED_RETRY_AFTER_SECONDS,
-    RATE_LIMIT_FAIL_CLOSED_RESPONSES,
     TOO_MANY_REQUESTS_MESSAGE,
     UNAVAILABLE_MESSAGE,
     rate_limit_headers,
@@ -35,9 +34,6 @@ from app.core.sentry import report_exception
 logger = logging.getLogger("yourapp.partner")
 
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-# Declared on the sub-app so the partner contract lists them: a 429 for any call, a 503 where the database or a
-# fail-closed limiter is unavailable.
-PARTNER_LIMIT_RESPONSES = RATE_LIMIT_FAIL_CLOSED_RESPONSES
 
 
 def policy_for(method: str) -> RateLimitPolicy:

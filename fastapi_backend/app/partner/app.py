@@ -3,14 +3,18 @@
 from typing import Any
 
 from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from app.core.config import settings
-from app.core.errors import ERROR_RESPONSES, ErrorResponse, register_error_handlers
+from app.core.errors import register_error_handlers
 from app.core.partner_keys import running_environment
 from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
-from app.partner.limits import PARTNER_LIMIT_RESPONSES
+from app.partner.clicks_routes import partner_validation_handler
+from app.partner.clicks_routes import router as clicks_router
+from app.partner.error_models import PartnerErrorResponse
+from app.partner.failures import register_failure_handlers
 from app.partner.mount import PartnerMount
 from app.partner.routes import router
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
@@ -22,16 +26,21 @@ PARTNER_API_VERSION = "1.0.0"
 
 # Answers every partner route can give besides its own. 401 is decided before routing (the surface) and again by
 # ``require_partner_key``; 429 and 503 come from the rate limits and the database, also before routing.
+# The descriptions are written for a retailer: the partner document is what gets shared.
 PARTNER_RESPONSES: dict[int | str, dict[str, Any]] = {
-    **ERROR_RESPONSES,
     401: {
-        "model": ErrorResponse,
+        "model": PartnerErrorResponse,
         "description": "Missing, unknown, revoked or malformed key",
     },
-    **PARTNER_LIMIT_RESPONSES,
+    422: {"model": PartnerErrorResponse, "description": "Invalid request"},
+    429: {
+        "model": PartnerErrorResponse,
+        "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
+    },
+    500: {"model": PartnerErrorResponse, "description": "Internal server error"},
     503: {
-        "model": ErrorResponse,
-        "description": "Service temporarily unavailable (the database or a limiter)",
+        "model": PartnerErrorResponse,
+        "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
     },
 }
 
@@ -53,7 +62,16 @@ def create_partner_api() -> FastAPI:
         dependencies=[Depends(require_partner_key)],
     )
     register_error_handlers(api)
+    # The shared 422, except that a refused from or to (clicks) gets its own fixed text and code. Any other partner
+    # route that takes a query parameter named from or to would get that text too: give it other names, or scope this.
+    api.add_exception_handler(
+        RequestValidationError,
+        partner_validation_handler,  # type: ignore[arg-type]  # Starlette types handlers on Exception; as in register_error_handlers
+    )
+    # A database that cannot answer inside any partner route is the same fixed 503 as in authentication.
+    register_failure_handlers(api)
     api.include_router(router)
+    api.include_router(clicks_router)
     return api
 
 

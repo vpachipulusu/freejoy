@@ -1,3 +1,4 @@
+import ipaddress
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -11,6 +12,24 @@ from app.core.totp import TotpCodec, TotpUnavailable
 LOCAL_ENVIRONMENTS = frozenset({"local", "test"})
 VERCEL_NON_PRODUCTION = frozenset({"preview", "development"})
 EMAIL_PROVIDERS = frozenset({"", "brevo", "fake"})
+
+
+def _is_public_https_origin(origin: str) -> bool:
+    """True for an https origin whose host is not localhost, a ``.localhost`` name or a loopback or unspecified address."""
+    try:
+        site = urlsplit(origin)
+        host = (site.hostname or "").lower()
+    except ValueError:
+        return False
+    if site.scheme != "https" or not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (address.is_loopback or address.is_unspecified)
 
 
 class Settings(BaseSettings):
@@ -181,6 +200,15 @@ class Settings(BaseSettings):
         if not partner_user or partner_user == owner_user:
             raise ValueError(
                 "PARTNER_DATABASE_URL must use the restricted partner role, not the role of DATABASE_URL"
+            )
+        # Every offer in a click report carries a link to its public page, built from PUBLIC_SITE_URL, which defaults
+        # to http://localhost:3000. A production surface must not hand retailers that. The value is never quoted.
+        if not self.relaxed_environment and not _is_public_https_origin(
+            self.PUBLIC_SITE_URL
+        ):
+            raise ValueError(
+                "PUBLIC_SITE_URL must be an https origin that is not localhost "
+                "when PARTNER_API_ENABLED is true in production"
             )
         return self
 

@@ -10,7 +10,7 @@ from app.core import rate_limiter_provider
 from app.core.partner_keys import GeneratedKey
 from app.partner import deps
 from tests.fakes import FakeRateLimiter
-from tests.fakes_partner import FakeKeyStore, FakePartnerSessions
+from tests.fakes_partner import FakeClickStore, FakeKeyStore, FakePartnerSessions
 
 
 @dataclass
@@ -19,6 +19,7 @@ class PartnerWorld:
     sessions: FakePartnerSessions
     limiter: FakeRateLimiter
     key: GeneratedKey
+    clicks: FakeClickStore
 
     def headers(self, key: GeneratedKey | None = None) -> list[tuple[str, str]]:
         return [("authorization", f"Bearer {(key or self.key).value}")]
@@ -30,7 +31,9 @@ def world(monkeypatch: pytest.MonkeyPatch) -> PartnerWorld:
     sessions = FakePartnerSessions()
     limiter = FakeRateLimiter()
     key = store.add()
+    clicks = FakeClickStore()
     monkeypatch.setattr(deps, "get_partner_session_provider", lambda: sessions)
     monkeypatch.setattr(deps, "build_key_store", lambda session: store)
+    monkeypatch.setattr(deps, "build_click_store", lambda session: clicks)
     monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", limiter)
-    return PartnerWorld(store, sessions, limiter, key)
+    return PartnerWorld(store, sessions, limiter, key, clicks)

@@ -11,12 +11,14 @@ import json
 import pytest
 from fastapi import Request
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
 
 from app.core.config import settings
 from app.core.partner_keys import key_digest
 from app.core.rate_limit import PARTNER_AUTH_FAILURE_POLICY
 from app.main import app
 from app.partner.app import create_partner_api, create_partner_authenticator
+from app.partner.clicks_routes import INVALID_RANGE_CODE, RANGE_MESSAGE
 from app.partner.surface import PartnerSurface
 from tests.api.partner.support import RawResponse, call_raw
 from tests.fakes import RaisingRateLimiter
@@ -32,8 +34,11 @@ FIXED_MESSAGES = frozenset(
         "Too many requests",
         "Internal server error",
         "Service temporarily unavailable",
+        RANGE_MESSAGE,  # a refused clicks range (FREEJ-59): fixed text, repeats nothing
     }
 )
+# The only error body that carries more than ``success`` and ``error``: one stable code, for the range text.
+CODED = {RANGE_MESSAGE: INVALID_RANGE_CODE}
 MARKER = "zz-request-marker-9f3"
 
 
@@ -51,6 +56,18 @@ def _surface(max_body_bytes: int = 64) -> PartnerSurface:
     @api.get("/boom")
     async def boom() -> None:
         raise RuntimeError(f"detail {MARKER}")
+
+    @api.get("/db-down")
+    async def db_down() -> None:
+        raise DBAPIError(
+            f"SELECT secret FROM t WHERE x = '{MARKER}'",
+            {"x": MARKER},
+            Exception(MARKER),
+        )
+
+    @api.get("/connection-refused")
+    async def connection_refused() -> None:
+        raise ConnectionRefusedError(MARKER)
 
     @api.post("/echo")
     async def echo(request: Request) -> dict[str, int]:
@@ -71,9 +88,14 @@ def surface_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def assert_fixed(response: RawResponse, forbidden: list[str]) -> None:
     body = response.json()
-    assert set(body) == {"success", "error"}
     assert body["success"] is False
     assert body["error"] in FIXED_MESSAGES
+    # Exactly the envelope: a code only on the message that has one, and never a null code anywhere.
+    expected_keys = {"success", "error"} | (
+        {"code"} if body["error"] in CODED else set()
+    )
+    assert set(body) == expected_keys
+    assert body.get("code") == CODED.get(body["error"])
     text = response.body.decode() + repr(response.headers)
     for item in forbidden:
         assert item not in text
@@ -114,6 +136,27 @@ async def test_every_partner_error_has_a_fixed_message_and_echoes_nothing(
         headers=[*keyed, ("content-type", "application/json")],
         chunks=[json.dumps({"count": MARKER}).encode()],
     )
+    # 422 again: a refused clicks range, with the marker as a date and the marker in an unknown parameter
+    assert_fixed(
+        await call_raw(
+            surface,
+            "GET",
+            "/clicks",
+            headers=keyed,
+            query_string=f"from={MARKER}&to={MARKER}&{MARKER}={MARKER}",
+        ),
+        forbidden,
+    )
+    assert_fixed(
+        await call_raw(
+            surface,
+            "GET",
+            "/clicks",
+            headers=keyed,
+            query_string="from=2026-03-02&to=2026-03-01",
+        ),
+        [*forbidden, "2026-03-02", "2026-03-01"],
+    )
     # 413: too large, declared and counted
     responses[413] = await call_raw(
         surface, "POST", "/echo", headers=[*keyed, ("content-length", "9999")]
@@ -124,6 +167,12 @@ async def test_every_partner_error_has_a_fixed_message_and_echoes_nothing(
         ),
         forbidden,
     )
+    # 503 again: the database cannot answer inside a route (a statement error, a refused connection)
+    for route in ("/db-down", "/connection-refused"):
+        db_down = await call_raw(surface, "GET", route, headers=keyed)
+        assert db_down.status == 503
+        assert db_down.header("retry-after") is not None
+        assert_fixed(db_down, forbidden)
     # 500: a handler that fails with request data in its message
     responses[500] = await call_raw(surface, "GET", "/boom", headers=keyed)
     # 429 and 503 from the failure limit and the limiter

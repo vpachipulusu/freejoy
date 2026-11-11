@@ -50,6 +50,8 @@ dependencies, and the plain 422 of a malformed parameter) are produced by shared
 sentences saying what a click is and which rule filtered bots). **Counts only**: no referrer host, no user agent, no
 link or destination, nothing about a visitor.
 
+**The partner API** (FREEJ-59, `GET /partner/v1/clicks`, [backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)) gives a retailer its own counts through a separate, narrower query with the same rules (UTC days, bots left out, the same order); a Postgres test shows both give the same per offer per day counts.
+
 **What a click is.** One visitor sent through a Freejoy link to the destination (one `click_events` row). It is not a
 sale, a sign-up or a claim, and not a unique person: a person who clicks twice counts twice. Nothing is deduplicated.
 
