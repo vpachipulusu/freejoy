@@ -395,7 +395,7 @@ describe('Dismiss source change waits like the other status buttons', () => {
   });
 
   it('waits while another write on the page is running, opening nothing and calling nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     function OtherWriter() {
       const review = useOfferReview();
       return (

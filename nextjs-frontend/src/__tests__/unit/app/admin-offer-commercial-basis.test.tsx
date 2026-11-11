@@ -446,7 +446,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   });
 
   it('holds Publish until a basis is chosen, says why, and sends the editor to the choice', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(placeholder());
     const publish = screen.getByRole('button', { name: 'Publish' });
 
@@ -461,7 +461,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   it.each(['Editorial', 'Affiliate', 'Sponsored'])(
     'publishes with the %s the editor chose',
     async (name) => {
-      const user = userEvent.setup();
+      const user = setupUser();
       render(placeholder());
 
       await user.click(within(group()).getByRole('radio', { name }));
@@ -480,7 +480,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   );
 
   it('lets the editor change the choice before publishing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(placeholder());
 
     await user.click(within(group()).getByRole('radio', { name: 'Sponsored' }));
@@ -492,7 +492,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   });
 
   it('asks again when the offer has moved on to a new review token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(placeholder());
     await user.click(within(group()).getByRole('radio', { name: 'Affiliate' }));
 
@@ -553,7 +553,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('saves other changes without a basis, and sends none', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     placeholderForm();
 
     await user.clear(screen.getByLabelText(/^Title/));
@@ -568,7 +568,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('sends the basis the editor picked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     placeholderForm();
 
     await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
@@ -581,7 +581,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('still requires a basis on an offer that is not a placeholder', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(editForm({ commercialBasis: '' }));
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));

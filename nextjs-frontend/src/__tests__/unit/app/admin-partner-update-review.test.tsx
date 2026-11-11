@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   applyPartnerUpdateAction: vi.fn(),
@@ -335,7 +336,7 @@ describe('the comparison', () => {
 
 describe('applying', () => {
   it('applies a draft in one press, with the token and the hash it showed, and announces the outcome', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true)));
 
     await user.click(applyButton());
@@ -358,7 +359,7 @@ describe('applying', () => {
   });
 
   it('ignores a second press while the first write is running, and finishes the write', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let release!: (value: unknown) => void;
     mocks.applyPartnerUpdateAction.mockReturnValue(new Promise((done) => (release = done)));
     render(tree(offer(true)));
@@ -376,7 +377,7 @@ describe('applying', () => {
   });
 
   it('has an empty live region before anything happens, and names the offer while it works', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let release!: (value: unknown) => void;
     mocks.applyPartnerUpdateAction.mockReturnValue(new Promise((done) => (release = done)));
     render(tree(offer(true)));
@@ -402,7 +403,7 @@ describe('applying', () => {
   });
 
   it('moves focus to a stable paragraph when the buttons go away after a write', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(tree(offer(true)));
     await user.click(applyButton());
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
@@ -433,7 +434,7 @@ describe('applying to a live offer', () => {
   });
 
   it('opens a confirmation naming the changed fields and does not write until it is confirmed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     live();
 
     await user.click(applyButton(APPLY));
@@ -451,7 +452,7 @@ describe('applying to a live offer', () => {
     ],
     ['Escape', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
   ])('%s closes it without writing and returns focus to Apply', async (_name, close) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     live();
     await user.click(applyButton(APPLY));
     await screen.findByRole('dialog', { name: TITLE });
@@ -464,7 +465,7 @@ describe('applying to a live offer', () => {
   });
 
   it('applies once when confirmed, even when the confirm button is pressed twice', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     live();
     await user.click(applyButton(APPLY));
     const dialog = await screen.findByRole('dialog', { name: TITLE });
@@ -478,7 +479,7 @@ describe('applying to a live offer', () => {
   });
 
   it('closes the confirmation when the proposal it was opened for is replaced', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = live();
     await user.click(applyButton(APPLY));
     await screen.findByRole('dialog', { name: TITLE });
@@ -496,7 +497,7 @@ describe('dismissing', () => {
   const TITLE = 'Dismiss this retailer update?';
 
   it('asks in a dialog with a title, and Cancel changes nothing and returns focus', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true)));
 
     await user.click(dismissButton());
@@ -509,7 +510,7 @@ describe('dismissing', () => {
   });
 
   it('closes on Escape and returns focus to the button that opened it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true)));
     await user.click(dismissButton());
     await screen.findByRole('dialog', { name: TITLE });
@@ -522,7 +523,7 @@ describe('dismissing', () => {
   });
 
   it('dismisses with the token and the hash after the confirmation, once, however often confirm is pressed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true)));
     await user.click(dismissButton());
     const dialog = await screen.findByRole('dialog', { name: TITLE });
@@ -539,7 +540,7 @@ describe('dismissing', () => {
   });
 
   it('moves focus to the stable paragraph when the buttons go away after a dismissal', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(tree(offer(true)));
     await user.click(dismissButton());
     await user.click(await screen.findByRole('button', { name: 'Dismiss update' }));
@@ -554,7 +555,7 @@ describe('dismissing', () => {
 
 describe('waiting, with the reason attached', () => {
   it('holds both buttons while the form has unsaved edits, says why and describes them by it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true), { dirty: true }));
 
     for (const button of [applyButton(), dismissButton()]) {
@@ -588,7 +589,7 @@ describe('waiting, with the reason attached', () => {
   });
 
   it('holds while another write on the page runs, and does not call its action', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(tree(offer(true), { other: true }));
 
     await user.click(screen.getByRole('button', { name: 'Begin other write' }));
@@ -607,7 +608,7 @@ describe('waiting, with the reason attached', () => {
   });
 
   it('holds the lifecycle steps while a retailer update is being applied, and the reverse', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let release!: (value: unknown) => void;
     mocks.applyPartnerUpdateAction.mockReturnValue(new Promise((done) => (release = done)));
     render(tree(offer(true), { lifecycle: true }));
@@ -645,7 +646,7 @@ describe('waiting, with the reason attached', () => {
 
 describe('a refusal', () => {
   it('shows a destructive toast and a lasting alert, and leaves the buttons usable for another try', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.applyPartnerUpdateAction.mockResolvedValue(REFUSED);
     render(tree(offer(true)));
 
@@ -665,7 +666,7 @@ describe('a refusal', () => {
   });
 
   it('clears the alert when the next attempt starts', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let release!: (value: unknown) => void;
     mocks.applyPartnerUpdateAction.mockResolvedValueOnce(REFUSED);
     render(tree(offer(true)));
@@ -682,7 +683,7 @@ describe('a refusal', () => {
   });
 
   it('shows the dismissal failure the same way', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.dismissPartnerUpdateAction.mockResolvedValue(REFUSED);
     render(tree(offer(true)));
 
@@ -699,7 +700,7 @@ describe('a refusal', () => {
   });
 
   it('turns a server action that throws into the curated failure', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.applyPartnerUpdateAction.mockRejectedValue(new Error('SECRET stack'));
     render(tree(offer(true)));
 
@@ -711,7 +712,7 @@ describe('a refusal', () => {
   });
 
   it('raises the lasting notice and refreshes when the proposal went stale', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.applyPartnerUpdateAction.mockResolvedValue({
       success: false,
       error: 'This offer changed since you opened it. Review it again.',
@@ -730,7 +731,7 @@ describe('a refusal', () => {
   });
 
   it('leaves focus where it was when a later reload arrives after a refused write', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.applyPartnerUpdateAction.mockResolvedValue(REFUSED);
     const { rerender } = render(tree(offer(true)));
     await user.click(applyButton());
