@@ -12,6 +12,7 @@ Every response is ``Cache-Control: no-store``. The destination is never logged.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, Response
@@ -27,7 +28,12 @@ from app.api.rate_limit import (
 from app.api.v1.catalogue_schemas import ExpiredOfferResponse, expired_response
 from app.core.config import settings
 from app.core.errors import ErrorResponse
-from app.core.rate_limit import OUTBOUND_CLICK_POLICY, OUTBOUND_OFFER_POLICY
+from app.core.rate_limit import (
+    OUTBOUND_CLICK_POLICY,
+    OUTBOUND_OFFER_BOT_POLICY,
+    OUTBOUND_OFFER_POLICY,
+    RateLimitPolicy,
+)
 from app.core.sentry import report_exception
 from app.models.platform.click_event import UserAgentClass
 from app.repositories.catalogue import CatalogueRepository
@@ -53,31 +59,49 @@ router = APIRouter(
 OfferIdPath = Annotated[str, Path(pattern=OFFER_ID_PATTERN)]
 
 
-async def offer_has_room(
+RecordGate = Callable[[UserAgentClass | None], Awaitable[bool]]
+
+
+def offer_policy_for(user_agent_class: UserAgentClass | None) -> RateLimitPolicy:
+    """The per-offer budget a click spends: BOT has its own, everything else (and no class) the main one."""
+    if user_agent_class is UserAgentClass.BOT:
+        return OUTBOUND_OFFER_BOT_POLICY
+    return OUTBOUND_OFFER_POLICY
+
+
+def offer_recording_gate(
     request: Request, limiter: RateLimiterDep, offer_id: OfferIdPath
-) -> bool:
-    """Second limit, per offer id: True while this offer may still gain a recorded click this minute.
+) -> RecordGate:
+    """Second limit, per offer id: a gate that says whether this offer may still gain a recorded click.
 
-    Past the cap the visitor is still sent on (``record`` is False): refusing would punish the visitor for
-    a crowd, while capping only limits how many clicks one offer can add per minute. A limiter outage
-    records the click as usual, like the other public routes (the policy fails open).
+    The device class is in the body, which a dependency does not see, so the route calls the gate once it has the
+    class. The gate spends exactly one hit, on the bucket the class selects (``offer_policy_for``), and a
+    ``BOT`` request never touches the main budget. Past the cap the visitor is still sent on (``record`` is
+    False): refusing would punish the visitor for a crowd, while capping only limits how many clicks one offer
+    can add per minute. A limiter outage records the click as usual, like the other public routes (the policy
+    fails open).
     """
-    identifier = f"{OUTBOUND_OFFER_POLICY.scope}:offer:{offer_id}"
-    try:
-        decision = await limiter.hit(identifier, OUTBOUND_OFFER_POLICY)
-    except Exception as exc:
-        request_id = request.scope.get("state", {}).get("request_id")
-        logger.warning(
-            "offer cap limiter unavailable, recording the click",
-            exc_info=exc,
-            extra={"request_id": request_id},
-        )
-        report_exception(exc)
-        return True
-    return decision.allowed
+
+    async def may_record(user_agent_class: UserAgentClass | None) -> bool:
+        policy = offer_policy_for(user_agent_class)
+        identifier = f"{policy.scope}:offer:{offer_id}"
+        try:
+            decision = await limiter.hit(identifier, policy)
+        except Exception as exc:
+            request_id = request.scope.get("state", {}).get("request_id")
+            logger.warning(
+                "offer cap limiter unavailable, recording the click",
+                exc_info=exc,
+                extra={"request_id": request_id},
+            )
+            report_exception(exc)
+            return True
+        return decision.allowed
+
+    return may_record
 
 
-RecordAllowed = Annotated[bool, Depends(offer_has_room)]
+RecordGateDep = Annotated[RecordGate, Depends(offer_recording_gate)]
 
 
 class ClickRequest(BaseModel):
@@ -140,11 +164,12 @@ def _no_store(body: BaseModel, status_code: int = 200) -> Response:
 async def record_click(
     offer_id: OfferIdPath,
     service: ClickServiceDep,
-    record: RecordAllowed,
+    may_record: RecordGateDep,
     body: Annotated[ClickRequest | None, Body()] = None,
 ) -> Response:
     """Write one click event for a live offer and return its affiliate destination."""
     request = body or ClickRequest()
+    record = await may_record(request.user_agent_class)
     outcome = await service.record_click(
         offer_id, request.referrer_host, request.user_agent_class, record=record
     )

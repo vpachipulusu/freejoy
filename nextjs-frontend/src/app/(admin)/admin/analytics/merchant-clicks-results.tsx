@@ -90,7 +90,8 @@ export async function MerchantClicksResults({ query }: { query: ClicksQuery }) {
       {report.excluded_bot_clicks > 0 ? (
         <p className="text-sm text-muted-foreground">
           {plural(report.excluded_bot_clicks, 'click', 'clicks')} from automated visitors (bots)
-          were left out of these counts.
+          were left out of these counts. This is a minimum: recording of bot clicks is capped, so
+          there may have been more.
         </p>
       ) : null}
       <DownloadClicksButton merchantId={query.merchant} from={query.from} to={query.to} />

@@ -8,7 +8,7 @@ lives in the internal developer docs, and this test keeps it equal to the policy
 from pathlib import Path
 
 from app.api.v1 import catalogue_click
-from app.core.rate_limit import OUTBOUND_OFFER_POLICY
+from app.core.rate_limit import OUTBOUND_OFFER_BOT_POLICY, OUTBOUND_OFFER_POLICY
 
 REPO = Path(__file__).resolve().parents[4]
 DOCS = (
@@ -26,6 +26,16 @@ def test_each_internal_doc_states_the_cap_the_code_enforces() -> None:
     phrase = f"{OUTBOUND_OFFER_POLICY.limit} clicks for one offer in a minute"
     for doc in DOCS:
         assert phrase in doc.read_text(encoding="utf-8").replace("\r\n", "\n"), doc.name
+
+
+def test_each_internal_doc_states_the_bot_cap_the_code_enforces() -> None:
+    assert OUTBOUND_OFFER_BOT_POLICY.scope != OUTBOUND_OFFER_POLICY.scope
+    for doc in DOCS:
+        text = doc.read_text(encoding="utf-8")
+        assert "OUTBOUND_OFFER_BOT_POLICY" in text, doc.name
+        assert f"{OUTBOUND_OFFER_BOT_POLICY.limit} a minute" in text.replace(
+            "per minute", "a minute"
+        ), doc.name
 
 
 def test_the_public_schema_does_not_state_the_cap_or_how_the_limiter_behaves() -> None:
