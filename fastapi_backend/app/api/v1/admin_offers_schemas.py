@@ -291,6 +291,8 @@ class OfferSummaryOut(BaseModel):
     # Both null for an offer made by hand.
     import_provider: str | None
     source_changed_at: datetime | None
+    # The retailer's own ref, for an offer submitted through the partner API (its "Submitted by retailer" marker).
+    partner_ref: str | None
 
 
 class OfferOut(OfferSummaryOut):
@@ -362,17 +364,22 @@ def link_out(record: AffiliateLinkRecord) -> AffiliateLinkOut:
     return AffiliateLinkOut(**record.__dict__)
 
 
-def _import_fields(provenance: OfferProvenance | None) -> dict[str, Any]:
+def _import_fields(
+    provenance: OfferProvenance | None, partner_ref: str | None = None
+) -> dict[str, Any]:
     return {
+        "partner_ref": partner_ref,
         "import_provider": provenance.provider if provenance else None,
         "source_changed_at": provenance.source_changed_at if provenance else None,
     }
 
 
 def summary_out(
-    record: OfferRecord, provenance: OfferProvenance | None
+    record: OfferRecord,
+    provenance: OfferProvenance | None,
+    partner_ref: str | None = None,
 ) -> OfferSummaryOut:
-    return OfferSummaryOut(**record.__dict__, **_import_fields(provenance))
+    return OfferSummaryOut(**record.__dict__, **_import_fields(provenance, partner_ref))
 
 
 def partner_out(record: PartnerSubmissionRecord | None) -> PartnerSubmissionOut | None:
@@ -402,7 +409,7 @@ def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
     provenance = detail.provenance
     return {
         **detail.offer.__dict__,
-        **_import_fields(provenance),
+        **_import_fields(provenance, detail.partner.ref if detail.partner else None),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
         "needs_basis_confirmation": needs_basis_confirmation(

@@ -2110,6 +2110,10 @@ export type OfferOut = {
      */
     source_changed_at: string | null;
     /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
+    /**
      * Review Token
      */
     review_token: string;
@@ -2276,6 +2280,10 @@ export type OfferSummaryOut = {
      * Source Changed At
      */
     source_changed_at: string | null;
+    /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
 };
 
 /**
@@ -2339,6 +2347,10 @@ export type OfferWriteOut = {
      * Source Changed At
      */
     source_changed_at: string | null;
+    /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
     /**
      * Review Token
      */

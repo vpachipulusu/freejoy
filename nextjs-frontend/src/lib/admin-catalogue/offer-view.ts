@@ -24,6 +24,8 @@ export interface OfferRowView {
   importProvider: string | null;
   /** Set while the source has moved on and nobody has reviewed the change (the review queue). */
   sourceChangedAt: string | null;
+  /** The retailer's own ref, for an offer submitted through the partner API; null otherwise. */
+  partnerRef: string | null;
 }
 
 /** Where an imported offer came from (the offer page's read-only Provenance panel). */
@@ -32,6 +34,23 @@ export interface OfferProvenanceView {
   externalId: string;
   appliedAt: string;
   sourceChangedAt: string | null;
+}
+
+/** What a retailer proposed for an offer an editor has touched: sanitised content, as the partner API stored it. */
+export interface PartnerProposalView {
+  /** Sent back to apply or dismiss: it names exactly the proposal the editor was shown. */
+  hash: string;
+  submittedAt: string;
+  payload: Record<string, unknown>;
+}
+
+/** The retailer behind an offer submitted through the partner API. */
+export interface PartnerSubmissionView {
+  ref: string;
+  merchantId: string;
+  merchantName: string;
+  submittedAt: string;
+  pending: PartnerProposalView | null;
 }
 
 export interface OfferLinkView {
@@ -70,6 +89,8 @@ export interface OfferDetailView extends OfferRowView {
   needsBasisConfirmation: boolean;
   /** Null for an offer made by hand. */
   provenance: OfferProvenanceView | null;
+  /** Null unless the offer was submitted through the partner API. */
+  partnerSubmission: PartnerSubmissionView | null;
 }
 
 const LOCAL_DATE_TIME_LENGTH = 19;

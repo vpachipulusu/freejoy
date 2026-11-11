@@ -17127,6 +17127,17 @@
             ],
             "title": "Source Changed At"
           },
+          "partner_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partner Ref"
+          },
           "review_token": {
             "type": "string",
             "title": "Review Token"
@@ -17307,6 +17318,7 @@
           "updated_at",
           "import_provider",
           "source_changed_at",
+          "partner_ref",
           "review_token",
           "needs_basis_confirmation",
           "provenance",
@@ -17467,6 +17479,17 @@
               }
             ],
             "title": "Source Changed At"
+          },
+          "partner_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partner Ref"
           }
         },
         "type": "object",
@@ -17484,7 +17507,8 @@
           "last_verified_at",
           "updated_at",
           "import_provider",
-          "source_changed_at"
+          "source_changed_at",
+          "partner_ref"
         ],
         "title": "OfferSummaryOut"
       },
@@ -17585,6 +17609,17 @@
               }
             ],
             "title": "Source Changed At"
+          },
+          "partner_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partner Ref"
           },
           "review_token": {
             "type": "string",
@@ -17770,6 +17805,7 @@
           "updated_at",
           "import_provider",
           "source_changed_at",
+          "partner_ref",
           "review_token",
           "needs_basis_confirmation",
           "provenance",

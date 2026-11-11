@@ -38,6 +38,9 @@ export const reviewTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
  */
 export const sourceChangedAtSchema = z.string().max(40).datetime({ offset: true });
 
+/** The hash of the retailer update the page showed (a SHA-256 in hex), sent back when it is applied or dismissed. */
+export const pendingHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 const SLUG_FOR_PATH = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Runs `action` only for a confirmed admin; everyone else gets the curated refusal and nothing is called. */

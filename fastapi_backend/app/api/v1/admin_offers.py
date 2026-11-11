@@ -115,7 +115,12 @@ async def admin_list_offers(
     return OffersPageResponse(
         data=OffersPage(
             offers=[
-                summary_out(item, page.provenance.get(item.id)) for item in page.offers
+                summary_out(
+                    item,
+                    page.provenance.get(item.id),
+                    page.partner_refs.get(item.id),
+                )
+                for item in page.offers
             ],
             total_count=page.total_count,
             limit=limit,

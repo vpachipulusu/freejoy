@@ -92,6 +92,7 @@ async def test_a_new_submission_is_in_the_review_queue_with_no_change_to_the_que
     (queued,) = queue.json()["data"]["offers"]
     assert queued["title"] == "Free sample box"
     assert queued["import_provider"] == "partner"
+    assert queued["partner_ref"] == "sku-1"
     assert queued["status"] == "DRAFT"
 
 

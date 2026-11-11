@@ -110,6 +110,8 @@ describe('offerToFormValues and the basis', () => {
       importProvider: null,
       sourceChangedAt: null,
       provenance: null,
+      partnerSubmission: null,
+      partnerRef: null,
       reviewToken: 'tok',
       summary: 'S',
       description: [],

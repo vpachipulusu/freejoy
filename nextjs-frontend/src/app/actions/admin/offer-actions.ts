@@ -14,6 +14,7 @@ import {
   failed,
   invalidForm,
   notFound,
+  pendingHashSchema,
   refreshPublicCatalogue,
   resourceIdSchema,
   reviewTokenSchema,
@@ -21,12 +22,15 @@ import {
   type CatalogueActionResult,
 } from '@/lib/api/admin-catalogue-action';
 import {
+  NO_PARTNER_UPDATE_MESSAGE,
   NO_SOURCE_CHANGE_MESSAGE,
   OFFER_CHANGED_MESSAGE,
   OFFER_NOT_FOUND_MESSAGE,
 } from '@/lib/api/admin-catalogue-errors';
 import {
+  applyAdminOfferPartnerUpdate,
   createAdminOffer,
+  dismissAdminOfferPartnerUpdate,
   dismissAdminOfferSourceChange,
   patchAdminOffer,
   runAdminOfferAction,
@@ -257,4 +261,97 @@ export async function offerLifecycleAction(
       },
     };
   });
+}
+
+type PartnerUpdateCall = typeof applyAdminOfferPartnerUpdate;
+
+/**
+ * The shared body of applying or dismissing a retailer's update: the id, the review token and the proposal hash
+ * the page showed are validated before the API is called (a malformed one is the curated "changed since you opened
+ * it", with only the action name logged), every failure is a curated message and a success refreshes the admin
+ * pages. `publicToo` also refreshes the public catalogue: applying edits what a live offer says.
+ */
+async function partnerUpdateAction(
+  name: 'apply_partner_update' | 'dismiss_partner_update',
+  call: PartnerUpdateCall,
+  offerId: string,
+  reviewToken: string | undefined,
+  pendingHash: string | undefined,
+  publicToo: boolean
+): Promise<CatalogueActionResult<OfferActionData>> {
+  return asAdmin(async () => {
+    if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
+    const token = reviewTokenSchema.safeParse(reviewToken);
+    const hash = pendingHashSchema.safeParse(pendingHash);
+    if (!token.success || !hash.success) {
+      logger.warn('Admin offer action: review token or proposal hash missing or malformed', {
+        action: name,
+      });
+      return { success: false, error: OFFER_CHANGED_MESSAGE };
+    }
+
+    const result = await call(offerId, token.data, hash.data);
+    if (!result.success) {
+      const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, `Admin ${name} failed`);
+      if (result.code === 'offer_changed') {
+        refreshAdminPages(offerId);
+        return { ...refusal, reason: 'offer_changed' };
+      }
+      if (result.code === 'illegal_transition') {
+        refreshAdminPages(offerId);
+        return { success: false, error: NO_PARTNER_UPDATE_MESSAGE };
+      }
+      return refusal;
+    }
+
+    refreshAdminPages(offerId);
+    const { id, slug, status } = result.data;
+    if (publicToo && status === 'PUBLISHED') refreshPublicCatalogue(slug);
+    return {
+      success: true,
+      data: {
+        id,
+        slug,
+        status: status as OfferStatus,
+        reviewToken: plainToken(result.data.review_token),
+        previousReviewToken: plainToken(result.data.previous_review_token),
+      },
+    };
+  });
+}
+
+/**
+ * Applies the update a retailer sent for an offer an editor has touched: the API writes it through the normal edit
+ * path, after the review token and the proposal hash the page showed check out. It needs `offers.write` (and
+ * `offers.publish` for a live offer); the API checks the admin's own permission.
+ */
+export async function applyPartnerUpdateAction(
+  offerId: string,
+  reviewToken?: string,
+  pendingHash?: string
+): Promise<CatalogueActionResult<OfferActionData>> {
+  return partnerUpdateAction(
+    'apply_partner_update',
+    applyAdminOfferPartnerUpdate,
+    offerId,
+    reviewToken,
+    pendingHash,
+    true
+  );
+}
+
+/** Dismisses the update a retailer sent: it is forgotten and the offer leaves the review queue; nothing is edited. */
+export async function dismissPartnerUpdateAction(
+  offerId: string,
+  reviewToken?: string,
+  pendingHash?: string
+): Promise<CatalogueActionResult<OfferActionData>> {
+  return partnerUpdateAction(
+    'dismiss_partner_update',
+    dismissAdminOfferPartnerUpdate,
+    offerId,
+    reviewToken,
+    pendingHash,
+    false
+  );
 }

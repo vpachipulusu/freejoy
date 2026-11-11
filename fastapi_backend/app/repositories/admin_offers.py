@@ -129,6 +129,8 @@ class OfferPage:
     total_count: int
     # By offer id, for the imported offers on this page only (a hand-made offer has no entry).
     provenance: Mapping[str, OfferProvenance] = dataclass_field(default_factory=dict)
+    # By offer id: the retailer's own ref, for the offers submitted through the partner API on this page.
+    partner_refs: Mapping[str, str] = dataclass_field(default_factory=dict)
 
 
 _OFFER_FIELDS = tuple(OfferRecord.__dataclass_fields__)
@@ -191,8 +193,10 @@ class AdminOfferRepository(BaseRepository):
                 OfferImport.external_id,
                 OfferImport.applied_at,
                 OfferImport.source_changed_at,
+                PartnerSubmission.ref.label("partner_ref"),
             )
             .outerjoin(OfferImport, OfferImport.offer_id == Offer.id)
+            .outerjoin(PartnerSubmission, PartnerSubmission.offer_id == Offer.id)
             .where(*conditions)
             .order_by(Offer.updated_at.desc(), Offer.id)
             .limit(limit)
@@ -212,7 +216,12 @@ class AdminOfferRepository(BaseRepository):
             for row in rows
             if row.provider is not None
         }
-        return OfferPage([_offer(row.Offer) for row in rows], total or 0, provenance)
+        partner_refs = {
+            row.Offer.id: row.partner_ref for row in rows if row.partner_ref is not None
+        }
+        return OfferPage(
+            [_offer(row.Offer) for row in rows], total or 0, provenance, partner_refs
+        )
 
     async def get_provenance(
         self, offer_id: str, *, lock: bool = False

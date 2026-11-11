@@ -24,6 +24,8 @@ export const CLICKS_MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists
 export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
 export const NO_SOURCE_CHANGE_MESSAGE =
   'There is no source change to dismiss on this offer. This page has been refreshed.';
+export const NO_PARTNER_UPDATE_MESSAGE =
+  'There is no retailer update waiting on this offer any more. This page has been refreshed.';
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Wait a minute and try again.';
 export const INVALID_INPUT_MESSAGE = 'Some values were rejected. Check the form and try again.';
 export const INVALID_FORM_MESSAGE = 'Check the highlighted fields and try again.';

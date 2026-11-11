@@ -20,6 +20,7 @@ import { OfferForm } from '../_components/offer-form';
 import { OfferLifecycleButtons } from '../_components/offer-lifecycle-buttons';
 import { OfferLinksList } from '../_components/offer-links-list';
 import { OfferProvenancePanel } from '../_components/offer-provenance-panel';
+import { PartnerSubmissionPanel } from '../_components/partner-submission-panel';
 import { OfferReviewProvider } from '../_components/offer-review-context';
 
 type Params = Promise<{ id: string }>;
@@ -106,7 +107,15 @@ export default async function EditOfferPage({ params }: { params: Params }) {
             />
           </div>
 
-          {offer.provenance ? (
+          {offer.partnerSubmission ? (
+            <PartnerSubmissionPanel
+              offer={offer}
+              status={offer.status}
+              categoryNames={Object.fromEntries(
+                categoryOptions.map((option) => [option.id, option.name])
+              )}
+            />
+          ) : offer.provenance ? (
             <OfferProvenancePanel
               provenance={offer.provenance}
               offerId={offer.id}

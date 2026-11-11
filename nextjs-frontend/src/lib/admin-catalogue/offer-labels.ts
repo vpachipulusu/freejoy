@@ -40,7 +40,7 @@ export const POSTAGE_KIND_LABELS: Record<string, string> = {
   CHECK_TERMS: 'Check the terms',
 };
 
-const PROVIDER_LABELS: Record<string, string> = { awin: 'Awin' };
+const PROVIDER_LABELS: Record<string, string> = { awin: 'Awin', partner: 'Retailer (partner API)' };
 
 /** The affiliate network an offer was imported from, by name; one this UI does not know shows as sent. */
 export function providerLabel(value: string): string {
