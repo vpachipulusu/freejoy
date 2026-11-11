@@ -18,6 +18,7 @@ import {
   lookupOffer,
   settle,
 } from '@/lib/catalogue';
+import { forcesDisclosure } from '@/lib/outbound/disclosure';
 import { endedOfferState } from '@/lib/seo/indexing';
 import { buildBreadcrumbList } from '@/lib/seo/json-ld';
 import { NOINDEX_FOLLOW_ROBOTS, offerRobots, openGraphFor } from '@/lib/seo/metadata';
@@ -31,6 +32,8 @@ export const dynamic = 'force-dynamic';
 
 interface OfferPageProps {
   params: Promise<{ slug: string }>;
+  /** Only `ad` is read, and only to ADD the commission disclosure (see `@/lib/outbound/disclosure`). */
+  searchParams?: Promise<{ ad?: string | string[] }>;
 }
 
 const NOT_FOUND_METADATA: Metadata = { title: 'Offer not found', robots: { index: false } };
@@ -41,7 +44,9 @@ const UNAVAILABLE_METADATA: Metadata = {
   robots: NOINDEX_FOLLOW_ROBOTS,
 };
 
-export async function generateMetadata({ params }: OfferPageProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: Pick<OfferPageProps, 'params'>): Promise<Metadata> {
   const { slug } = await params;
   const [lookup, today] = await Promise.all([settle(lookupOffer(slug)), getToday()]);
   if (!lookup.ok) return UNAVAILABLE_METADATA;
@@ -82,8 +87,9 @@ export async function generateMetadata({ params }: OfferPageProps): Promise<Meta
   };
 }
 
-export default async function OfferPage({ params }: OfferPageProps) {
+export default async function OfferPage({ params, searchParams }: OfferPageProps) {
   const { slug } = await params;
+  const disclosureForced = forcesDisclosure((await searchParams)?.ad);
   const lookup = await settle(lookupOffer(slug));
   if (!lookup.ok) return <CatalogueUnavailablePage heading="This freebie" />;
 
@@ -97,6 +103,8 @@ export default async function OfferPage({ params }: OfferPageProps) {
   }
 
   const { offer } = result;
+  // `?ad=1` (the bounce from a stale link) can only add the disclosure: the hero renders as if the offer earns.
+  const heroOffer = disclosureForced ? { ...offer, earnsCommission: true } : offer;
   const [categoryRead, relatedRead, merchantsRead, today] = await Promise.all([
     settle(getCategoryBySlug(offer.categorySlug)),
     settle(getRelatedOffers(offer, 4)),
@@ -124,7 +132,7 @@ export default async function OfferPage({ params }: OfferPageProps) {
       />
       <Breadcrumbs category={category} title={offer.title} />
       <div className="mt-6 space-y-12 sm:mt-8 sm:space-y-16">
-        <OfferHero offer={offer} merchant={merchant} category={category} ended={ended} />
+        <OfferHero offer={heroOffer} merchant={merchant} category={category} ended={ended} />
         <ClaimSteps steps={offer.steps} />
         <ImportantBits offer={offer} />
         <RelatedOffers offers={related} merchants={merchants} category={category} />

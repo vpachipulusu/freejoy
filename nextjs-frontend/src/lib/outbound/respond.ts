@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { refreshPublicCatalogue } from '@/lib/api/admin-catalogue-action';
 import { recordOutboundClick, type OutboundClickResult } from '@/lib/api/outbound';
 import { logger } from '@/lib/logger';
+import { disclosureBouncePath, isExactMarker, UNDISCLOSED_PARAM } from './disclosure';
 import {
   classifyUserAgent,
   isOfferId,
@@ -31,7 +31,6 @@ const NO_STORE = 'no-store';
 const UNAVAILABLE_RETRY_SECONDS = '30';
 const ENDED_REDIRECT_STATUS = 302;
 const DISCLOSURE_REDIRECT_STATUS = 303;
-const UNDISCLOSED_PARAM = 'nd';
 const REDIRECT_STATUS = 307;
 
 function textResponse(status: number, body: string | null, headers: Record<string, string> = {}) {
@@ -83,23 +82,23 @@ function endedRedirect(slug: string): NextResponse {
 
 /** True only for exactly one `nd` parameter with the exact value `1`. */
 function pageShowedNoDisclosure(request: NextRequest): boolean {
-  const values = request.nextUrl.searchParams.getAll(UNDISCLOSED_PARAM);
-  return values.length === 1 && values[0] === '1';
+  return isExactMarker(request.nextUrl.searchParams.getAll(UNDISCLOSED_PARAM));
 }
 
 /**
  * The page the visitor came from showed no commission disclosure but this offer earns one (its cached copy was
- * stale). No click was recorded and no destination reached this server. The page cache is expired so the next
- * render is fresh, then the visitor is sent back to it with a RELATIVE Location built from a checked slug. The
- * fresh page shows "Ad" and a plain `/go/<id>` link, so this cannot loop.
+ * stale). No click was recorded and no destination reached this server. The visitor is sent back to the offer page
+ * with a RELATIVE Location built from a checked slug and `?ad=1`, which makes that page show the disclosure and a
+ * plain `/go/<id>` link whatever its cached flag says (see `./disclosure`), so this cannot loop. This route never
+ * touches the catalogue cache: an anonymous request must not be able to expire it. The stale entry ages out on its
+ * own within the revalidate window (`fetchOffer`).
  */
 function disclosureRedirect(offerId: string, slug: string): NextResponse {
   if (!isOfferSlug(slug)) return notFound();
   logger.info('Outbound click sent back for a commission disclosure', { offerId });
-  refreshPublicCatalogue(slug);
   return new NextResponse(null, {
     status: DISCLOSURE_REDIRECT_STATUS,
-    headers: { Location: `/freebies/${slug}`, 'Cache-Control': NO_STORE },
+    headers: { Location: disclosureBouncePath(slug), 'Cache-Control': NO_STORE },
   });
 }
 

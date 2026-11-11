@@ -29,7 +29,7 @@ the `affiliate_links` row, the backend response to the Next.js server, and the `
 | Outcome | `/go/<id>` answers | Backend answer | Click row |
 |---|---|---|---|
 | Live offer, usable link | `307` to the destination | `200 {"success": true, "data": {"destination_url": ...}}` | one |
-| Offer that earns commission, link marked `?nd=1` (the page showed no "Ad") | `303` to the **relative** `/freebies/<slug>`, page cache expired | `409` code `disclosure_required` with the slug, `no-store` | none |
+| Offer that earns commission, link marked `?nd=1` (the page showed no "Ad") | `303` to the **relative** `/freebies/<slug>?ad=1`, no cache call | `409` code `disclosure_required` with the slug, `no-store` | none |
 | Offer that was public and has ended | `302` to the **relative** `/freebies/<slug>?ended=1` | `410` with `expired: true` and the slug (same body as `GET /v1/catalogue/offers/{slug}`) | none |
 | Unknown, draft, archived, never-live, hidden category or inactive merchant | `404` | `404 Offer not found` (one identical body) | none |
 | Live offer with no usable link (none active, bad URL, host not allowed) | `404` | the same `404 Offer not found` | none |
@@ -294,11 +294,17 @@ network. "Sponsored" is a different disclosure and does not depend on it.
   body (the field is left out otherwise; the backend default is true). After the link is chosen and before any row is
   written, `OutboundClickService.record_click` runs the same `offer_earns_commission` rule: if the click is undisclosed
   and the offer earns, the outcome is `DisclosureNeeded(slug)`, the router answers `409` with code `disclosure_required`
-  and the slug (`Cache-Control: no-store`, no destination), and nothing is recorded. The route then calls
-  `refreshPublicCatalogue(slug)` (tag expiry) and answers a relative `303` to `/freebies/<slug>` built from a slug that
-  passes `isOfferSlug`; the fresh page shows "Ad" and a plain `/go/<id>` link, so there is no loop. The parameter can only
-  make the redirect stricter, so a forged `nd=1` gains a bounce back to the offer page and nothing else. Nothing is logged
-  beyond the offer id and the reason.
+  and the slug (`Cache-Control: no-store`, no destination), and nothing is recorded. The route then answers a
+  relative `303` to `/freebies/<slug>?ad=1`, built from a slug that passes `isOfferSlug`. The offer page
+  (`src/app/(public)/freebies/[slug]/page.tsx`) reads exactly one `ad` parameter with the exact value `1`
+  (`forcesDisclosure` in `src/lib/outbound/disclosure.ts`, the same exact-match rule as `nd`) and renders the hero as if
+  the offer earned: "Ad", the commission sentence and a plain `/go/<id>` link without `nd`, so the next click is treated as
+  disclosed and there is no loop. Any other `ad` value, a repeated `ad` or none leaves the mapped flag alone. **The click
+  route never touches the catalogue cache** (no tag expiry, no path revalidation): an anonymous request must not be able
+  to expire the cache for every page. `nd` can only make the redirect stricter and `ad` can only add a disclosure, so a
+  forged value of either gains nothing (a forged `nd=1` gets a bounce to the offer page; a forged `ad=1` gets an "Ad"
+  label the offer might not need). The canonical URL, the Open Graph URL and the JSON-LD are built from the slug and never
+  carry `ad` (a test asserts it). Nothing is logged beyond the offer id and the reason.
 - **A missing flag discloses.** `mapOfferDetail` (`src/lib/catalogue/api-mapper.ts`) carries a boolean as sent and, when
   the flag is absent or not a boolean (an older backend), keeps the offer, logs a warning with the slug and stores `null`
   ("unknown"); list items map to `null` too. `OfferHero` passes `earnsCommission !== false` to the call to action, whose
@@ -309,10 +315,12 @@ network. "Sponsored" is a different disclosure and does not depend on it.
   backend directly when the entry is older than `CATALOGUE_REVALIDATE_SECONDS`. After an editor changes the links or the
   basis, the page can therefore describe the previous state for at most about a minute in the normal case. A page that
   over-discloses for that minute does no harm. A page that under-discloses (a stale "no Ad" link whose offer now earns,
-  or a tab opened earlier) is caught by the click guard: the visitor is bounced back to the refreshed offer page and
-  nothing is recorded or sent to the brand. What remains: a bounce for the visitor in that case, and the fact that a link
-  without `?nd=1` followed by hand or from a bookmark (no page involved) is unaffected. Only an admin action that calls
-  `refreshPublicCatalogue` clears the cache sooner; the Awin import and direct database edits do not.
+  or a tab opened earlier) is caught by the click guard: the visitor is bounced to the offer page with `?ad=1`, which shows
+  the disclosure whatever the cached flag says, and nothing is recorded or sent to the brand. The stale cached entry is
+  not expired by that bounce; it ages out on its own within the 60 seconds above. What remains: a bounce for the visitor
+  in that case, and the fact that a link without `?nd=1` followed by hand or from a bookmark (no page involved) is
+  unaffected. Only an admin action that calls `refreshPublicCatalogue` clears the cache sooner; the Awin import and direct
+  database edits do not.
 - **Deploy order: backend first, then frontend.** The generated client and the schema treat `earns_commission` as
   required, and the frontend sends `commission_disclosed`, so the backend that understands both must be live before the
   frontend. Against an older backend the frontend still works and discloses (a missing flag is unknown), but the click
