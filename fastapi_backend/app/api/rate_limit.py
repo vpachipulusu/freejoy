@@ -19,6 +19,7 @@ from app.api.deps import get_rate_limiter
 from app.core.config import settings
 from app.core.rate_limit import (
     AUTH_POLICY,
+    IPV6_GROUP_PREFIX,
     RateLimiter,
     RateLimitPolicy,
     client_bucket,
@@ -105,7 +106,7 @@ def client_ip(request: Request) -> str:
 
     Only a validated internal service key may establish the forwarding trust boundary.
     Otherwise use the direct peer; ignore inbound X-Forwarded-For. For rate-limit keys use
-    ``client_key``, which groups IPv6 by /64.
+    ``client_key``, which groups IPv6 by /64 (the click policies pass /56).
     """
     forwarded = forwarded_client_ip(request)
     if forwarded is not None:
@@ -114,31 +115,33 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def bucket_of(address: str) -> str:
+def bucket_of(address: str, ipv6_prefix: int = IPV6_GROUP_PREFIX) -> str:
     """``client_bucket`` that leaves a non-address (the ``unknown`` peer) as it is."""
     try:
-        return client_bucket(address)
+        return client_bucket(address, ipv6_prefix)
     except ValueError:
         return address
 
 
-def client_key(request: Request) -> str:
-    """The rate-limit key part for the end user: IPv4 as is, IPv6 grouped by /64."""
-    return bucket_of(client_ip(request))
+def client_key(request: Request, ipv6_prefix: int = IPV6_GROUP_PREFIX) -> str:
+    """The rate-limit key part for the end user: IPv4 as is, IPv6 grouped by /64 (or ``ipv6_prefix``)."""
+    return bucket_of(client_ip(request), ipv6_prefix)
 
 
-def limit_by_client_ip(policy: RateLimitPolicy) -> Callable[..., Awaitable[None]]:
+def limit_by_client_ip(
+    policy: RateLimitPolicy, ipv6_prefix: int = IPV6_GROUP_PREFIX
+) -> Callable[..., Awaitable[None]]:
     """Dependency factory for unauthenticated routes with no user to key on.
 
-    Keyed by the forwarded client IP (see ``client_key``). It sets rate-limit headers on
-    the injected response; a route that returns its own cacheable ``Response`` drops
+    Keyed by the forwarded client IP (see ``client_key``; ``ipv6_prefix`` sets how IPv6 is grouped). It sets
+    rate-limit headers on the injected response; a route that returns its own cacheable ``Response`` drops
     them, so a shared cache never stores one client's counters.
     """
 
     async def dependency(
         request: Request, response: Response, limiter: RateLimiterDep
     ) -> None:
-        identifier = f"{policy.scope}:ip:{client_key(request)}"
+        identifier = f"{policy.scope}:ip:{client_key(request, ipv6_prefix)}"
         await enforce_rate_limit(request, response, limiter, policy, [identifier])
 
     return dependency

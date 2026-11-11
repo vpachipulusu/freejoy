@@ -262,8 +262,13 @@ describe('partner API page (FREEJ-59)', () => {
     expect(heading.nextElementSibling).toHaveTextContent(/not a sale, a sign-up or a claim/);
     const text = pageText(container);
     expect(text).toMatch(/clicks twice counts twice/);
+    expect(text).toMatch(
+      /Counts can also be overstated by automated traffic that does not identify itself as automated\./
+    );
     expect(text).toMatch(/Recording is rate limited for each offer/);
-    expect(text).toMatch(/some clicks are not recorded and the count can be low/);
+    expect(text).toMatch(
+      /in a very busy minute, or when many clicks on one offer come from one network in a minute, some clicks are not recorded and the count can be low/
+    );
     expect(text).toMatch(/deleted after 395 days/);
     // The recording rate figure must not be on the page (600 as a field length is not that figure).
     expect(text).not.toMatch(/600 (clicks|times|requests)|a minute for each offer|still sent on/);

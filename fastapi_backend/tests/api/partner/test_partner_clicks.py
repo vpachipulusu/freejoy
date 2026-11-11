@@ -123,6 +123,16 @@ def test_the_definition_says_only_what_the_code_does() -> None:
     # Recording is rate limited, and the public text says so without a figure or a description of the limiter.
     assert "rate limited for each offer" in CLICK_DEFINITION
     assert "some clicks are not recorded" in CLICK_DEFINITION
+    assert (
+        "in a very busy minute, or when many clicks on one offer come from one network "
+        "in a minute, some clicks are not recorded and the count can be low."
+    ) in CLICK_DEFINITION
+    # Automated traffic that does not identify itself is counted, and the text says the count can be too high (FREEJ-63).
+    assert (
+        "Counts can also be overstated by automated traffic that does not identify "
+        "itself as automated." in CLICK_DEFINITION
+    )
+    assert "—" not in CLICK_DEFINITION and "bucket" not in CLICK_DEFINITION
     assert not any(
         ch.isdigit() for ch in CLICK_DEFINITION.replace(str(CLICK_RETENTION_DAYS), "")
     )

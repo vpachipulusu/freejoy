@@ -4,7 +4,7 @@ import pytest
 from starlette.requests import Request
 
 from app.api.rate_limit import client_ip, client_key, forwarded_client_ip
-from app.core.rate_limit import client_bucket
+from app.core.rate_limit import CLICK_IPV6_GROUP_PREFIX, client_bucket
 
 
 @pytest.mark.parametrize(
@@ -84,3 +84,40 @@ def test_a_malformed_header_falls_back_to_the_peer_and_an_unknown_peer_stays_unk
 
     assert client_key(bad) == "127.0.0.1"
     assert client_key(no_peer) == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("address", "bucket"),
+    [
+        ("203.0.113.7", "203.0.113.7"),
+        ("::ffff:198.51.100.9", "198.51.100.9"),
+        ("2001:db8:1:2aff:1:2:3:4", "2001:db8:1:2a00::/56"),
+        ("2001:db8:1:2a00::1", "2001:db8:1:2a00::/56"),
+        ("2001:DB8:1:2bff:ffff:ffff:ffff:ffff", "2001:db8:1:2b00::/56"),
+    ],
+)
+def test_a_56_prefix_groups_ipv6_by_56_and_leaves_ipv4_alone(
+    address: str, bucket: str
+) -> None:
+    assert client_bucket(address, CLICK_IPV6_GROUP_PREFIX) == bucket
+
+
+def test_two_64s_in_one_56_share_a_click_bucket_but_not_the_default_one() -> None:
+    first, second = "2001:db8:1:2a01::1", "2001:db8:1:2a02::1"
+    other_56 = "2001:db8:1:2b01::1"
+
+    assert client_bucket(first) != client_bucket(second)
+    assert client_bucket(first, CLICK_IPV6_GROUP_PREFIX) == client_bucket(
+        second, CLICK_IPV6_GROUP_PREFIX
+    )
+    assert client_bucket(other_56, CLICK_IPV6_GROUP_PREFIX) != client_bucket(
+        first, CLICK_IPV6_GROUP_PREFIX
+    )
+
+
+def test_client_key_takes_the_prefix_and_defaults_to_64() -> None:
+    request = make_request(header="2001:db8:9:9a01:1:2:3:4", internal=True)
+
+    assert client_key(request) == "2001:db8:9:9a01::/64"
+    assert client_key(request, CLICK_IPV6_GROUP_PREFIX) == "2001:db8:9:9a00::/56"
+    assert client_key(request, CLICK_IPV6_GROUP_PREFIX) != client_ip(request)

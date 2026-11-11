@@ -12,7 +12,11 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.deps import get_rate_limiter
 from app.api.v1.catalogue_click import get_click_service
-from app.core.rate_limit import OUTBOUND_CLICK_POLICY, OUTBOUND_OFFER_POLICY
+from app.core.rate_limit import (
+    OUTBOUND_CLICK_OFFER_POLICY,
+    OUTBOUND_CLICK_POLICY,
+    OUTBOUND_OFFER_POLICY,
+)
 from app.main import create_app
 from app.models.platform.click_event import UserAgentClass
 from app.models.platform.offer import OfferStatus
@@ -218,6 +222,10 @@ async def test_rate_limit_is_keyed_by_the_forwarded_client_ip_and_by_the_offer()
     assert isinstance(limiter, FakeRateLimiter)
     assert limiter.hits == [
         ("outbound_click:ip:203.0.113.7", OUTBOUND_CLICK_POLICY),
+        (
+            "outbound_click_offer:ip:203.0.113.7:offer:offer_1",
+            OUTBOUND_CLICK_OFFER_POLICY,
+        ),
         ("outbound_offer:offer:offer_1", OUTBOUND_OFFER_POLICY),
     ]
 
@@ -252,7 +260,8 @@ async def test_the_per_client_limit_still_refuses_with_429() -> None:
 
     assert responses[-1].status_code == 429
     assert "Retry-After" in responses[-1].headers
-    assert len(store.clicks) == OUTBOUND_CLICK_POLICY.limit
+    # One address has only its per-offer share recorded (FREEJ-63); the rest are refused with 429 at the per-address limit.
+    assert len(store.clicks) == OUTBOUND_CLICK_OFFER_POLICY.limit
 
 
 async def test_a_capped_offer_still_refuses_what_it_would_refuse_anyway() -> None:
@@ -288,6 +297,7 @@ async def test_the_offer_cap_is_per_offer() -> None:
         await http.post("/v1/catalogue/offers/other_offer/click")
 
     assert isinstance(limiter, FakeRateLimiter)
+    # No forwarded address: no address-and-offer hit (FREEJ-63), so the offer bucket is second.
     assert limiter.hits[1][0] == "outbound_offer:offer:other_offer"
 
 
@@ -301,6 +311,7 @@ async def test_requests_over_the_limit_get_429_and_write_no_click() -> None:
 
     assert responses[-1].status_code == 429
     assert "Retry-After" in responses[-1].headers
+    # No forwarded address, so no per-address recording limit: every admitted click is recorded.
     assert len(store.clicks) == OUTBOUND_CLICK_POLICY.limit
 
 
