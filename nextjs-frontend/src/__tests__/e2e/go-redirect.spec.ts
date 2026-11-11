@@ -4,7 +4,9 @@ import { test, expect } from '@playwright/test';
  * `/go/[offerId]` outbound redirect against a production build and a real, seeded backend.
  *
  * It needs offer ids from the backend database, so it skips unless they are supplied:
- *   GO_E2E_LIVE_OFFER_ID   a published offer with an active affiliate link on an allowed host
+ *   GO_E2E_LIVE_OFFER_ID   a published offer with an active affiliate link on an allowed host. For the click-through
+ *                          test it must be a `sample` or `direct` link on an EDITORIAL offer: such an offer earns no
+ *                          commission, so its page shows no "Ad" label and its link carries ?nd=1 (FREEJ-60)
  *   GO_E2E_ENDED_OFFER_ID  an offer that was public and has ended (EXPIRED or past end_at)
  *   GO_E2E_DRAFT_OFFER_ID  optional: a draft or archived offer
  *   GO_E2E_LIVE_OFFER_SLUG optional: the slug of the live offer, to click through from its real page
@@ -93,13 +95,15 @@ test.describe('/go/[offerId]', () => {
     );
 
     await page.goto(`/freebies/${LIVE_SLUG}`);
-    const cta = page.locator(`a[href="/go/${LIVE}"]`);
+    const cta = page.locator(`a[href="/go/${LIVE}?nd=1"]`);
     await expect(cta).toHaveCount(1);
     await expect(cta).toHaveAttribute('rel', 'sponsored nofollow noopener');
-    // The seeded links use the `sample` provider, which earns no commission (FREEJ-60), so neither the label nor
-    // the commission sentence is shown. An affiliate network link would show both; that is covered by unit tests,
-    // because a real network host cannot be seeded here.
+    // The seeded offers are EDITORIAL with a `sample` link, which earns no commission (FREEJ-60), so neither the
+    // label nor either commission sentence is shown, and the link is marked "not disclosed" with ?nd=1. An offer
+    // that earns would show both and a plain link; that is covered by unit tests, because a real network host
+    // cannot be seeded here.
     await expect(page.getByText('Ad', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/paid a commission|may also earn a commission/i)).toHaveCount(0);
     await expect(page.getByText(/coming soon|demo offer/i)).toHaveCount(0);
     await cta.click();
     await page.waitForURL(`${destination.origin}/**`);

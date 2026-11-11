@@ -19,9 +19,9 @@ import { AffiliateCta } from './outbound-link';
 interface OfferCtaProps {
   offerType: OfferType;
   /** True when the listing is sponsored: the real-offer CTA says so in a sentence of its own. */
-  sponsored?: boolean;
-  /** True when the followed link earns commission: gates the "Ad" label and commission sentence. Defaults to true. */
-  earnsCommission?: boolean;
+  sponsored: boolean;
+  /** True when the offer earns commission, or that is unknown: gates the "Ad" label and commission sentence. */
+  earnsCommission: boolean;
   /** True for fixture offers (design preview); false for real catalogue offers. */
   demo: boolean;
   /** Set for a real offer: the CTA links to `/go/<offerId>`. Null or absent keeps the demo dialog. */
@@ -39,8 +39,8 @@ interface OfferCtaProps {
 export function OfferCta({
   offerType,
   demo,
-  sponsored = false,
-  earnsCommission = true,
+  sponsored,
+  earnsCommission,
   offerId = null,
   conditions = null,
 }: OfferCtaProps) {
@@ -78,8 +78,8 @@ export function OfferCta({
           </DialogDescription>
           <ul className="list-disc space-y-2 ps-5 text-sm text-foreground">
             <li>
-              Real offers will link to the provider through a Freejoy redirect, with an affiliate
-              disclosure next to the button.
+              Real offers will link to the brand through a Freejoy redirect. A link that earns
+              Freejoy a commission is marked &quot;Ad&quot; next to the button.
             </li>
             <li>Nothing was clicked through and no other website was opened.</li>
           </ul>
@@ -103,8 +103,8 @@ export function OfferCta({
         <Link href="/affiliate-disclosure" className="underline underline-offset-2">
           Affiliate disclosure
         </Link>
-        : real offers whose link earns Freejoy a commission are marked &quot;Ad&quot; and say how
-        Freejoy is paid.
+        : real offers that earn Freejoy a commission are marked &quot;Ad&quot; and say how Freejoy
+        is paid.
       </p>
     </div>
   );

@@ -183,8 +183,8 @@ function defineOffer(input: OfferInput): Offer {
   return {
     status: 'published',
     sponsored: false,
-    // Fixture offers never render the outbound button; true is the disclosing default.
-    earnsCommission: true,
+    // Fixture offers never render the outbound button, so nothing is known.
+    earnsCommission: null,
     featured: false,
     postage: { kind: 'free' },
     requiresCard: false,

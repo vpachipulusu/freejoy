@@ -74,8 +74,8 @@ export default async function AboutPage() {
       </ol>
       <h2>How Freejoy plans to pay for itself</h2>
       <p>
-        Only some links to brands are expected to earn Freejoy a commission once real offers go
-        live, and those links are marked &ldquo;Ad&rdquo;. Read the{' '}
+        Only some links to brands will earn Freejoy a commission once real offers go live, and those
+        links will be marked &ldquo;Ad&rdquo;. Read the{' '}
         <Link href="/affiliate-disclosure">affiliate disclosure</Link> for how that is planned to
         work.
       </p>

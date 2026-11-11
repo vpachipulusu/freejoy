@@ -78,12 +78,13 @@ export interface Offer {
    */
   sponsored: boolean;
   /**
-   * True when the link `/go/<id>` follows is on an affiliate network that pays Freejoy commission. It gates the
-   * "Ad" label and the commission sentence beside the outbound button; "Sponsored" is separate. Only the offer
-   * page reads it. Defaults to true wherever the API did not say (list items never carry it; an older backend
-   * would not send it): showing the disclosure when unsure is the safe side.
+   * True when the offer earns Freejoy a commission (its confirmed basis is affiliate, or the link `/go/<id>`
+   * follows is on an affiliate network); false when it does not; null when not known: a list item (the list
+   * response does not carry the flag) or a detail body that omitted it. It gates the "Ad" label and the
+   * commission sentence beside the outbound button; "Sponsored" is separate. Only the offer page reads it, and
+   * `OfferHero` shows the disclosure unless it is exactly false.
    */
-  earnsCommission: boolean;
+  earnsCommission: boolean | null;
   featured: boolean;
   image: OfferImage;
   postage: Postage;

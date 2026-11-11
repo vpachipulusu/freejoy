@@ -15,7 +15,7 @@ import {
   fetchOffers,
   type OfferListParams,
 } from '@/lib/api/catalogue';
-import { mapCategory, mapEndedOffer, mapOffer, mapOffers } from './api-mapper';
+import { mapCategory, mapEndedOffer, mapOfferDetail, mapOffers } from './api-mapper';
 import { normaliseQuery } from './query';
 import { isValidSlug } from './slug';
 import type { CatalogueBackend, OfferLookup } from './source';
@@ -126,7 +126,7 @@ const lookupOnce = cache(async (slug: string): Promise<OfferLookup> => {
   const result = await fetchOffer(slug);
   if (result.kind === 'not_found') return { kind: 'not_found' };
   if (result.kind === 'found') {
-    const offer = mapOffer(result.offer);
+    const offer = mapOfferDetail(result.offer);
     // Not "not found": the API has the offer, this site just cannot read it (yet). Callers must not discard it.
     return offer ? { kind: 'found', offer } : { kind: 'unreadable' };
   }

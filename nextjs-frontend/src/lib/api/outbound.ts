@@ -23,6 +23,7 @@ const MAX_RETRY_AFTER_SECONDS = 3_600;
 export type OutboundClickResult =
   | { kind: 'redirect'; destination: string }
   | { kind: 'ended'; slug: string }
+  | { kind: 'disclosure_required'; slug: string }
   | { kind: 'not_found' }
   | { kind: 'rate_limited'; retryAfterSeconds: number }
   | { kind: 'unavailable' };
@@ -30,6 +31,11 @@ export type OutboundClickResult =
 export interface ClickDetails {
   referrerHost: string | null;
   userAgentClass: UserAgentClass;
+  /**
+   * Set to false only when the visitor clicked a link whose page showed no commission disclosure. Left out
+   * otherwise, so the backend default (disclosed) applies. It can only make the backend stricter.
+   */
+  commissionDisclosed?: false;
 }
 
 const UNAVAILABLE: OutboundClickResult = { kind: 'unavailable' };
@@ -53,6 +59,13 @@ function slugOf(body: unknown): OutboundClickResult {
   return typeof slug === 'string' ? { kind: 'ended', slug } : { kind: 'not_found' };
 }
 
+/** The 409 `disclosure_required` body: the offer earns commission the page did not disclose. */
+function disclosureOf(body: unknown): OutboundClickResult {
+  if (!isRecord(body) || body.code !== 'disclosure_required') return UNAVAILABLE;
+  const slug = isRecord(body.data) ? body.data.slug : undefined;
+  return typeof slug === 'string' ? { kind: 'disclosure_required', slug } : UNAVAILABLE;
+}
+
 /** The backend's Retry-After in whole seconds, clamped; anything unusable becomes the default. */
 function retryAfterOf(header: string | null): number {
   if (header === null || !/^\d+$/.test(header.trim())) return DEFAULT_RETRY_AFTER_SECONDS;
@@ -66,6 +79,7 @@ function outcomeOf(response: Response, body: unknown): OutboundClickResult {
   if (status === 200) return destinationOf(body);
   if (status === 404) return { kind: 'not_found' };
   if (status === 410) return slugOf(body);
+  if (status === 409) return disclosureOf(body);
   if (status === 429) {
     return {
       kind: 'rate_limited',
@@ -84,7 +98,11 @@ export async function recordOutboundClick(
     const result = await recordClick({
       client,
       path: { offer_id: offerId },
-      body: { referrer_host: details.referrerHost, user_agent_class: details.userAgentClass },
+      body: {
+        referrer_host: details.referrerHost,
+        user_agent_class: details.userAgentClass,
+        ...(details.commissionDisclosed === false ? { commission_disclosed: false } : {}),
+      },
       signal: AbortSignal.timeout(CLICK_REQUEST_TIMEOUT_MS),
     });
     if (!result.response) return UNAVAILABLE;

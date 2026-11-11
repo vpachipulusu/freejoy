@@ -16,11 +16,13 @@ export default function AffiliateDisclosurePage() {
     >
       <h2>How Freejoy earns money</h2>
       <p>
-        Only some links on Freejoy earn Freejoy money. Those are affiliate links: if you take up an
-        offer through one, the brand pays Freejoy a commission. The commission is paid by the brand,
-        not by you. Other links go straight to the brand&apos;s own website and pay Freejoy no
-        commission. Listings that are marked as a demo or sample are illustrations and do not link
-        to a brand, so they earn nothing.
+        Only some links on Freejoy earn Freejoy a commission. If you take up an offer through one of
+        them, the brand pays Freejoy. The commission is paid by the brand, not by you. Most of those
+        are affiliate links through an affiliate network. A link to a brand&apos;s own website can
+        earn a commission too, if the brand runs its own affiliate scheme. Other links go to the
+        brand and pay Freejoy no commission. Listings that are marked as a demo or sample are
+        illustrations and do not link to a brand, so they earn nothing. Some listings are paid for
+        in other ways: see <a href="#sponsored-listings">sponsored listings</a> below.
       </p>
       <h2>How the links work</h2>
       <ul>
@@ -31,11 +33,10 @@ export default function AffiliateDisclosurePage() {
         </li>
         <li>These links are marked as a paid link for search engines.</li>
         <li>
-          A button that leads to a brand through an affiliate link carries an &ldquo;Ad&rdquo; label
-          before the button, with a plain sentence about commission. A button that goes straight to
-          the brand&apos;s own website and earns Freejoy nothing carries neither. The label always
-          describes the link the button actually follows. This page is the longer explanation, not a
-          replacement for the label.
+          A button whose link earns Freejoy a commission carries an &ldquo;Ad&rdquo; label before
+          the button, with a plain sentence about commission. A button whose link earns Freejoy no
+          commission carries neither. The label describes the link the button follows. This page is
+          the longer explanation, not a replacement for the label.
         </li>
       </ul>
       <h2>What a click records</h2>
@@ -72,12 +73,12 @@ export default function AffiliateDisclosurePage() {
         </li>
         <li>
           &ldquo;Ad&rdquo;: shown before the button on an offer page only when that button&apos;s
-          link earns Freejoy a commission through an affiliate network.
+          link earns Freejoy a commission.
         </li>
       </ul>
       <p>
-        The two are separate. A sponsored listing whose button follows an affiliate link shows both
-        labels. A sponsored listing whose button goes straight to the brand shows
+        The two are separate. A sponsored listing whose link also earns Freejoy a commission shows
+        both labels. A sponsored listing whose link earns no commission shows
         &ldquo;Sponsored&rdquo; only.
       </p>
       <h2>What we aim to keep separate</h2>

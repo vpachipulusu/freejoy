@@ -169,7 +169,7 @@ describe('affiliate disclosure page', () => {
     expect(container.textContent).toContain('/go/');
     expect(container.textContent).toMatch(/marked as a paid link for search engines/i);
     expect(container.textContent).toMatch(/“Ad”/);
-    expect(container.textContent).toMatch(/pays Freejoy a commission/i);
+    expect(container.textContent).toMatch(/the brand pays Freejoy/i);
     expect(container.textContent).toMatch(/paid by the brand, not by you/i);
     expect(container.textContent).not.toMatch(/rel=|sponsored nofollow/i);
   });
@@ -217,10 +217,12 @@ describe('affiliate disclosure page: sponsored listings', () => {
       /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled “Sponsored”/i
     );
     expect(text).toMatch(
-      /“Ad”: shown before the button on an offer page only when that button.s link earns Freejoy a commission through an affiliate network/i
+      /“Ad”: shown before the button on an offer page only when that button.s link earns Freejoy a commission\./i
     );
-    expect(text).toMatch(/whose button follows an affiliate link shows both labels/i);
-    expect(text).toMatch(/goes straight to the brand shows “Sponsored” only/i);
+    expect(text).toMatch(/whose link also earns Freejoy a commission shows both labels/i);
+    expect(text).toMatch(/whose link earns no commission shows “Sponsored” only/i);
+    expect(text).toMatch(/the label describes the link the button follows/i);
+    expect(text).not.toMatch(/always describes|actually follows|earns Freejoy nothing/i);
     expect(text).not.toMatch(/including links that earn freejoy no commission/i);
     expect(text).not.toMatch(/appear for every such button/i);
     expect(text).not.toMatch(
@@ -235,9 +237,12 @@ describe('affiliate disclosure page: sponsored listings', () => {
     expect(text).not.toMatch(
       /where an offer has a link to a brand, that link is an affiliate link/i
     );
-    expect(text).toMatch(/only some links on freejoy earn freejoy money/i);
+    expect(text).toMatch(/only some links on freejoy earn freejoy a commission/i);
     expect(text).not.toMatch(/most links to brands are affiliate links/i);
-    expect(text).toMatch(/go straight to the brand.s own website and pay Freejoy no commission/i);
+    expect(text).toMatch(/other links go to the brand and pay Freejoy no commission/i);
+    // A link to the brand's own website can earn a commission too, so no sentence says it never does.
+    expect(text).toMatch(/link to a brand.s own website can earn a commission too/i);
+    expect(text).not.toMatch(/straight to the brand.s own website and pay Freejoy no commission/i);
   });
 
   it('commits to labelling every paid listing instead of claiming an unlabelled one is not sponsored', () => {
@@ -523,6 +528,26 @@ describe('terms and about copy', () => {
     render(<TermsPage />);
 
     expect(screen.getByText(/competitions are run by the organiser/i)).toBeInTheDocument();
+  });
+
+  it('about says, in the future tense, that only some links will earn a commission and will be marked Ad', async () => {
+    const { container } = render(await AboutPage());
+    const text = container.textContent ?? '';
+
+    expect(text).toMatch(
+      /only some links to brands will earn Freejoy a commission once real offers go live, and those links will be marked .Ad./i
+    );
+    expect(text).not.toMatch(/are expected to earn|are marked .Ad./i);
+  });
+
+  it('the disclosure points from how Freejoy earns money to the sponsored listings section', () => {
+    render(<AffiliatePage />);
+
+    expect(screen.getByRole('link', { name: 'sponsored listings' })).toHaveAttribute(
+      'href',
+      '#sponsored-listings'
+    );
+    expect(document.getElementById('sponsored-listings')).not.toBeNull();
   });
 
   it('about explains that cashback and vouchers are not free and links the disclosure', async () => {

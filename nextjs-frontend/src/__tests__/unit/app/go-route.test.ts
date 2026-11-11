@@ -7,12 +7,15 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('@/lib/api/outbound', () => ({ recordOutboundClick: vi.fn() }));
+vi.mock('@/lib/api/admin-catalogue-action', () => ({ refreshPublicCatalogue: vi.fn() }));
 
 import { GET, HEAD } from '@/app/go/[offerId]/route';
+import { refreshPublicCatalogue } from '@/lib/api/admin-catalogue-action';
 import { recordOutboundClick, type OutboundClickResult } from '@/lib/api/outbound';
 import { logger } from '@/lib/logger';
 
 const recordMock = vi.mocked(recordOutboundClick);
+const refreshMock = vi.mocked(refreshPublicCatalogue);
 const DESTINATION = 'https://www.awin1.com/cread.php?awinmid=1&awinaffid=2';
 
 function call(path = '/go/offer_1', headers: Record<string, string> = {}, offerId = 'offer_1') {
@@ -45,6 +48,7 @@ describe('GET /go/[offerId]', () => {
     const outcomes: OutboundClickResult[] = [
       { kind: 'redirect', destination: DESTINATION },
       { kind: 'ended', slug: 'free-shampoo' },
+      { kind: 'disclosure_required', slug: 'free-shampoo' },
       { kind: 'not_found' },
       { kind: 'rate_limited', retryAfterSeconds: 60 },
       { kind: 'unavailable' },
@@ -153,6 +157,92 @@ describe('GET /go/[offerId]', () => {
       expect(response.headers.get('Location')).toBeNull();
     }
   );
+
+  describe('the not-disclosed marker (?nd=1)', () => {
+    it('forwards exactly nd=1 to the backend as commissionDisclosed false', async () => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      const response = await call('/go/offer_1?nd=1');
+
+      expect(recordMock).toHaveBeenCalledWith('offer_1', {
+        referrerHost: null,
+        userAgentClass: 'OTHER',
+        commissionDisclosed: false,
+      });
+      expect(response.headers.get('Location')).toBe(DESTINATION);
+    });
+
+    it('sends nothing extra for a plain link', async () => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      await call('/go/offer_1');
+
+      expect(recordMock.mock.calls[0][1]).not.toHaveProperty('commissionDisclosed');
+    });
+
+    it.each([
+      '?nd=0',
+      '?nd=true',
+      '?nd=',
+      '?nd=1%20',
+      '?nd=01',
+      '?ND=1',
+      '?nd=1&nd=1',
+      '?nd=1&nd=0',
+      '?nd[]=1',
+    ])('treats %s as disclosed', async (query) => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      await call(`/go/offer_1${query}`);
+
+      expect(recordMock.mock.calls[0][1]).not.toHaveProperty('commissionDisclosed');
+    });
+
+    it('answers a backend disclosure_required with a relative 303 to the offer page, after expiring the page cache', async () => {
+      backendAnswers({ kind: 'disclosure_required', slug: 'free-shampoo' });
+
+      const response = await call('/go/offer_1?nd=1&url=//evil.example', {
+        host: 'evil.example',
+        'x-forwarded-host': 'evil.example',
+      });
+
+      expect(response.status).toBe(303);
+      expect(response.headers.get('Location')).toBe('/freebies/free-shampoo');
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Set-Cookie')).toBeNull();
+      expect(refreshMock).toHaveBeenCalledExactlyOnceWith('free-shampoo');
+    });
+
+    it.each(['../admin', 'a/b', 'Free Shampoo', '//evil.example', 'x?y=1', ''])(
+      'answers 404, with no redirect and no cache refresh, when the disclosure slug is %j',
+      async (slug) => {
+        backendAnswers({ kind: 'disclosure_required', slug });
+
+        const response = await call('/go/offer_1?nd=1');
+
+        expect(response.status).toBe(404);
+        expect(response.headers.get('Location')).toBeNull();
+        expect(refreshMock).not.toHaveBeenCalled();
+      }
+    );
+
+    it('logs only the offer id and a reason, never a destination', async () => {
+      backendAnswers({ kind: 'disclosure_required', slug: 'free-shampoo' });
+
+      await call('/go/offer_1?nd=1');
+
+      expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toMatch(/https?:/);
+      expect(vi.mocked(logger.info).mock.calls[0][1]).toEqual({ offerId: 'offer_1' });
+    });
+
+    it('does not refresh the cache for any other outcome', async () => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      await call('/go/offer_1?nd=1');
+
+      expect(refreshMock).not.toHaveBeenCalled();
+    });
+  });
 
   it('answers an unknown or unpublished offer with an uncached 404', async () => {
     backendAnswers({ kind: 'not_found' });
