@@ -25,6 +25,8 @@ editor cannot give themselves or anyone else `offers.publish`.
 | `offers.publish` | Publish, unpublish, expire, archive and verify an offer (they change what the public sees or the "Last checked" claim) |
 | `categories.write` | Create, edit, enable and disable categories |
 | `merchants.write` | Create, edit, activate and deactivate merchants |
+| `partner_keys.read` | List a merchant's partner API keys (FREEJ-57) |
+| `partner_keys.write` | Issue and revoke a merchant's partner API keys. Dedicated, so `merchants.write` does not silently start issuing credentials |
 | `subscribers.read` | Registered only. No subscriber endpoint exists yet; the later subscriber story uses it |
 
 A request without the permission is 403 with the generic `Forbidden` body, before the body is validated and before
@@ -55,6 +57,7 @@ plus a stable `code` (below). Lists take `limit` (1 to 100) and `offset`.
 | `GET /v1/admin/merchants`, `GET .../{id}` | `offers.read` | `search`, `active` |
 | `POST /v1/admin/merchants`, `PATCH .../{id}` | `merchants.write` | 201 on create. `website` and `logo_url` must be https |
 | `POST /v1/admin/merchants/{id}/activate`, `/deactivate` | `merchants.write` | |
+| `GET`, `POST /v1/admin/merchants/{id}/partner-keys`, `POST .../{key_id}/revoke` | `merchants.read` to list, `merchants.write` to issue and revoke | The key is returned once, by the create call. See [backend-partner-api.md](backend-partner-api.md) |
 
 Affiliate link routes are not in the original story text; they exist because the publish rule needs an "active
 affiliate link" and nothing else could create one.

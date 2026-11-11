@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 from app.core.env_file import settings_env_file
 from app.core.totp import TotpCodec, TotpUnavailable
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     # same 404 as an unknown path. Nothing is served there yet; this is the switch for later stories.
     # Blank means off; any other non-boolean value stops startup.
     PARTNER_API_ENABLED: bool = False
+    # The restricted database role the partner surface connects as (ADR-013, ``commands/sql/partner_role.sql``).
+    # Required when PARTNER_API_ENABLED is true, and it must not be the owner's DATABASE_URL; unused otherwise.
+    PARTNER_DATABASE_URL: SecretStr | None = None
 
     # Database
     DATABASE_URL: str
@@ -146,6 +150,39 @@ class Settings(BaseSettings):
         surface in a state nobody chose.
         """
         return False if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("PARTNER_DATABASE_URL", mode="before")
+    @classmethod
+    def clean_partner_database_url(cls, value: object) -> object:
+        """Blank (or only spaces) means unset; a stray space or newline around a pasted URL is dropped."""
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def validate_partner_database(self) -> "Settings":
+        """The partner surface needs its own, restricted database role before it can be switched on."""
+        if not self.PARTNER_API_ENABLED:
+            return self
+        url = self.PARTNER_DATABASE_URL
+        if url is None:
+            raise ValueError(
+                "PARTNER_DATABASE_URL must be set when PARTNER_API_ENABLED is true"
+            )
+        # Compare the role, not the text: the owner URL with another driver prefix, a query string, a different
+        # host spelling or the default port dropped is still the owner. The URLs are never put in the message.
+        try:
+            partner_user = make_url(url.get_secret_value()).username
+            owner_user = make_url(self.DATABASE_URL).username
+        except Exception:  # noqa: BLE001 - make_url errors can quote the URL
+            raise ValueError(
+                "PARTNER_DATABASE_URL is not a valid database URL"
+            ) from None
+        if not partner_user or partner_user == owner_user:
+            raise ValueError(
+                "PARTNER_DATABASE_URL must use the restricted partner role, not the role of DATABASE_URL"
+            )
+        return self
 
     @field_validator("AWIN_PUBLISHER_ID", mode="before")
     @classmethod

@@ -87,8 +87,8 @@ branches may do that:
     rights these commands use (do not reuse the application's owner role, and never the migration role). End it with
     `?sslmode=verify-full`. `sslmode=require` encrypts but checks neither the certificate nor the host name, and this
     connection crosses the public internet from a GitHub-hosted runner, so an on-path party could terminate TLS and
-    read the credential; `verify-full` closes that (`app/core/db_url.py` forwards the value to asyncpg unchanged, and a
-    hosted Postgres with a public-CA certificate needs no root certificate file). From the repositories' SQL, the role
+    read the credential; `verify-full` closes that (`app/core/db_url.py` maps `verify-full` to a default SSL context that trusts the system CA store and checks
+    the host name unless `PGSSLROOTCERT` names a root certificate file; asyncpg's own string mode would trust only that file and fail without it). From the repositories' SQL, the role
     needs:
 
     | Table | Rights | Used by |

@@ -31,6 +31,7 @@ from app.models.platform.offer import (
     PostageKind,
 )
 from app.models.platform.organization import Organization
+from app.models.platform.partner_api_key import PartnerApiKey
 from app.models.platform.seo_meta import SeoMeta
 from app.models.platform.stripe_event import StripeEvent
 from app.models.platform.url_redirect import UrlRedirect
@@ -64,6 +65,7 @@ __all__ = [
     "OfferStatus",
     "OfferType",
     "Organization",
+    "PartnerApiKey",
     "PostageKind",
     "SeoMeta",
     "StripeEvent",

@@ -4,9 +4,10 @@
 # Needs no secret. It requests paths under and around /partner/v1 on the real domain and fails when the
 # backend answers one of them WITHOUT the X-Freejoy-Surface: partner header, which would mean a request
 # reached the backend by some other route than the partner sub-app. It passes whether
-# PARTNER_API_ENABLED is on or off: the surface answers 404 and sets the header either way.
+# PARTNER_API_ENABLED is on or off: the surface sets the header either way. Off, every path is the same 404. On,
+# authentication comes before routing (FREEJ-57), so a request without a key gets 401 whatever the path.
 #
-#   must: paths that cannot leave the prefix. 404, the surface header, Cache-Control: no-store, private,
+#   must: paths that cannot leave the prefix. 404 (surface off) or 401 (surface on, no key), the surface header, Cache-Control: no-store, private,
 #         no Location, no Set-Cookie and no CORS headers.
 #   may:  paths an edge might normalise to another path (dot segments, encoded slashes, //), plus the bare
 #         prefix, look-alikes and the internal docs paths. Anything is fine except a BACKEND answer without the
@@ -62,7 +63,7 @@ probe() {  # probe <must|may> <path>
   head -c 20 "$WORK/body" | grep -q '^{"success"' && envelope=1
 
   if [ "$mode" = must ]; then
-    [ "$status" = 404 ] || fail "expected 404, got $status"
+    [ "$status" = 404 ] || [ "$status" = 401 ] || fail "expected 404 (surface off) or 401 (surface on), got $status"
     [ "$surface" = partner ] || fail "the answer has no partner surface header"
     [ "$(header cache-control)" = "no-store, private" ] || fail "Cache-Control is not 'no-store, private'"
     [ -z "$(header location)" ] || fail "the answer has a Location header"

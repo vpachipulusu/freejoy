@@ -956,6 +956,16 @@ export type CreateOfferRequest = {
 };
 
 /**
+ * CreatePartnerKeyRequest
+ */
+export type CreatePartnerKeyRequest = {
+    /**
+     * Label
+     */
+    label: string;
+};
+
+/**
  * CreateRequest
  *
  * Body for creating an organisation (name and slug only).
@@ -1617,6 +1627,28 @@ export type InvoicesResponse = {
      * Data
      */
     data: Array<InvoiceData>;
+};
+
+/**
+ * IssuedPartnerKey
+ */
+export type IssuedPartnerKey = {
+    key: PartnerKeyOut;
+    /**
+     * Api Key
+     */
+    api_key: string;
+};
+
+/**
+ * IssuedPartnerKeyResponse
+ */
+export type IssuedPartnerKeyResponse = {
+    /**
+     * Success
+     */
+    success?: true;
+    data: IssuedPartnerKey;
 };
 
 /**
@@ -2542,6 +2574,63 @@ export type OverviewResponse = {
      */
     success?: true;
     data: OverviewData;
+};
+
+/**
+ * PartnerKeyOut
+ *
+ * A key's metadata. Never the key and never its hash.
+ */
+export type PartnerKeyOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Merchant Id
+     */
+    merchant_id: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Last Used At
+     */
+    last_used_at: string | null;
+    /**
+     * Revoked At
+     */
+    revoked_at: string | null;
+};
+
+/**
+ * PartnerKeyResponse
+ */
+export type PartnerKeyResponse = {
+    /**
+     * Success
+     */
+    success?: true;
+    data: PartnerKeyOut;
+};
+
+/**
+ * PartnerKeysResponse
+ */
+export type PartnerKeysResponse = {
+    /**
+     * Success
+     */
+    success?: true;
+    /**
+     * Data
+     */
+    data: Array<PartnerKeyOut>;
 };
 
 /**
@@ -7642,6 +7731,194 @@ export type AdminUpdateOfferLinkResponses = {
 };
 
 export type AdminUpdateOfferLinkResponse = AdminUpdateOfferLinkResponses[keyof AdminUpdateOfferLinkResponses];
+
+export type AdminListPartnerKeysData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Merchant Id
+         */
+        merchant_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/merchants/{merchant_id}/partner-keys';
+};
+
+export type AdminListPartnerKeysErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type AdminListPartnerKeysError = AdminListPartnerKeysErrors[keyof AdminListPartnerKeysErrors];
+
+export type AdminListPartnerKeysResponses = {
+    /**
+     * Successful Response
+     */
+    200: PartnerKeysResponse;
+};
+
+export type AdminListPartnerKeysResponse = AdminListPartnerKeysResponses[keyof AdminListPartnerKeysResponses];
+
+export type AdminCreatePartnerKeyData = {
+    body: CreatePartnerKeyRequest;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Merchant Id
+         */
+        merchant_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/merchants/{merchant_id}/partner-keys';
+};
+
+export type AdminCreatePartnerKeyErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: CatalogueErrorResponse;
+};
+
+export type AdminCreatePartnerKeyError = AdminCreatePartnerKeyErrors[keyof AdminCreatePartnerKeyErrors];
+
+export type AdminCreatePartnerKeyResponses = {
+    /**
+     * Successful Response
+     */
+    201: IssuedPartnerKeyResponse;
+};
+
+export type AdminCreatePartnerKeyResponse = AdminCreatePartnerKeyResponses[keyof AdminCreatePartnerKeyResponses];
+
+export type AdminRevokePartnerKeyData = {
+    body?: never;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Merchant Id
+         */
+        merchant_id: string;
+        /**
+         * Key Id
+         */
+        key_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/merchants/{merchant_id}/partner-keys/{key_id}/revoke';
+};
+
+export type AdminRevokePartnerKeyErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type AdminRevokePartnerKeyError = AdminRevokePartnerKeyErrors[keyof AdminRevokePartnerKeyErrors];
+
+export type AdminRevokePartnerKeyResponses = {
+    /**
+     * Successful Response
+     */
+    200: PartnerKeyResponse;
+};
+
+export type AdminRevokePartnerKeyResponse = AdminRevokePartnerKeyResponses[keyof AdminRevokePartnerKeyResponses];
 
 export type ListOrganizationsData = {
     body?: never;

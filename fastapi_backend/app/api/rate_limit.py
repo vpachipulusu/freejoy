@@ -9,41 +9,55 @@ import hashlib
 import hmac
 import ipaddress
 import logging
-import math
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from fastapi import Depends, HTTPException, Request, Response, status
+from fastapi import Depends, HTTPException, Request, Response
 
 from app.api.deps import get_rate_limiter
 from app.core.config import settings
-from app.core.errors import ErrorResponse
 from app.core.rate_limit import (
     AUTH_POLICY,
-    RateLimitDecision,
     RateLimiter,
     RateLimitPolicy,
     client_bucket,
 )
-from app.core.sentry import report_exception
+from app.core.rate_limit_enforcement import (
+    FAIL_CLOSED_RETRY_AFTER_SECONDS,
+    RATE_LIMIT_FAIL_CLOSED_RESPONSES,
+    RATE_LIMIT_RESPONSES,
+    TOO_MANY_REQUESTS_MESSAGE,
+    UNAVAILABLE_MESSAGE,
+    enforce_rate_limit,
+    enforce_rate_limits,
+)
+
+# The enforcement helpers moved to app.core.rate_limit_enforcement (the partner surface uses them too);
+# these names stay importable from here.
+__all__ = [
+    "FAIL_CLOSED_RETRY_AFTER_SECONDS",
+    "RATE_LIMIT_FAIL_CLOSED_RESPONSES",
+    "RATE_LIMIT_RESPONSES",
+    "TOO_MANY_REQUESTS_MESSAGE",
+    "UNAVAILABLE_MESSAGE",
+    "RateLimitSubject",
+    "bucket_of",
+    "client_ip",
+    "client_key",
+    "email_digest",
+    "enforce_rate_limit",
+    "enforce_rate_limits",
+    "forwarded_client_ip",
+    "limit_auth_attempts",
+    "limit_by_client_ip",
+    "limit_by_client_ip_and_email",
+    "limit_by_subject",
+]
 
 logger = logging.getLogger("yourapp.rate_limit")
 
 CLIENT_IP_HEADER = "X-Client-IP"
-TOO_MANY_REQUESTS_MESSAGE = "Too many requests"
-UNAVAILABLE_MESSAGE = "Service temporarily unavailable"
-FAIL_CLOSED_RETRY_AFTER_SECONDS = 5
-
-# Add to a route's ``responses=`` so the OpenAPI schema documents these errors.
-RATE_LIMIT_RESPONSES: dict[int | str, dict[str, Any]] = {
-    429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
-}
-RATE_LIMIT_FAIL_CLOSED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    **RATE_LIMIT_RESPONSES,
-    503: {"model": ErrorResponse, "description": "Rate limiter unavailable"},
-}
 
 
 @dataclass(frozen=True)
@@ -55,82 +69,6 @@ class RateLimitSubject:
 
 
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
-
-
-def _rate_limit_headers(decision: RateLimitDecision) -> dict[str, str]:
-    return {
-        "X-RateLimit-Limit": str(decision.limit),
-        "X-RateLimit-Remaining": str(decision.remaining),
-        "X-RateLimit-Reset": str(math.ceil(decision.reset_at)),
-    }
-
-
-def _too_many_requests(decision: RateLimitDecision) -> HTTPException:
-    retry_after = max(1, math.ceil(decision.reset_at - time.time()))
-    headers = {**_rate_limit_headers(decision), "Retry-After": str(retry_after)}
-    return HTTPException(
-        status.HTTP_429_TOO_MANY_REQUESTS, TOO_MANY_REQUESTS_MESSAGE, headers
-    )
-
-
-def _handle_outage(request: Request, policy: RateLimitPolicy, exc: Exception) -> None:
-    """Redis could not answer. Fail closed (503) or open (log and let through)."""
-    request_id = request.scope.get("state", {}).get("request_id")
-    if policy.fail_closed:
-        logger.error(
-            "rate limiter unavailable, rejecting request",
-            exc_info=exc,
-            extra={"request_id": request_id},
-        )
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            UNAVAILABLE_MESSAGE,
-            {"Retry-After": str(FAIL_CLOSED_RETRY_AFTER_SECONDS)},
-        )
-    logger.warning(
-        "rate limiter unavailable, allowing request",
-        exc_info=exc,
-        extra={"request_id": request_id},
-    )
-    report_exception(exc)
-
-
-async def enforce_rate_limits(
-    request: Request,
-    response: Response,
-    limiter: RateLimiter,
-    checks: list[tuple[RateLimitPolicy, str]],
-) -> None:
-    """Hit every (policy, identifier) pair in order; the first denial raises 429.
-
-    Each pair follows its own policy's fail mode on a Redis outage. Headers show the tightest decision.
-    """
-    tightest: RateLimitDecision | None = None
-    for policy, identifier in checks:
-        try:
-            decision = await limiter.hit(identifier, policy)
-        except Exception as exc:  # noqa: BLE001 - any adapter failure follows the fail mode
-            _handle_outage(request, policy, exc)
-            return
-        if not decision.allowed:
-            raise _too_many_requests(decision)
-        if tightest is None or decision.remaining < tightest.remaining:
-            tightest = decision
-    if tightest is not None:
-        response.headers.update(_rate_limit_headers(tightest))
-
-
-async def enforce_rate_limit(
-    request: Request,
-    response: Response,
-    limiter: RateLimiter,
-    policy: RateLimitPolicy,
-    identifiers: list[str],
-) -> None:
-    """Hit every identifier under one policy; the first denial raises 429. Headers show the tightest."""
-    await enforce_rate_limits(
-        request, response, limiter, [(policy, identifier) for identifier in identifiers]
-    )
 
 
 def limit_by_subject(

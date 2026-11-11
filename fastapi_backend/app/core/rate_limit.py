@@ -38,7 +38,7 @@ logger = logging.getLogger("yourapp.rate_limit")
 # reachable: the Upstash client sets no httpx timeout, so the wait_for budget fires first.
 _RETRYABLE_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
 
-# Every key is stored as rl:{scope}:{user|org|ip|email}:{id}.
+# Every key is stored as rl:{scope}:{user|org|ip|email|key}:{id}.
 KEY_PREFIX = "rl"
 
 
@@ -318,4 +318,22 @@ SUBSCRIBER_TOKEN_POLICY = RateLimitPolicy(
 # per user. Fail closed: an outage must not lift the limit on an expensive read.
 EXPORT_POLICY = RateLimitPolicy(
     "me_export", limit=3, window_seconds=60 * 60, fail_closed=True
+)
+
+
+# Partner API (ADR-013), keyed by the partner key id (``rl:partner_read:key:<key id>``): never by IP, because partner
+# code does not read forwarded client-IP headers. Reads fail open: an outage must not stop a retailer reading.
+# Writes fail closed: an outage must not lift the limit on a call that changes data.
+PARTNER_READ_POLICY = RateLimitPolicy(
+    "partner_read", limit=120, window_seconds=60, fail_closed=False
+)
+PARTNER_WRITE_POLICY = RateLimitPolicy(
+    "partner_write", limit=30, window_seconds=60, fail_closed=True
+)
+# Failed partner authentications of a well-formed key, counted only on failure (a valid key is never held up by it) and
+# keyed by the presented key id. Nothing keyless is counted. Fail closed: an outage must not lift the limit. It turns repeated
+# failures for one key id into a 429; it does NOT bound database work (every well-formed key costs a connection and a SELECT,
+# counted or not): that is bounded only by the edge rate rule and the role's connection limit (ADR-013).
+PARTNER_AUTH_FAILURE_POLICY = RateLimitPolicy(
+    "partner_auth_failure", limit=30, window_seconds=60, fail_closed=True
 )

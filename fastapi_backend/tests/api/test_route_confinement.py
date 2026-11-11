@@ -22,7 +22,7 @@ from app.main import app, create_app
 from app.partner.app import create_partner_api
 from app.partner.mount import PartnerMount
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
-from tests.api.partner.support import call_raw
+from tests.api.partner.support import allow_all, call_raw
 from tests.confinement_walker import (
     OPEN_ROUTES,
     PATH_PARAMETER,
@@ -60,7 +60,9 @@ def _throwaway(
     application.include_router(router)
     if mount:
         surface = PartnerSurface(
-            partner_api or create_partner_api(), enabled=lambda: True
+            partner_api or create_partner_api(),
+            enabled=lambda: True,
+            authenticator=allow_all,
         )
         application.router.routes.insert(
             0, PartnerMount(PARTNER_PREFIX, app=surface, name="partner")
@@ -236,7 +238,9 @@ def test_the_walker_fails_on_a_plain_mount_at_the_prefix() -> None:
 
 def test_the_walker_fails_when_the_mount_is_not_the_first_route() -> None:
     application = _throwaway(*_keyed_ok(), mount=False)
-    surface = PartnerSurface(create_partner_api(), enabled=lambda: True)
+    surface = PartnerSurface(
+        create_partner_api(), enabled=lambda: True, authenticator=allow_all
+    )
     application.routes.append(PartnerMount(PARTNER_PREFIX, app=surface))
 
     assert "the partner mount is not the first route" in confinement_violations(

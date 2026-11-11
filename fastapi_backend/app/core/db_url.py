@@ -1,3 +1,5 @@
+import os
+import ssl
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -40,6 +42,20 @@ class AsyncDatabaseTarget:
     connect_args: dict[str, Any] = field(default_factory=dict)
 
 
+def _tls_connect_arg(mode: str) -> Any:
+    """The asyncpg ``ssl`` argument for a libpq ``sslmode``.
+
+    asyncpg treats the string ``verify-full`` like libpq: it trusts only the file named by ``PGSSLROOTCERT`` or
+    ``~/.postgresql/root.crt`` and never the system CA store, so on a host with neither (a serverless function)
+    it fails to connect ("root certificate file ... does not exist"). Without ``PGSSLROOTCERT`` the mode becomes a
+    default SSL context, which trusts the system CA store, requires a certificate and checks the host name: what
+    ``verify-full`` means for a host with a public-CA certificate. ``require`` still verifies nothing.
+    """
+    if mode == "verify-full" and not os.environ.get("PGSSLROOTCERT"):
+        return ssl.create_default_context()
+    return mode
+
+
 def to_async_target(raw_url: str) -> AsyncDatabaseTarget:
     """Rebuild a Postgres URL for asyncpg without losing TLS settings.
 
@@ -51,7 +67,9 @@ def to_async_target(raw_url: str) -> AsyncDatabaseTarget:
         (str(parsed.query[key]) for key in _TLS_PARAMS if key in parsed.query), None
     )
     url = parsed.set(drivername=ASYNC_DRIVER, query={})
-    tls_args: dict[str, Any] = {} if tls_mode is None else {"ssl": tls_mode}
+    tls_args: dict[str, Any] = (
+        {} if tls_mode is None else {"ssl": _tls_connect_arg(tls_mode)}
+    )
     connect_args: dict[str, Any] = {
         "statement_cache_size": STATEMENT_CACHE_SIZE,
         "prepared_statement_cache_size": STATEMENT_CACHE_SIZE,

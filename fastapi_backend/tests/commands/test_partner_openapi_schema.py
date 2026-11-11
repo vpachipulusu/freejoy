@@ -1,8 +1,8 @@
 """The partner OpenAPI document and its freshness check (ADR-013).
 
-The partner contract is its own committed file, ``docs/partner/openapi.json``. It has no paths
-until the first endpoint exists, so the generator is also exercised on a throwaway sub-app that
-has one, to prove the check stays meaningful when the first real endpoint arrives.
+The partner contract is its own committed file, ``docs/partner/openapi.json``. Today it has one path,
+``/partner/v1/me``; the generator is also exercised on a throwaway sub-app with one more route, to prove
+the check stays meaningful as endpoints are added.
 """
 
 import json
@@ -49,7 +49,10 @@ def test_paths_are_written_as_a_retailer_calls_them() -> None:
 
     schema = partner_openapi_schema(api)
 
-    assert list(schema["paths"]) == ["/partner/v1/things/{thing_id}"]
+    assert list(schema["paths"]) == [
+        "/partner/v1/me",
+        "/partner/v1/things/{thing_id}",
+    ]
     assert all(path.startswith(f"{PARTNER_PREFIX}/") for path in schema["paths"])
 
 
@@ -60,7 +63,7 @@ def test_asking_twice_does_not_prefix_twice_or_change_the_cached_schema() -> Non
     second = partner_openapi_schema(api)
 
     assert first == second
-    assert list(api.openapi()["paths"]) == ["/things/{thing_id}"]
+    assert list(api.openapi()["paths"]) == ["/me", "/things/{thing_id}"]
 
 
 def test_the_internal_schema_has_no_partner_path() -> None:
@@ -72,7 +75,33 @@ def test_the_internal_schema_has_no_partner_path() -> None:
 
 
 def test_the_internal_schema_file_does_not_mention_the_partner_surface() -> None:
-    assert "partner" not in INTERNAL_SCHEMA.read_text(encoding="utf-8").lower()
+    """The partner surface (its prefix, its header, its sub-app) is not in the internal schema. The only
+    "partner" paths are the admin ones that issue keys (FREEJ-57): they live under the merchants."""
+    text = INTERNAL_SCHEMA.read_text(encoding="utf-8")
+    paths = json.loads(text)["paths"]
+
+    assert "/partner/v1" not in text.lower()
+    components = {
+        name
+        for name in json.loads(text)["components"]["schemas"]
+        if "partner" in name.lower()
+    }
+    assert components == {
+        "CreatePartnerKeyRequest",
+        "IssuedPartnerKey",
+        "IssuedPartnerKeyResponse",
+        "PartnerKeyOut",
+        "PartnerKeyResponse",
+        "PartnerKeysResponse",
+    }
+    assert "x-freejoy-surface" not in text.lower()
+    assert "Freejoy Partner API" not in text
+    partner_paths = [p for p in paths if "partner" in p.lower()]
+    assert partner_paths
+    assert all(
+        p.startswith("/v1/admin/merchants/{merchant_id}/partner-keys")
+        for p in partner_paths
+    )
 
 
 def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -> None:
@@ -83,7 +112,7 @@ def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -
     raw = target.read_bytes()
     assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert json.loads(raw)["paths"] == {}
+    assert list(json.loads(raw)["paths"]) == ["/partner/v1/me"]
 
 
 def test_the_committed_partner_schema_is_what_the_generator_writes(

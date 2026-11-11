@@ -9,6 +9,7 @@ normalised to ``/v1/me`` it would have reached an internal route and answered 40
 
 import pytest
 from fastapi import Request
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
@@ -22,9 +23,11 @@ from app.partner.surface import MAX_BODY_BYTES, PartnerSurface
 from tests.api.partner.support import (
     SURFACE_HEADERS,
     Recorder,
+    allow_all,
     call_raw,
     error_logs,
 )
+from tests.partner_world import PartnerWorld
 
 NOT_FOUND = {"success": False, "error": "Not Found"}
 # (path as the server decodes it, raw_path as it came off the wire)
@@ -68,10 +71,15 @@ def test_the_switch_is_off_by_default() -> None:
     assert Settings.model_fields["PARTNER_API_ENABLED"].default is False
 
 
+UNAUTHORIZED = {"success": False, "error": "Unauthorized"}
+
+
 @pytest.mark.parametrize(("path", "raw_path"), ADVERSARIAL)
-async def test_every_path_under_the_prefix_gives_the_same_404(
+async def test_every_path_under_the_prefix_gets_one_answer_without_a_key(
     switch: bool, path: str, raw_path: str
 ) -> None:
+    """Off: the 404 of an unknown path. On: the 401 every caller without a valid key gets, whatever the path
+    (authentication comes before routing, so which paths exist is not learned)."""
     recorder = Recorder(app)
     baseline = await call_raw(app, "GET", "/partner/v1/unknown")
 
@@ -79,23 +87,54 @@ async def test_every_path_under_the_prefix_gives_the_same_404(
 
     assert recorder.paths == [path]  # the path was not normalised on the way in
     assert recorder.raw_paths == [raw_path.encode()]
-    assert response.status == 404
-    assert response.json() == NOT_FOUND
+    assert response.status == (401 if switch else 404)
+    assert response.json() == (UNAUTHORIZED if switch else NOT_FOUND)
     assert response.body == baseline.body
     _assert_partner_headers(response.headers)
 
 
-async def test_the_disabled_and_enabled_404_are_byte_for_byte_the_same(
+@pytest.mark.parametrize(("path", "raw_path"), ADVERSARIAL)
+async def test_with_a_valid_key_every_adversarial_path_stays_in_the_sub_app_and_gets_its_404(
+    world: PartnerWorld,
     monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    raw_path: str,
+) -> None:
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
+    recorder = Recorder(app)
+
+    response = await call_raw(
+        recorder, "GET", path, raw_path=raw_path, headers=world.headers()
+    )
+
+    assert recorder.paths == [path]
+    assert response.status == 404
+    assert response.json() == NOT_FOUND
+    _assert_partner_headers(response.headers)
+
+
+async def test_the_disabled_404_and_the_enabled_404_for_a_valid_key_are_byte_for_byte_the_same(
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "PARTNER_API_ENABLED", False)
-    disabled = await call_raw(app, "GET", "/partner/v1/x")
+    disabled = await call_raw(app, "GET", "/partner/v1/x", headers=world.headers())
     monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
-    enabled = await call_raw(app, "GET", "/partner/v1/x")
+    enabled = await call_raw(app, "GET", "/partner/v1/x", headers=world.headers())
 
     assert disabled.body == enabled.body
     assert disabled.status == enabled.status == 404
     assert {k for k, _ in disabled.headers} == {k for k, _ in enabled.headers}
+
+
+async def test_the_switch_comes_before_authentication(
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", False)
+
+    response = await call_raw(app, "GET", "/partner/v1/me", headers=world.headers())
+
+    assert response.status == 404
+    assert world.store.finds == []  # no lookup happened
 
 
 async def test_a_normal_http_client_gets_the_same_envelope(switch: bool) -> None:
@@ -104,8 +143,8 @@ async def test_a_normal_http_client_gets_the_same_envelope(switch: bool) -> None
     ) as http:
         response = await http.get("/partner/v1/x")
 
-    assert response.status_code == 404
-    assert response.json() == NOT_FOUND
+    assert response.status_code == (401 if switch else 404)
+    assert response.json() == (UNAUTHORIZED if switch else NOT_FOUND)
     assert response.headers["x-freejoy-surface"] == "partner"
 
 
@@ -126,7 +165,7 @@ async def test_options_gets_no_cors_headers(
 
     response = await call_raw(app, "OPTIONS", path, headers=headers)
 
-    assert response.status == 404
+    assert response.status == (401 if switch else 404)
     _assert_partner_headers(response.headers)
 
 
@@ -154,16 +193,20 @@ async def test_an_outer_cors_middleware_would_reach_the_partner_responses() -> N
 
 
 async def test_the_real_body_limit_applies_only_while_the_surface_is_on(
-    switch: bool,
+    switch: bool, world: PartnerWorld
 ) -> None:
+    keyed = world.headers()
     over = await call_raw(
         app,
         "POST",
         "/partner/v1/x",
-        headers=[("Content-Length", str(MAX_BODY_BYTES + 1))],
+        headers=[*keyed, ("Content-Length", str(MAX_BODY_BYTES + 1))],
     )
     within = await call_raw(
-        app, "POST", "/partner/v1/x", headers=[("Content-Length", str(MAX_BODY_BYTES))]
+        app,
+        "POST",
+        "/partner/v1/x",
+        headers=[*keyed, ("Content-Length", str(MAX_BODY_BYTES))],
     )
 
     # Switched off, every request gets the same 404, a large declared length included.
@@ -175,23 +218,60 @@ async def test_the_real_body_limit_applies_only_while_the_surface_is_on(
     _assert_partner_headers(over.headers)
 
 
+async def test_an_oversize_declared_length_without_a_key_is_a_401_not_a_413(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
+
+    response = await call_raw(
+        app,
+        "POST",
+        "/partner/v1/x",
+        headers=[("Content-Length", str(MAX_BODY_BYTES + 1))],
+    )
+
+    assert response.status == 401
+
+
+PARTNER_HEADER_NAMES = {
+    "content-length",
+    "content-type",
+    "cache-control",
+    "x-content-type-options",
+    "x-freejoy-surface",
+    "x-request-id",
+}
+
+
 @pytest.mark.parametrize("with_origin", [False, True])
 async def test_a_partner_404_has_exactly_these_headers(
-    switch: bool, with_origin: bool
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch, with_origin: bool
 ) -> None:
     """A new header on a partner response (from outer middleware, say) must be a decision."""
+    headers = [("Origin", "https://retailer.example")] if with_origin else []
+    for enabled in (False, True):
+        monkeypatch.setattr(settings, "PARTNER_API_ENABLED", enabled)
+
+        response = await call_raw(
+            app, "GET", "/partner/v1/x", headers=[*headers, *world.headers()]
+        )
+
+        assert response.status == 404
+        assert response.header_names() == PARTNER_HEADER_NAMES
+
+
+@pytest.mark.parametrize("with_origin", [False, True])
+async def test_a_partner_401_has_exactly_these_headers(
+    monkeypatch: pytest.MonkeyPatch, with_origin: bool
+) -> None:
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
     headers = [("Origin", "https://retailer.example")] if with_origin else []
 
     response = await call_raw(app, "GET", "/partner/v1/x", headers=headers)
 
-    assert response.header_names() == {
-        "content-length",
-        "content-type",
-        "cache-control",
-        "x-content-type-options",
-        "x-freejoy-surface",
-        "x-request-id",
-    }
+    assert response.status == 401
+    assert response.header_names() == PARTNER_HEADER_NAMES | {"www-authenticate"}
+    assert response.header("www-authenticate") == "Bearer"
 
 
 # ---------------------------------------------------------------- the surface on its own (throwaway sub-app)
@@ -231,7 +311,9 @@ def _throwaway_surface(
     async def typed(item: Typed) -> None:
         return None
 
-    return PartnerSurface(api, enabled=lambda: enabled, max_body_bytes=limit), probe
+    return PartnerSurface(
+        api, enabled=lambda: enabled, authenticator=allow_all, max_body_bytes=limit
+    ), probe
 
 
 async def test_an_over_long_declared_length_is_refused_without_reading_the_body() -> (
@@ -414,7 +496,7 @@ class LeakyApp:
 
 
 async def test_the_surface_strips_cookies_and_cors_headers_an_inner_app_sets() -> None:
-    surface = PartnerSurface(LeakyApp(), enabled=lambda: True)
+    surface = PartnerSurface(LeakyApp(), enabled=lambda: True, authenticator=allow_all)
 
     response = await call_raw(surface, "GET", "/anything")
 
@@ -435,7 +517,9 @@ class HeaderlessApp:
 async def test_a_response_started_without_a_headers_list_still_gets_the_headers() -> (
     None
 ):
-    surface = PartnerSurface(HeaderlessApp(), enabled=lambda: True)
+    surface = PartnerSurface(
+        HeaderlessApp(), enabled=lambda: True, authenticator=allow_all
+    )
 
     response = await call_raw(surface, "GET", "/x")
 
@@ -444,7 +528,7 @@ async def test_a_response_started_without_a_headers_list_still_gets_the_headers(
 
 
 async def test_a_websocket_is_refused() -> None:
-    surface = PartnerSurface(LeakyApp(), enabled=lambda: True)
+    surface = PartnerSurface(LeakyApp(), enabled=lambda: True, authenticator=allow_all)
     sent: list[Message] = []
 
     async def receive() -> Message:
@@ -465,5 +549,13 @@ async def test_a_websocket_is_refused() -> None:
 def test_the_surface_exposes_its_routes_for_the_confinement_walk() -> None:
     surface, _ = _throwaway_surface()
 
-    assert {route.path for route in surface.routes} == {"/echo", "/boom", "/typed"}  # type: ignore[attr-defined]
-    assert PartnerSurface(LeakyApp(), enabled=lambda: True).routes == []
+    assert {c.path for c in iter_route_contexts(surface.routes)} == {
+        "/me",
+        "/echo",
+        "/boom",
+        "/typed",
+    }
+    assert (
+        PartnerSurface(LeakyApp(), enabled=lambda: True, authenticator=allow_all).routes
+        == []
+    )

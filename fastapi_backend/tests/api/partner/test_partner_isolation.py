@@ -61,7 +61,18 @@ def forbidden_imports(source: str) -> list[str]:
 def test_there_are_partner_modules_to_check() -> None:
     names = {p.name for p in PARTNER_DIR.glob("*.py")}
 
-    assert {"__init__.py", "app.py", "mount.py", "schema.py", "surface.py"} <= names
+    assert {
+        "__init__.py",
+        "app.py",
+        "auth.py",
+        "deps.py",
+        "keys.py",
+        "limits.py",
+        "mount.py",
+        "routes.py",
+        "schema.py",
+        "surface.py",
+    } <= names
 
 
 @pytest.mark.parametrize(
@@ -120,3 +131,93 @@ def test_the_mounted_sub_app_serves_the_routes_the_schema_is_generated_from() ->
     )
 
     assert mounted == generated
+
+
+# What partner code must never touch (ADR-013): the internal credentials, the forwarded client address and the
+# owner's database session. Identifiers only: a docstring may still say why.
+FORBIDDEN_NAMES = frozenset(
+    {
+        "require_internal_key",
+        "get_session_identity",
+        "get_current_identity",
+        "forwarded_client_ip",
+        "client_ip",
+        "client_key",
+        "get_session_provider",
+        "get_session",
+        "DefaultSessionProvider",
+        "async_session_maker",
+        "build_engine",
+        "engine",
+        "internal_authenticated",
+        "client",
+    }
+)
+FORBIDDEN_STRINGS = frozenset(
+    {
+        "x-client-ip",
+        "x-forwarded-for",
+        "x-real-ip",
+        "forwarded",
+        "x-vercel-forwarded-for",
+        "cf-connecting-ip",
+        "true-client-ip",
+        "client",
+    }
+)
+
+
+def forbidden_uses(source: str) -> list[str]:
+    """Identifiers and header-name strings in ``source`` that partner code must not use."""
+    problems: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        names: list[str] = []
+        if isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.alias):
+            names.append(node.name.split(".")[-1])
+        problems.extend(n for n in names if n in FORBIDDEN_NAMES)
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.lower() in FORBIDDEN_STRINGS
+        ):
+            problems.append(node.value)
+    return problems
+
+
+@pytest.mark.parametrize(
+    "path", sorted(PARTNER_DIR.rglob("*.py")), ids=lambda p: p.name
+)
+def test_partner_code_never_uses_internal_credentials_client_addresses_or_the_owner_session(
+    path: Path,
+) -> None:
+    assert forbidden_uses(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("x = 1", []),
+        ("from app.api.auth import require_internal_key", ["require_internal_key"]),
+        ("Depends(get_session_identity)", ["get_session_identity"]),
+        ("request.state.internal_authenticated", ["internal_authenticated"]),
+        ("client_ip(request)", ["client_ip"]),
+        ("headers['X-Client-IP']", ["X-Client-IP"]),
+        ("h = 'X-Forwarded-For'", ["X-Forwarded-For"]),
+        ("provider = get_session_provider()", ["get_session_provider"]),
+        ("h = 'CF-Connecting-IP'", ["CF-Connecting-IP"]),
+        ("h = 'True-Client-IP'", ["True-Client-IP"]),
+        ("h = 'X-Vercel-Forwarded-For'", ["X-Vercel-Forwarded-For"]),
+        ("request.client.host", ["client"]),
+        ("scope['client']", ["client"]),
+        ("maker = async_session_maker()", ["async_session_maker"]),
+        ('"""require_internal_key is mentioned only in a docstring"""', []),
+    ],
+)
+def test_the_forbidden_use_check_catches_what_it_should(
+    source: str, expected: list[str]
+) -> None:
+    assert forbidden_uses(source) == expected

@@ -201,8 +201,8 @@ pull requests and nothing requires it.
 - **Limits.** On a public repository GitHub skips scheduled runs once the repository has had no activity for 60 days
   (the schedule is disabled until the workflow is re-enabled on the Actions tab), and it may start a scheduled run some
   minutes late at busy times. The database must accept TLS connections from GitHub-hosted runners (the URL carries
-  `?sslmode=verify-full`, which the backend forwards to asyncpg unchanged; see `app/core/db_url.py`; a hosted Postgres
-  with a public-CA certificate needs no root certificate file). A run cannot be proven from this repository: the first real run is the
+  `?sslmode=verify-full`, which `app/core/db_url.py` turns into a default SSL context (system CA store, host name checked) unless `PGSSLROOTCERT` is set;
+  `sslmode=require` encrypts but verifies nothing). A run cannot be proven from this repository: the first real run is the
   owner's check.
 
 `commands.import_awin_offers` is deliberately not scheduled: it has not been verified against the live Awin API.

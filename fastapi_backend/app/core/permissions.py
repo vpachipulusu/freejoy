@@ -30,6 +30,8 @@ ADMIN_PERMISSIONS: frozenset[str] = frozenset(
         "offers.publish",
         "offers.read",
         "offers.write",
+        "partner_keys.read",
+        "partner_keys.write",
         "seo.delete",
         "seo.read",
         "seo.write",

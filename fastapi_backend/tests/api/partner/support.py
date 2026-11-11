@@ -16,11 +16,18 @@ from typing import Any
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.partner.auth import PartnerContext
+
 SURFACE_HEADERS = {
     "cache-control": "no-store, private",
     "x-content-type-options": "nosniff",
     "x-freejoy-surface": "partner",
 }
+
+
+async def allow_all(scope: Scope) -> PartnerContext:
+    """An authenticator that accepts everyone: for tests whose subject is not authentication."""
+    return PartnerContext(key_id="testkeyid", merchant_id="testmerchant")
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,7 @@ def build_scope(
     raw_path: str | None = None,
     headers: Iterable[tuple[str, str]] = (),
     root_path: str = "",
+    query_string: str = "",
 ) -> Scope:
     return {
         "root_path": root_path,
@@ -72,7 +80,7 @@ def build_scope(
         "scheme": "http",
         "path": path,
         "raw_path": (raw_path if raw_path is not None else path).encode(),
-        "query_string": b"",
+        "query_string": query_string.encode(),
         "headers": [(k.lower().encode(), v.encode()) for k, v in headers],
         "server": ("testserver", 80),
         "client": ("203.0.113.9", 4242),
@@ -89,6 +97,7 @@ async def call_raw(
     chunks: Iterable[bytes] = (b"",),
     on_receive: Callable[[], None] | None = None,
     root_path: str = "",
+    query_string: str = "",
 ) -> RawResponse:
     """Call ``application`` with a hand-built scope; ``chunks`` are the body, sent in order."""
     pending = list(chunks)
@@ -111,7 +120,7 @@ async def call_raw(
 
     error: Exception | None = None
     try:
-        scope = build_scope(method, path, raw_path, headers, root_path)
+        scope = build_scope(method, path, raw_path, headers, root_path, query_string)
         await application(scope, receive, send)
     except Exception as exc:  # noqa: BLE001 - a 500 is re-raised after it is sent; keep the response
         error = exc

@@ -10,6 +10,7 @@ from upstash_ratelimit.utils import ms_to_s
 
 from app.api import deps
 from app.core import rate_limit as rate_limit_module
+from app.core import rate_limiter_provider
 from app.core.rate_limit import (
     API_POLICY,
     AUTH_POLICY,
@@ -116,8 +117,8 @@ async def test_disabled_limiter_allows_everything() -> None:
 def test_get_rate_limiter_is_disabled_without_upstash_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(deps, "_rate_limiter", None)
-    monkeypatch.setattr(deps.settings, "UPSTASH_REDIS_REST_URL", None)
+    monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", None)
+    monkeypatch.setattr(rate_limiter_provider.settings, "UPSTASH_REDIS_REST_URL", None)
 
     assert isinstance(deps.get_rate_limiter(), DisabledRateLimiter)
 
@@ -125,9 +126,13 @@ def test_get_rate_limiter_is_disabled_without_upstash_settings(
 def test_get_rate_limiter_builds_upstash_and_caches_when_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(deps, "_rate_limiter", None)
-    monkeypatch.setattr(deps.settings, "UPSTASH_REDIS_REST_URL", "https://x.upstash.io")
-    monkeypatch.setattr(deps.settings, "UPSTASH_REDIS_REST_TOKEN", SecretStr("t"))
+    monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", None)
+    monkeypatch.setattr(
+        rate_limiter_provider.settings, "UPSTASH_REDIS_REST_URL", "https://x.upstash.io"
+    )
+    monkeypatch.setattr(
+        rate_limiter_provider.settings, "UPSTASH_REDIS_REST_TOKEN", SecretStr("t")
+    )
 
     limiter = deps.get_rate_limiter()
 

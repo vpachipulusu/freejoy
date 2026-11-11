@@ -14,7 +14,7 @@ from app.core.database import (
     async_session_maker,
 )
 from app.core.email_provider import EmailProvider, build_email_provider
-from app.core.rate_limit import DisabledRateLimiter, RateLimiter, UpstashRateLimiter
+from app.core.rate_limiter_provider import get_rate_limiter
 from app.repositories.health import HealthRepository
 from app.services.health import HealthService
 
@@ -67,22 +67,15 @@ def get_email_provider() -> EmailProvider:
 
 EmailProviderDep = Annotated[EmailProvider, Depends(get_email_provider)]
 
-_rate_limiter: RateLimiter | None = None
-
-
-def get_rate_limiter() -> RateLimiter:
-    """The limiter routes and readiness use; tests override this with a fake.
-
-    Without Upstash settings (local dev, tests) rate limiting is disabled.
-    """
-    global _rate_limiter
-    if _rate_limiter is None:
-        token = settings.UPSTASH_REDIS_REST_TOKEN
-        if settings.UPSTASH_REDIS_REST_URL and token:
-            _rate_limiter = UpstashRateLimiter.from_credentials(
-                settings.UPSTASH_REDIS_REST_URL, token.get_secret_value()
-            )
-        else:
-            logger.warning("Upstash Redis not configured: rate limiting is disabled")
-            _rate_limiter = DisabledRateLimiter()
-    return _rate_limiter
+# ``get_rate_limiter`` lives in app.core.rate_limiter_provider (the partner surface uses it too); tests
+# override it from here, which is the same function object.
+__all__ = [
+    "EmailProviderDep",
+    "HealthServiceDep",
+    "SessionDep",
+    "get_email_provider",
+    "get_health_service",
+    "get_rate_limiter",
+    "get_session",
+    "get_session_provider",
+]

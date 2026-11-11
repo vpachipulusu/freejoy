@@ -3,6 +3,8 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 
+PARTNER_URL = "postgresql+asyncpg://freejoy_partner:placeholder@localhost:5432/yourapp"
+
 
 def test_production_requires_auth_configuration(
     monkeypatch: pytest.MonkeyPatch,
@@ -189,6 +191,9 @@ def test_the_partner_switch_reads_booleans(
     monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool
 ) -> None:
     monkeypatch.setenv("PARTNER_API_ENABLED", raw)
+    monkeypatch.setenv(
+        "PARTNER_DATABASE_URL", PARTNER_URL
+    )  # required once the switch is on
 
     assert Settings(_env_file=None).PARTNER_API_ENABLED is expected  # type: ignore[call-arg]
 
@@ -207,3 +212,101 @@ def test_the_partner_switch_is_off_when_unset(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("PARTNER_API_ENABLED", raising=False)
 
     assert Settings(_env_file=None).PARTNER_API_ENABLED is False  # type: ignore[call-arg]
+
+
+def test_the_partner_switch_on_without_a_partner_database_url_stops_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.delenv("PARTNER_DATABASE_URL", raising=False)
+
+    with pytest.raises(ValidationError, match="PARTNER_DATABASE_URL must be set"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_partner_database_url_counts_as_missing(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("PARTNER_DATABASE_URL", blank)
+
+    with pytest.raises(ValidationError, match="PARTNER_DATABASE_URL"):
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_the_partner_database_url_is_not_needed_while_the_switch_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "false")
+    monkeypatch.delenv("PARTNER_DATABASE_URL", raising=False)
+
+    assert Settings(_env_file=None).PARTNER_DATABASE_URL is None  # type: ignore[call-arg]
+
+
+OWNER_URL = "postgresql+asyncpg://owner:secret@db.example.com:5432/app"
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        OWNER_URL,
+        OWNER_URL + "?sslmode=verify-full",
+        "postgresql://owner:secret@db.example.com:5432/app",
+        OWNER_URL + "?",
+        "postgresql+asyncpg://owner:secret@DB.EXAMPLE.COM:5432/app",
+        "postgresql+asyncpg://owner:secret@db.example.com/app",
+        "postgresql+asyncpg://owner:other@db-pooler.example.com/app",
+        "postgresql+asyncpg://:secret@db.example.com/app",
+    ],
+)
+def test_the_partner_database_url_may_not_use_the_owner_role_however_it_is_spelled(
+    monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", OWNER_URL)
+    monkeypatch.setenv("PARTNER_DATABASE_URL", spelling)
+
+    with pytest.raises(ValidationError, match="restricted partner role") as caught:
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert "secret" not in str(caught.value)
+    assert "db.example.com" not in str(caught.value).lower()
+
+
+def test_a_partner_database_url_with_another_role_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", OWNER_URL)
+    monkeypatch.setenv(
+        "PARTNER_DATABASE_URL",
+        "postgresql+asyncpg://freejoy_partner:pw@db.example.com/app?sslmode=verify-full",
+    )
+
+    assert Settings(_env_file=None).PARTNER_DATABASE_URL is not None  # type: ignore[call-arg]
+
+
+def test_an_unparseable_partner_database_url_stops_startup_without_quoting_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("PARTNER_DATABASE_URL", "not a url pw-in-here")
+
+    with pytest.raises(ValidationError, match="not a valid database URL") as caught:
+        Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert "pw-in-here" not in str(caught.value)
+
+
+def test_the_partner_database_url_is_a_secret_and_stays_out_of_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PARTNER_API_ENABLED", "true")
+    monkeypatch.setenv("PARTNER_DATABASE_URL", PARTNER_URL)
+
+    loaded = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert "placeholder" not in repr(loaded)
+    assert loaded.PARTNER_DATABASE_URL is not None
+    assert loaded.PARTNER_DATABASE_URL.get_secret_value() == PARTNER_URL
