@@ -64,8 +64,18 @@ that no automated traffic remains).
 offer (`OUTBOUND_OFFER_BOT_POLICY`; the rest are redirected and not stored), in a bucket separate from the 600 a minute
 for every other class (`OUTBOUND_OFFER_POLICY`), so automated traffic cannot use up the budget genuine clicks need. The
 figure is therefore a **lower bound** on automated traffic, not a full count; the admin page says "minimum" and the
-`bot_rule` text says so. Bot rows stored before the change shared the 600 budget with every other class. The residual: A flood that does not identify itself as automated still fills the main budget. The reported count is then not lower than the genuine count, but genuine clicks in a flooded minute are still not recorded and cannot be told apart from the flood afterwards. Because IPv6 addresses are grouped by /64, the ten addresses can be one host. FREEJ-62 only removes the bot-classed route to this. It is not handled
-here. See [freejoy-affiliate.md](freejoy-affiliate.md).
+`bot_rule` text says so. Bot rows stored before the change shared the 600 budget with every other class.
+
+**Recording limits for every class (FREEJ-63).** One client address (IPv6 grouped by /56) can have 5 clicks a minute for one
+offer recorded, whatever its class (`OUTBOUND_CLICK_OFFER_POLICY`); past that the visitor is still redirected, the click
+is not stored and neither per-offer bucket is spent. So a flood that sends an empty or ordinary browser user agent
+(classed `DESKTOP` or `OTHER`, counted as genuine) can no longer fill the 600 from ten addresses. When the main 600 is spent anyway,
+the backend logs one `offer recording cap reached` warning a minute for the offer (see
+[freejoy-affiliate.md](freejoy-affiliate.md#rate-limits)).
+
+**The residual (accepted).** About 120 addresses or /56 blocks (600 divided by 5) can still fill an offer's main budget in a
+minute. The reported count for that minute is then inflated by the flood, genuine clicks in it are not recorded, and the
+rows cannot be told apart afterwards; the log line above is the only trace. Nothing in the report marks such a minute.
 
 **Days.** A day is a UTC calendar day: a click at 23:59:59 UTC belongs to that day, 00:00:00 to the next, whatever the
 database session time zone (`timezone('UTC', occurred_at)`). `occurred_at` is already truncated to the minute. The query

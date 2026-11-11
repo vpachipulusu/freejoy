@@ -55,13 +55,19 @@ many IPs.
   enforcement helpers and the limiter singleton live in `app/core` (`rate_limit_enforcement.py`, `rate_limiter_provider.py`) so the partner
   package, which imports only `app.core`, uses them; `app.api.rate_limit` and `app.api.deps` re-export the names.
 - Outbound clicks (`POST /v1/catalogue/offers/{id}/click`, called only by the `/go/` route): `rl:outbound_click:ip:{client key}`
-  (60 per minute, fails open) and, per offer, one of two buckets chosen by the device class the route sends (FREEJ-62):
-  `rl:outbound_offer:offer:{offer id}` (600 per minute) for every class except `BOT` and for a missing class, and
-  `rl:outbound_offer_bot:offer:{offer id}` (60 per minute) for `BOT`. Both fail open. At most one is hit per request, and exactly one for a request
-  that reaches the handler; a request refused with 401, 429 or 422 spends none. Automated traffic therefore cannot spend the budget
-  that counted clicks need. Past either cap the visitor is still redirected and no click row
-  is written. Residual: a flood that claims a non-bot user agent still fills the main bucket (see
-  [freejoy-affiliate.md](../developer/freejoy-affiliate.md)).
+  (60 per minute, fails open; the only one of these that answers 429), then the recording limits, in this order and at most two hits per request
+  that reaches the handler (a request refused with 401, 429 or 422 makes none):
+  1. `rl:outbound_click_offer:ip:{client key}:offer:{offer id}` (5 per minute, every class, fails open; FREEJ-63). Past it the visitor is
+     still redirected, no click row is written and step 2 is not hit, so one address never uses more than 5 of an offer's budget a minute.
+  2. Per offer, one of two buckets chosen by the device class the route sends (FREEJ-62): `rl:outbound_offer:offer:{offer id}`
+     (600 per minute) for every class except `BOT` and for a missing class, and `rl:outbound_offer_bot:offer:{offer id}` (60 per minute) for
+     `BOT`. Both fail open. Past either the visitor is still redirected and no click row is written.
+  When the main bucket in step 2 denies a request, one warning (`offer recording cap reached`) is logged at most once a minute for the
+  offer, gated by `rl:outbound_offer_cap_signal:offer:{offer id}` (1 per minute, fails open and silent when it errors; hit only on the denied path).
+  **The client key of the click policies groups IPv6 by /56** (`CLICK_IPV6_GROUP_PREFIX`), every other policy by /64, so a host with a routed
+  /56 is one client for them. This changes the stored key of `rl:outbound_click:ip:` for IPv6 clients; old counters expire unread.
+  Residual: about 120 addresses or /56 blocks can still fill the main bucket, and a flood that claims a non-bot user agent is counted
+  (see [freejoy-affiliate.md](../developer/freejoy-affiliate.md)).
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.
   Fail-closed policies (sign-in, data export, admin sync) get a 1 s deadline per identifier, because a cold
   connection to a distant region can exceed 200 ms and a fail-closed timeout locks users out. A fail-closed call

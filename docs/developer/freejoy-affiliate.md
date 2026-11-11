@@ -166,11 +166,17 @@ merchant's website can change after a `direct` link was saved. A link that fails
 - The client key is `x-vercel-forwarded-for` on Vercel. **Off Vercel there is no trusted proxy header, so every
   client shares one `unknown` bucket per scope** (all `/go/` traffic together counts against 200 per minute). That
   is fine for local runs and previews behind a single caller; do not rely on this limiter alone behind another host.
-- The backend limits `POST .../click` twice:
-  - `OUTBOUND_CLICK_POLICY`, 60 per minute per forwarded client IP. Over it the answer is `429` with `Retry-After`.
-  - A per-offer budget, in one of two buckets chosen by `user_agent_class` (FREEJ-62; `app/core/rate_limit.py`, the
-    choice is made in `app/api/v1/catalogue_click.py`, in a dependency that reads the body). At most one is spent per
-    request, and exactly one for a request that reaches the handler; a request refused with 401, 429 or 422 spends none:
+- The backend limits `POST .../click` in three steps, in this order (`app/core/rate_limit.py` for the policies; the first
+  is a router dependency, the other two are made in `app/api/v1/catalogue_click.py`, in a dependency that reads the body):
+  - `OUTBOUND_CLICK_POLICY`, 60 per minute per forwarded client IP (key `outbound_click:ip:{client key}`). Over it the
+    answer is `429` with `Retry-After`.
+  - `OUTBOUND_CLICK_OFFER_POLICY`, 5 per minute per client address **and** offer (FREEJ-63; key
+    `outbound_click_offer:ip:{client key}:offer:{offer id}`), for every class including `BOT`. Over it the visitor is
+    **still redirected** (never a `429` from this limit) but **no click row is written**, and step 3 is **not** hit, so one
+    address can never use more than 5 of an offer's recording budget a minute. Before FREEJ-63 about ten addresses sending
+    an empty or ordinary browser user agent filled the 600 below. Fails open.
+  - A per-offer budget, in one of two buckets chosen by `user_agent_class` (FREEJ-62). A request that reaches the handler
+    makes at most two recording-limit hits (steps 2 and 3); a request refused with 401, 429 or 422 makes none:
     - `OUTBOUND_OFFER_POLICY`, 600 per minute per offer id (key `outbound_offer:offer:{offer id}`), for every class
       except `BOT` and for a request with no class. Over it the visitor is **still redirected** (the click endpoint
       answers `200` with the destination) but **no click row is written**.
@@ -180,15 +186,35 @@ merchant's website can change after a `direct` link was saved. A link that fails
       check (public offer, usable link, allowed host).
     - `OUTBOUND_OFFER_BOT_POLICY`, 60 per minute per offer id (key `outbound_offer_bot:offer:{offer id}`), for requests
       classed `BOT`. A `BOT` request never spends the 600 budget, so automated traffic from many addresses cannot
-      use it up and leave genuine clicks unrecorded (before FREEJ-62 about ten addresses at the 60 per minute address
-      limit could). Past the bot cap the request is not recorded and the redirect is unchanged.
-  - Both fail open like the other public catalogue routes (a limiter outage records the click as usual, with a warning
-    and a Sentry report), whichever bucket was asked.
+      use it up and leave genuine clicks unrecorded. Past the bot cap the request is not recorded and the redirect is unchanged.
+  - All three fail open like the other public catalogue routes (a limiter outage records the click as usual, with a
+    warning that carries the request id and a Sentry report), whichever limit was asked.
+  - **IPv6 is grouped by /56 for the two click keys** (`CLICK_IPV6_GROUP_PREFIX`, `client_bucket(address, ipv6_prefix)`,
+    passed by `limit_by_client_ip(policy, ipv6_prefix)` and `client_key(request, ipv6_prefix)`), where every other policy
+    (sign-in, public catalogue, partner) keeps /64. A host with a routed /56 holds 256 /64 networks, which would be 256
+    separate clients. IPv4 and IPv4-mapped IPv6 are unchanged. **This changes the key of `outbound_click:ip:` for IPv6
+    clients** (from `...::/64` to `...::/56`): counters under the old key are never read again and simply expire, so
+    nothing needs migrating. The Next.js proxy limiter and `client-bucket.ts` are not part of this and stay as they are.
+  - **The cap signal.** When step 3 denies a request for the **main** bucket, the backend logs one warning,
+    `offer recording cap reached`, with `offer_id`, `scope` (`outbound_offer`) and `request_id`, at most **once a minute per
+    offer**. The once-a-minute rule is the limiter itself: `OUTBOUND_OFFER_CAP_SIGNAL_POLICY`, 1 per minute, key
+    `outbound_offer_cap_signal:offer:{offer id}`, hit only on the denied path (an allowed request costs no extra call).
+    It fails open: if that hit cannot be answered nothing is logged and nothing is reported, so an outage cannot become a
+    line per request. It is a warning in the structured log (the JSON formatter emits `offer_id` and `scope`), never a
+    Sentry event, and carries no destination, address or user agent. There is no such signal for the bot bucket or for the
+    per-address limit (both are expected to be hit by a flood). **How an operator reads it:** search the backend logs
+    for `offer recording cap reached`; the `offer_id` says which offer's count is capped for that minute, and a line every
+    minute for hours means a sustained flood (or a genuinely viral offer). No line means the main budget was not spent.
   - **Where the class comes from.** The browser never calls the backend. The `/go/[offerId]` route handler
     (`src/lib/outbound/respond.ts`) computes the class from the visitor's `User-Agent` header with `classifyUserAgent`
     (`src/lib/outbound/validation.ts`) and sends it, with the internal key. The visitor controls that header, so
     the class is a label, not proof.
-  - **Residual (out of scope of FREEJ-62).** A flood that does not identify itself as automated still fills the main budget. The reported count is then not lower than the genuine count, but genuine clicks in a flooded minute are still not recorded and cannot be told apart from the flood afterwards. Because IPv6 addresses are grouped by /64, the ten addresses can be one host. FREEJ-62 only removes the bot-classed route to this.
+  - **Residual (accepted).** One address (or one /56) can no longer fill an offer's budget, but about 120 addresses or
+    /56 blocks (600 divided by 5) can still fill it in a minute. The reported count is then inflated by the flood, genuine
+    clicks in that minute are not recorded, and the rows cannot be told apart afterwards. The cap signal makes a spent
+    budget visible; it does not stop it. Not done in FREEJ-63, on purpose: treating requests without `Sec-Fetch-Mode`
+    differently, resolving the offer before spending recording budget, the Upstash plan cap, and any change to
+    `fail_closed` handling.
 - The proxy keys IPv6 clients by their full address, while the backend groups them by /64. This pre-existing gap
   is not specific to `/go/`: one IPv6 subscriber can spread requests over many addresses to get more proxy
   buckets, though the backend limits above still apply.
@@ -210,8 +236,10 @@ directly. Send the CSV and say plainly:
 - Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
 - Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded.
 
-Internal only, never sent to retailers: the limit is the 600 a minute described above (`OUTBOUND_OFFER_POLICY`). Bot clicks
-have their own, smaller cap (`OUTBOUND_OFFER_BOT_POLICY`), so the excluded bot figure on the admin page is a minimum.
+Internal only, never sent to retailers: the limit is the 600 a minute described above (`OUTBOUND_OFFER_POLICY`), and
+one address may have 5 clicks a minute for one offer recorded (`OUTBOUND_CLICK_OFFER_POLICY`). Bot clicks
+have their own, smaller cap (`OUTBOUND_OFFER_BOT_POLICY`), so the excluded bot figure on the admin page is a minimum. A flood from
+about 120 addresses can still inflate the count of one offer for a minute.
 
 A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with its own text in the answer (what a click is, bots left out, UTC days, the retention, and that recording is rate limited, without the figure) ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
 
