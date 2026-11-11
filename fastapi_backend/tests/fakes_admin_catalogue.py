@@ -20,6 +20,7 @@ from app.repositories.admin_offers import (
     OfferPage,
     OfferProvenance,
     OfferRecord,
+    PartnerSubmissionRecord,
     ReviewRefs,
 )
 
@@ -158,6 +159,9 @@ class FakeOfferStore:
         self.filters: list[tuple[OfferFilters, int, int]] = []
         self.provenance: dict[str, OfferProvenance] = {}
         self.provenance_locked: list[str] = []
+        self.partners: dict[str, PartnerSubmissionRecord] = {}
+        self.partner_locked: list[str] = []
+        self.applied_hashes: list[str | None] = []
 
     async def list_offers(
         self, filters: OfferFilters, limit: int, offset: int
@@ -174,6 +178,27 @@ class FakeOfferStore:
         if lock:
             self.provenance_locked.append(offer_id)
         return self.provenance.get(offer_id)
+
+    async def get_partner_submission(
+        self, offer_id: str, *, lock: bool = False
+    ) -> PartnerSubmissionRecord | None:
+        if lock:
+            self.partner_locked.append(offer_id)
+        return self.partners.get(offer_id)
+
+    async def clear_partner_pending(
+        self, offer_id: str, *, applied_hash: str | None = None
+    ) -> None:
+        self.partners[offer_id] = replace(
+            self.partners[offer_id],
+            pending_payload=None,
+            pending_hash=None,
+            pending_at=None,
+        )
+        self.provenance[offer_id] = replace(
+            self.provenance[offer_id], source_changed_at=None
+        )
+        self.applied_hashes.append(applied_hash)
 
     async def clear_source_change(self, offer_id: str) -> None:
         self.provenance[offer_id] = replace(

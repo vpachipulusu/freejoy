@@ -96,6 +96,8 @@ INVALID_MESSAGES = {
     "destination_not_allowed": "Destination host is not allowed for this provider",
     "review_token_required": "Send the review token from the offer you reviewed",
     "invalid_label": "Supply a plain label that is not a key",
+    "partner_merchant_fixed": "A retailer's submission cannot be moved to another merchant",
+    "invalid_pending_payload": "The retailer update is not valid content: dismiss it",
 }
 KEY_NOT_ALLOWED_MESSAGES = {
     "merchant_inactive": "Activate the merchant before issuing a key",

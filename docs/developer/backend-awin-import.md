@@ -479,6 +479,15 @@ been acknowledged), which a marker that stays set would have allowed.
 `tests/commands/test_import_awin_offers_e2e.py` (a real dismissal through `AdminOfferService`, then two runs against
 Postgres) pin all of this.
 
+## The same refresh rule for retailer submissions
+
+The partner API ([backend-partner-api.md](backend-partner-api.md#offer-submissions-freej-58)) applies the rule `_may_refresh` uses: an untouched
+draft may be refreshed, anything else only gets a proposal and the marker. The shared part, `is_untouched_draft` (status `DRAFT`, exactly one
+link, the stored `applied_content_hash` still equal to `fingerprint(offer, links)`), and `fingerprint` itself live in
+`app/core/offer_fingerprint.py`; `_may_refresh` calls it and adds its Awin-only conditions (the tracking URL, the source URL and the
+merchant). `app/services/offer_fingerprint.py` re-exports `fingerprint`, so the bytes in `tests/services/test_offer_fingerprint.py` are the
+same contract for both writers. Partner rows use provider `partner` in `offer_imports`; the importer only looks up provider `awin`.
+
 ## Tests
 
 `tests/core/test_awin_config.py`, `test_awin_client.py` (request shape, header-only token asserted against the URL, logs,

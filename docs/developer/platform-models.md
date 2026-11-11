@@ -50,6 +50,7 @@ SQLAlchemy models for the platform database are in `fastapi_backend/app/models/p
 | `offer_imports`, `merchant_imports` | Provenance for the Awin importer (migration `0004`): which provider promotion an offer came from and which advertiser a merchant stands for, unique `(provider, external_id)`, FKs that cascade, plus the hashes that tell a change at the source from an edit by a person. See [backend-awin-import.md](backend-awin-import.md). |
 | `click_events` | One row per outbound click. See the privacy rule below. Indexes `(offer_id, occurred_at)`, `occurred_at` (migration `0003`, serves the retention job) and `affiliate_link_id` (the `SET NULL` delete runs on every link delete). |
 | `partner_api_keys` | One row per partner API key an admin issues to a merchant (migration `0007`, [ADR-013](../adr/0013-partner-api.md)): `id` IS the key id written into the key (`fj_<env>_<id>_<secret>`, CHECK `^[a-z0-9]{24}$`); `merchant_id` (`ON DELETE CASCADE`, so a deleted merchant's keys die; ownership is per merchant, never per organisation); `key_hash` unique, the SHA-256 of the whole key (CHECK 64 hex; the key itself is never stored); `label` (1 to 80 characters); `created_by` the admin's user id as plain text with no foreign key (like the audit trail); `created_at`, `revoked_at` (CHECK `>= created_at`, written from the database clock), `last_used_at` (the only column the restricted partner role may update). Index `(merchant_id, created_at)`. The partner package reads it with SQLAlchemy Core (`app/partner/keys.py`), checked against this model by a test. See [backend-partner-api.md](backend-partner-api.md). |
+| `partner_submissions` | One row per offer a retailer submits through the partner API (migration `0008`, [ADR-013](../adr/0013-partner-api.md)): `merchant_id` (`ON DELETE CASCADE`) and the retailer's own `ref` (CHECK `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), unique `(merchant_id, ref)`; `offer_id` unique (`ON DELETE CASCADE`); `content_hash` (64 hex) of the sanitised content last sent; an optional pending update that waits for an editor, `pending_payload` (a `jsonb` object, CHECK `jsonb_typeof(...) = 'object'`, at most 49,152 bytes as text, the "v":1 payload marker inside it), `pending_hash` and `pending_at`, all set or all null (CHECK `ck_partner_submissions_pending_complete`); `key_id` (CHECK `^[a-z0-9]{24}$`, plain text with no foreign key, so revoking or deleting a key keeps the trail), `submitted_at`, `first_published_at` (set once by a trigger the first time the offer is PUBLISHED; the API needs it to tell `declined` from `ended`). The restricted partner role reads and writes it by column grant. The partner package reads it with SQLAlchemy Core (`app/partner/tables.py`), checked against this model by a test. Eight triggers (below) belong with it. See [backend-partner-api.md](backend-partner-api.md). |
 | `network_report_rows` | One row per transaction in the affiliate network's own report (migration `0005`, Awin importer): unique `(provider, external_id)`; `commission_status` is `pending`, `approved`, `declined`, `paid` or `deleted` with the raw value beside it; amounts are `bigint` minor units `>= 0` plus a 3-letter `currency`; the reported `click_ref`; `report_hash` of the normalised row. `offer_id`, `affiliate_link_id` and `merchant_id` are optional and `SET NULL`, so deleting any of them keeps the reported revenue. Indexes `(provider, transaction_at)`, `offer_id`, `affiliate_link_id` and `merchant_id` (the `SET NULL` deletes); CHECK `last_seen_at >= first_seen_at`. Revenue comes from here, never from `click_events`. See [backend-network-reports.md](backend-network-reports.md). |
 | `email_subscribers` | Double opt-in alert subscribers; see the email decision below. |
 
@@ -149,3 +150,46 @@ order:
 **Rollback:** frontend first, then backend. Never downgrade `0006` in production: it drops the column and discards every
 editor's choice, including every `SPONSORED` marking (a later upgrade backfills again from the links and never restores
 `SPONSORED`).
+
+## Rolling out migration 0008 (`partner_submissions` and the partner guard triggers)
+
+Migration `0008` adds the `partner_submissions` table and **eight triggers with their eight functions** that hold the
+restricted partner role to what the partner API may do (see ADR-013 and `0008_partner_submissions.py`). The triggers are
+not model objects, so `alembic check` does not see them: the migration is the only place they are defined, and a test
+(`tests/commands/test_partner_role_script.py`) keeps the migration, `PARTNER_GUARD_TRIGGERS` in `app/core/database.py` and
+`commands/sql/partner_role.sql` naming the same eight. Every function runs with the invoker's rights and a pinned
+`search_path`, and tells the partner role from every other writer by a privilege it lacks, so the owner, the admin API and
+the Awin importer are not affected.
+
+Roll out in this order:
+
+1. **Pause the Awin import** (`commands.import_awin_offers`) and any other writer of `offers`: the upgrade takes brief
+   locks on `offers`, `merchants`, `affiliate_links`, `offer_imports` and `audit_logs` and sets `lock_timeout` to 5 s, so
+   it fails and rolls back, rather than queueing behind a long transaction, if one is open. Run it again when the lock is
+   free.
+2. **Pre-flight**, against the production database. It must answer `t,t,t` (the database is at `0007`, there is no
+   `partner_submissions` table yet, and no object of the migration exists under its name):
+
+   ```sql
+   SELECT (SELECT version_num = '0007' FROM alembic_version),
+          NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'partner_submissions'),
+          NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname LIKE 'freejoy\_%');
+   ```
+
+3. **Upgrade** (`uv run alembic upgrade head` from `fastapi_backend/`), then **deploy the backend**. Between the two
+   the old code still works: it never writes `partner_submissions`, and the triggers are inert for it.
+4. **Re-run `commands/sql/partner_role.sql`** as the owner. It grants the submission columns and then refuses, in its own
+   verification, to finish unless every guard exists on its table, runs the function it should, is enabled and has the
+   expected type, and unless the role cannot switch triggers off (`session_replication_role`). The partner surface itself
+   checks the same on its first connection and answers 503 until it holds.
+5. **Only then enable the surface** (`PARTNER_API_ENABLED`) and tell retailers the offer endpoints exist.
+
+If the script is **not** re-run, the role simply lacks the new grants: the submission endpoints answer 503 (the role
+check fails closed) and the click and `/me` endpoints are unaffected. Nothing is written without the guards, because the
+guards come with the migration, not with the script.
+
+**Rollback.** Do not downgrade `0008` in production. The downgrade drops the triggers, their functions and the table,
+which loses every submission (the draft offers it made stay) and removes the guards while the role still holds the write
+grants the script gave it. If you must roll back, first re-run the role script of the previous release: it revokes
+everything and grants only the old set, so the role loses its write grants before the guards go. Frontend first, then
+backend, then the database, as for `0006`.

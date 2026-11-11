@@ -1,19 +1,8 @@
-"""Two hashes of an offer: the importer's edit fingerprint and the admin's review token.
+"""The admin's review token, and the importer's edit fingerprint (which lives in ``app.core.offer_fingerprint``).
 
-``fingerprint`` hashes every field an editor can change on an offer except ``commercial_basis`` (the importer
-writes that once, as AFFILIATE, and never refreshes it; see ``FINGERPRINT_FIELDS``), its status and verification date,
-and its affiliate links (provider, destination, tracking id, active), and nothing else (not ids, slugs,
-timestamps of the row or click counters). The Awin importer stores it as ``applied_content_hash`` each
-time it writes an offer; a later mismatch means a person changed the offer, so it is no longer an untouched
-import. Its bytes are a contract (stored hashes depend on them): ``tests/services/test_offer_fingerprint.py``
-pins the digest of a known offer. Bump ``FINGERPRINT_VERSION`` together with ``FINGERPRINT_FIELDS``: stored
-fingerprints then stop matching, which fails safe (nothing is refreshed).
-
-Both hashes refuse a naive datetime (``TypeError``) instead of reading it as the server's local time. That
-refusal lives in ``_canonical``, which ``fingerprint()`` shares, so for that one input ``fingerprint()`` is no
-longer what it was before; it cannot happen with stored data (every date column is ``timestamptz``, so the
-database always returns aware values) and it leaves every aware input's digest unchanged. The admin API computes
-the token inside the write's transaction, so such a failure would roll the write back, never follow a commit.
+``fingerprint``, ``FINGERPRINT_FIELDS`` and ``FINGERPRINT_VERSION`` moved to ``app/core/offer_fingerprint.py`` so the
+partner API (which may import only ``app.core``) shares the one definition; they are re-exported here, so no
+existing caller changes. See that module for what the fingerprint covers and why its bytes are a contract.
 
 ``review_token`` is what the admin API hands out so that ``verify`` and ``publish`` apply to the version the
 editor read (see ``admin_offers``). It covers more than the fingerprint, because a visitor sees more than the
@@ -22,59 +11,37 @@ and the merchant's and category's public fields (the category's name and short n
 shows them), and the commercial basis (a change to how an offer is paid for is a change the editor must see; it is
 outside the fingerprint, see ``FINGERPRINT_FIELDS``). It is separate so the importer's hashes stay as they are.
 Bump ``REVIEW_TOKEN_VERSION`` when what it covers changes: open tokens go stale and editors reload.
+
+Both hashes refuse a naive datetime (``TypeError``): the admin API computes the token inside the write's
+transaction, so such a failure would roll the write back, never follow a commit.
 """
 
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from typing import Any
 
+from app.core.offer_fingerprint import (
+    FINGERPRINT_FIELDS,
+    FINGERPRINT_VERSION,
+    canonical,
+    fingerprint,
+)
 from app.repositories.admin_offers import (
     AffiliateLinkRecord,
     OfferRecord,
     ReviewRefs,
 )
-from app.services.offer_rules import EDITABLE_FIELDS
 
-FINGERPRINT_VERSION = 1
+__all__ = [
+    "FINGERPRINT_FIELDS",
+    "FINGERPRINT_VERSION",
+    "REVIEW_TOKEN_VERSION",
+    "fingerprint",
+    "review_token",
+]
+
 REVIEW_TOKEN_VERSION = 3
-# ``commercial_basis`` is editable but deliberately NOT in the importer's fingerprint: the importer writes it
-# once, when it creates a draft, and never refreshes it, so an editor's change to it needs no "this is no longer
-# an untouched import" signal. Adding it here would also change the digest of every stored offer and mark every
-# existing import as edited. The review token covers it instead (see ``review_token``).
-FINGERPRINT_FIELDS = tuple(
-    sorted((EDITABLE_FIELDS - {"commercial_basis"}) | {"status", "last_verified_at"})
-)
-
-
-def _canonical(value: Any) -> Any:
-    if isinstance(value, datetime):
-        if (
-            value.utcoffset() is None
-        ):  # a naive time would be read as the server's local time
-            raise TypeError("a naive datetime in a fingerprint")
-        return value.astimezone(UTC).isoformat()
-    raise TypeError(f"unexpected {type(value).__name__} in a fingerprint")
-
-
-def fingerprint(offer: OfferRecord, links: Sequence[AffiliateLinkRecord]) -> str:
-    """SHA-256 (hex) of the offer's editable state and its links, as an editor would see them."""
-    state: Mapping[str, Any] = {
-        "v": FINGERPRINT_VERSION,
-        "offer": {name: getattr(offer, name) for name in FINGERPRINT_FIELDS},
-        "links": sorted(
-            (
-                [link.provider, link.destination_url, link.tracking_id, link.active]
-                for link in links
-            ),
-            key=repr,
-        ),
-    }
-    payload = json.dumps(
-        state, sort_keys=True, separators=(",", ":"), default=_canonical
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def review_token(
@@ -114,6 +81,6 @@ def review_token(
         ],
     }
     payload = json.dumps(
-        state, sort_keys=True, separators=(",", ":"), default=_canonical
+        state, sort_keys=True, separators=(",", ":"), default=canonical
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

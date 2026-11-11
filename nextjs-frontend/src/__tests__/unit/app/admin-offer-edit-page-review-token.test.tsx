@@ -38,7 +38,9 @@ vi.mock('@/lib/api/admin-offers', async () => {
 
 import EditOfferPage from '@/app/(admin)/admin/offers/[id]/page';
 import { OfferLifecycleButtons } from '@/app/(admin)/admin/offers/_components/offer-lifecycle-buttons';
+import { OfferForm } from '@/app/(admin)/admin/offers/_components/offer-form';
 import { OfferProvenancePanel } from '@/app/(admin)/admin/offers/_components/offer-provenance-panel';
+import { PartnerSubmissionPanel } from '@/app/(admin)/admin/offers/_components/partner-submission-panel';
 
 const OFFER = {
   id: 'o1',
@@ -123,6 +125,61 @@ describe('edit offer page', () => {
       confirmBasisToPublish: true,
     });
     expect(await props(false)).toMatchObject({ confirmBasisToPublish: false });
+  });
+
+  it('tells the buttons and the form when the basis is only a placeholder, and the form starts with none chosen', async () => {
+    const read = async (flag: boolean) => {
+      mocks.fetchAdminOffer.mockResolvedValue({
+        success: true,
+        data: { ...OFFER, needs_basis_confirmation: true, basis_is_placeholder: flag },
+      });
+      const page = (await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) })) as ReactNode;
+      const [buttons] = findAll(page, OfferLifecycleButtons) as {
+        props: Record<string, unknown>;
+      }[];
+      const [form] = findAll(page, OfferForm) as { props: Record<string, unknown> }[];
+      return { buttons: buttons.props, form: form.props };
+    };
+
+    const placeholder = await read(true);
+    expect(placeholder.buttons).toMatchObject({ basisIsPlaceholder: true });
+    expect(placeholder.form).toMatchObject({
+      basisIsPlaceholder: true,
+      initialValues: { commercialBasis: '' },
+    });
+    const chosen = await read(false);
+    expect(chosen.buttons).toMatchObject({ basisIsPlaceholder: false });
+    expect(chosen.form).toMatchObject({
+      basisIsPlaceholder: false,
+      initialValues: { commercialBasis: 'SPONSORED' },
+    });
+  });
+
+  it('hands the partner panel the category names and whether the pick list was cut short', async () => {
+    mocks.fetchAdminOffer.mockResolvedValue({
+      success: true,
+      data: {
+        ...OFFER,
+        import_provider: 'partner',
+        partner_submission: {
+          ref: 'sku-1',
+          merchant_id: 'm1',
+          merchant_name: 'Acme',
+          submitted_at: '2026-03-01T10:00:00Z',
+          pending: null,
+        },
+      },
+    });
+
+    const page = await EditOfferPage({ params: Promise.resolve({ id: 'o1' }) });
+
+    const [panel] = findAll(page as ReactNode, PartnerSubmissionPanel) as {
+      props: Record<string, unknown>;
+    }[];
+    expect(panel.props).toMatchObject({
+      categoryNames: { c1: 'Food' },
+      categoriesTruncated: false,
+    });
   });
 
   it('shows the provenance panel of an imported offer, with the token it read and the status', async () => {

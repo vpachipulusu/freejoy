@@ -31,6 +31,7 @@ from app.repositories.admin_offers import (
     AffiliateLinkRecord,
     OfferProvenance,
     OfferRecord,
+    PartnerSubmissionRecord,
 )
 from app.services.admin_offers import OfferDetail
 from app.services.offer_rules import needs_basis_confirmation
@@ -178,6 +179,21 @@ class DismissSourceChangeRequest(BaseModel):
     source_changed_at: AwareDatetime
 
 
+class PartnerUpdateRequest(BaseModel):
+    """Apply or dismiss the update a retailer sent for this offer.
+
+    Needs the ``review_token`` of the offer the editor loaded and the ``pending_hash`` of the proposal the editor was
+    shown (409 ``offer_changed`` when either is stale, so nothing is applied or dismissed blind).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: ReviewToken
+    pending_hash: Annotated[
+        str, StringConstraints(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    ]
+
+
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -238,6 +254,27 @@ class OfferProvenanceOut(BaseModel):
     source_changed_at: datetime | None
 
 
+class PartnerPendingOut(BaseModel):
+    """What a retailer proposed for an offer an editor has touched: the sanitised content and its hash.
+
+    ``payload`` has the keys of ``app.partner.content.CleanContent.payload`` (dates as ISO strings).
+    """
+
+    hash: str
+    submitted_at: datetime
+    payload: dict[str, Any]
+
+
+class PartnerSubmissionOut(BaseModel):
+    """The retailer behind an offer submitted through the partner API."""
+
+    ref: str
+    merchant_id: str
+    merchant_name: str
+    submitted_at: datetime
+    pending: PartnerPendingOut | None
+
+
 class OfferSummaryOut(BaseModel):
     id: str
     title: str
@@ -254,13 +291,20 @@ class OfferSummaryOut(BaseModel):
     # Both null for an offer made by hand.
     import_provider: str | None
     source_changed_at: datetime | None
+    # The retailer's own ref, for an offer submitted through the partner API (its "Submitted by retailer" marker).
+    partner_ref: str | None
 
 
 class OfferOut(OfferSummaryOut):
     review_token: str
     # True when publishing needs the editor to confirm the commercial basis (see ``needs_basis_confirmation``).
     needs_basis_confirmation: bool
+    # True while the stored commercial basis is the placeholder of a retailer's draft that no editor has put live:
+    # nobody chose it, so a form must not present it as the current basis.
+    basis_is_placeholder: bool
     provenance: OfferProvenanceOut | None
+    # Null unless the offer was submitted through the partner API.
+    partner_submission: PartnerSubmissionOut | None
     summary: str
     description: list[str]
     image_tint: str
@@ -323,30 +367,62 @@ def link_out(record: AffiliateLinkRecord) -> AffiliateLinkOut:
     return AffiliateLinkOut(**record.__dict__)
 
 
-def _import_fields(provenance: OfferProvenance | None) -> dict[str, Any]:
+def _import_fields(
+    provenance: OfferProvenance | None, partner_ref: str | None = None
+) -> dict[str, Any]:
     return {
+        "partner_ref": partner_ref,
         "import_provider": provenance.provider if provenance else None,
         "source_changed_at": provenance.source_changed_at if provenance else None,
     }
 
 
 def summary_out(
-    record: OfferRecord, provenance: OfferProvenance | None
+    record: OfferRecord,
+    provenance: OfferProvenance | None,
+    partner_ref: str | None = None,
 ) -> OfferSummaryOut:
-    return OfferSummaryOut(**record.__dict__, **_import_fields(provenance))
+    return OfferSummaryOut(**record.__dict__, **_import_fields(provenance, partner_ref))
+
+
+def partner_out(record: PartnerSubmissionRecord | None) -> PartnerSubmissionOut | None:
+    if record is None:
+        return None
+    pending = None
+    if (
+        record.pending_payload is not None
+        and record.pending_hash is not None
+        and record.pending_at is not None
+    ):
+        pending = PartnerPendingOut(
+            hash=record.pending_hash,
+            submitted_at=record.pending_at,
+            payload=record.pending_payload,
+        )
+    return PartnerSubmissionOut(
+        ref=record.ref,
+        merchant_id=record.merchant_id,
+        merchant_name=record.merchant_name,
+        submitted_at=record.submitted_at,
+        pending=pending,
+    )
 
 
 def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
     provenance = detail.provenance
     return {
         **detail.offer.__dict__,
-        **_import_fields(provenance),
+        **_import_fields(provenance, detail.partner.ref if detail.partner else None),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
-        "needs_basis_confirmation": needs_basis_confirmation(
+        "basis_is_placeholder": detail.partner is not None
+        and detail.partner.first_published_at is None,
+        "needs_basis_confirmation": detail.partner is not None
+        or needs_basis_confirmation(
             (link.provider, link.active) for link in detail.links
         ),
         "provenance": OfferProvenanceOut(**provenance.__dict__) if provenance else None,
+        "partner_submission": partner_out(detail.partner),
     }
 
 

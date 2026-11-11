@@ -394,6 +394,39 @@ describe('Dismiss source change waits like the other status buttons', () => {
     expect(mocks.dismissSourceChangeAction).not.toHaveBeenCalled();
   });
 
+  it('waits while another write on the page is running, opening nothing and calling nothing', async () => {
+    const user = userEvent.setup();
+    function OtherWriter() {
+      const review = useOfferReview();
+      return (
+        <button type="button" onClick={() => review.beginWrite()}>
+          Begin other write
+        </button>
+      );
+    }
+    render(
+      <DirtyFormProvider>
+        <OfferReviewProvider>
+          <OtherWriter />
+          <OfferProvenancePanel
+            provenance={MOVED}
+            offerId="o1"
+            offerTitle="Free coffee"
+            status="DRAFT"
+            reviewToken="tok-loaded"
+          />
+        </OfferReviewProvider>
+      </DirtyFormProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Begin other write' }));
+    await user.click(trigger()!);
+
+    expect(trigger()).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(mocks.dismissSourceChangeAction).not.toHaveBeenCalled();
+  });
+
   it('leaves the reason to the lifecycle group: its own live region says nothing about it', () => {
     renderPanel(MOVED, {}, { dirty: true, reloading: true });
 

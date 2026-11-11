@@ -24,6 +24,12 @@ export const CLICKS_MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists
 export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
 export const NO_SOURCE_CHANGE_MESSAGE =
   'There is no source change to dismiss on this offer. This page has been refreshed.';
+export const NO_PARTNER_UPDATE_MESSAGE =
+  'There is no retailer update waiting on this offer any more. This page has been refreshed.';
+export const PARTNER_UPDATE_ARCHIVED_MESSAGE =
+  'This offer is archived, so the retailer update cannot be applied. You can only dismiss it. This page has been refreshed.';
+export const PARTNER_UPDATE_NOT_APPLICABLE_MESSAGE =
+  'The retailer update cannot be applied to this offer as it is now. This page has been refreshed.';
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Wait a minute and try again.';
 export const INVALID_INPUT_MESSAGE = 'Some values were rejected. Check the form and try again.';
 export const INVALID_FORM_MESSAGE = 'Check the highlighted fields and try again.';
@@ -34,6 +40,7 @@ const CODE_MESSAGES: Record<string, string> = {
   review_token_required: OFFER_CHANGED_MESSAGE,
   permission_denied:
     'Changing the commercial basis of a published offer needs permission to publish. Ask an editor who can publish.',
+  partner_merchant_fixed: "A retailer's submission cannot be moved to another merchant.",
   illegal_transition:
     'That change is not allowed for an offer in its current status. Refresh the page and try again.',
   invalid_url: 'A web address was rejected. Use a full https:// address.',
@@ -48,6 +55,24 @@ const CODE_MESSAGES: Record<string, string> = {
   invalid_label: 'A label is a name, not a key. Do not paste a key.',
   invalid_range: `Choose dates where the start is on or before the end, at most ${MAX_CLICK_RANGE_DAYS} days apart.`,
 };
+
+/**
+ * Wording for the codes applying a retailer update can return, which differ from the edit form's: an update is not
+ * edited, so "choose another" and "check the form" lead nowhere. Used for the apply action only.
+ */
+const APPLY_CODE_MESSAGES: Record<string, string> = {
+  permission_denied:
+    'Applying a retailer update to a published offer needs permission to publish. Ask an editor who can publish.',
+  invalid_pending_payload:
+    'This retailer update cannot be applied as it was sent. Dismiss it and ask the retailer to send it again.',
+  destination_not_allowed:
+    "The retailer's link is not on the merchant's website, so the update cannot be applied. Check the merchant's website address, or dismiss the update.",
+  unknown_category:
+    'The category in this retailer update no longer exists, so it cannot be applied. Dismiss it and ask the retailer to send it again.',
+};
+
+const APPLY_PUBLISH_BLOCKED_PREFIX =
+  'The retailer update cannot be applied because the published offer would no longer meet the publishing rules';
 
 /** The backend's fixed publish rules (`PUBLISH_BLOCKERS`), mapped to our own wording. */
 const PUBLISH_REASONS: Record<string, string> = {
@@ -79,10 +104,27 @@ function publishBlockedMessage(backendText: string): string {
   return `This offer cannot be published yet: ${reasons.join('; ')}.`;
 }
 
+/**
+ * The message for a refused apply, or undefined when the code is not one apply words differently (the general
+ * wording then applies). Never the backend's text: a refused publish only lists reasons from the fixed table.
+ */
+export function applyErrorMessage(result: FailedResult): string | undefined {
+  if (result.code === 'publish_blocked') {
+    const reasons = publishBlockedReasons(result.error);
+    return reasons.length > 0
+      ? `${APPLY_PUBLISH_BLOCKED_PREFIX}: ${reasons.join('; ')}.`
+      : `${APPLY_PUBLISH_BLOCKED_PREFIX}.`;
+  }
+  if (result.code !== undefined && Object.hasOwn(APPLY_CODE_MESSAGES, result.code)) {
+    return APPLY_CODE_MESSAGES[result.code];
+  }
+  return undefined;
+}
+
 /** `notFoundMessage` names what was not found (offer, category or merchant). */
 export function catalogueErrorMessage(result: FailedResult, notFoundMessage: string): string {
   if (result.code === 'publish_blocked') return publishBlockedMessage(result.error);
-  if (result.code !== undefined && CODE_MESSAGES[result.code] !== undefined) {
+  if (result.code !== undefined && Object.hasOwn(CODE_MESSAGES, result.code)) {
     return CODE_MESSAGES[result.code];
   }
   if (result.status === 429) return RATE_LIMITED_MESSAGE;

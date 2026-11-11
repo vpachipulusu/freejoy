@@ -2233,6 +2233,10 @@ export type OfferOut = {
      */
     source_changed_at: string | null;
     /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
+    /**
      * Review Token
      */
     review_token: string;
@@ -2240,7 +2244,12 @@ export type OfferOut = {
      * Needs Basis Confirmation
      */
     needs_basis_confirmation: boolean;
+    /**
+     * Basis Is Placeholder
+     */
+    basis_is_placeholder: boolean;
     provenance: OfferProvenanceOut | null;
+    partner_submission: PartnerSubmissionOut | null;
     /**
      * Summary
      */
@@ -2398,6 +2407,10 @@ export type OfferSummaryOut = {
      * Source Changed At
      */
     source_changed_at: string | null;
+    /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
 };
 
 /**
@@ -2462,6 +2475,10 @@ export type OfferWriteOut = {
      */
     source_changed_at: string | null;
     /**
+     * Partner Ref
+     */
+    partner_ref: string | null;
+    /**
      * Review Token
      */
     review_token: string;
@@ -2469,7 +2486,12 @@ export type OfferWriteOut = {
      * Needs Basis Confirmation
      */
     needs_basis_confirmation: boolean;
+    /**
+     * Basis Is Placeholder
+     */
+    basis_is_placeholder: boolean;
     provenance: OfferProvenanceOut | null;
+    partner_submission: PartnerSubmissionOut | null;
     /**
      * Summary
      */
@@ -2754,6 +2776,74 @@ export type PartnerKeysResponse = {
      * Data
      */
     data: Array<PartnerKeyOut>;
+};
+
+/**
+ * PartnerPendingOut
+ *
+ * What a retailer proposed for an offer an editor has touched: the sanitised content and its hash.
+ *
+ * ``payload`` has the keys of ``app.partner.content.CleanContent.payload`` (dates as ISO strings).
+ */
+export type PartnerPendingOut = {
+    /**
+     * Hash
+     */
+    hash: string;
+    /**
+     * Submitted At
+     */
+    submitted_at: string;
+    /**
+     * Payload
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * PartnerSubmissionOut
+ *
+ * The retailer behind an offer submitted through the partner API.
+ */
+export type PartnerSubmissionOut = {
+    /**
+     * Ref
+     */
+    ref: string;
+    /**
+     * Merchant Id
+     */
+    merchant_id: string;
+    /**
+     * Merchant Name
+     */
+    merchant_name: string;
+    /**
+     * Submitted At
+     */
+    submitted_at: string;
+    pending: PartnerPendingOut | null;
+};
+
+/**
+ * PartnerUpdateRequest
+ *
+ * Apply or dismiss the update a retailer sent for this offer.
+ *
+ * Needs the ``review_token`` of the offer the editor loaded and the ``pending_hash`` of the proposal the editor was
+ * shown (409 ``offer_changed`` when either is stale, so nothing is applied or dismissed blind).
+ */
+export type PartnerUpdateRequest = {
+    /**
+     * Review Token
+     */
+    review_token: string;
+    /**
+     * Pending Hash
+     */
+    pending_hash: string;
 };
 
 /**
@@ -7730,6 +7820,126 @@ export type AdminDismissOfferSourceChangeResponses = {
 };
 
 export type AdminDismissOfferSourceChangeResponse = AdminDismissOfferSourceChangeResponses[keyof AdminDismissOfferSourceChangeResponses];
+
+export type AdminApplyPartnerUpdateData = {
+    body: PartnerUpdateRequest;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Offer Id
+         */
+        offer_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/offers/{offer_id}/apply-partner-update';
+};
+
+export type AdminApplyPartnerUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type AdminApplyPartnerUpdateError = AdminApplyPartnerUpdateErrors[keyof AdminApplyPartnerUpdateErrors];
+
+export type AdminApplyPartnerUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: OfferWriteResponse;
+};
+
+export type AdminApplyPartnerUpdateResponse = AdminApplyPartnerUpdateResponses[keyof AdminApplyPartnerUpdateResponses];
+
+export type AdminDismissPartnerUpdateData = {
+    body: PartnerUpdateRequest;
+    headers?: {
+        /**
+         * X-Internal-Key
+         */
+        'X-Internal-Key'?: string | null;
+        /**
+         * X-Session-Token
+         */
+        'X-Session-Token'?: string | null;
+    };
+    path: {
+        /**
+         * Offer Id
+         */
+        offer_id: string;
+    };
+    query?: never;
+    url: '/v1/admin/offers/{offer_id}/dismiss-partner-update';
+};
+
+export type AdminDismissPartnerUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Not Found
+     */
+    404: CatalogueErrorResponse;
+    /**
+     * Conflict
+     */
+    409: CatalogueErrorResponse;
+    /**
+     * Invalid request
+     */
+    422: CatalogueErrorResponse;
+    /**
+     * Internal server error
+     */
+    500: ErrorResponse;
+};
+
+export type AdminDismissPartnerUpdateError = AdminDismissPartnerUpdateErrors[keyof AdminDismissPartnerUpdateErrors];
+
+export type AdminDismissPartnerUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: OfferWriteResponse;
+};
+
+export type AdminDismissPartnerUpdateResponse = AdminDismissPartnerUpdateResponses[keyof AdminDismissPartnerUpdateResponses];
 
 export type AdminCreateOfferLinkData = {
     body: CreateLinkRequest;

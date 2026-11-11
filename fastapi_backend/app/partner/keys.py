@@ -22,8 +22,13 @@ partner_api_keys = table(
     column("revoked_at", DateTime(timezone=True)),
     column("last_used_at", DateTime(timezone=True)),
 )
+# ``website`` is read by the submission code (FREEJ-58) to judge a link's host; the role can never write ``merchants``.
 merchants = table(
-    "merchants", column("id", Text), column("name", Text), column("active", Boolean)
+    "merchants",
+    column("id", Text),
+    column("name", Text),
+    column("website", Text),
+    column("active", Boolean),
 )
 
 # ``last_used_at`` moves at most this often per key: it is a "last seen" hint for the admin, not a log, and a

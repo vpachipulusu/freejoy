@@ -37,7 +37,6 @@ function editableFields(values: OfferFormValues) {
     category_id: values.categoryId,
     merchant_id: values.merchantId,
     offer_type: values.offerType,
-    commercial_basis: requiredBasis(values.commercialBasis),
     featured: values.featured,
     image_tint: values.imageTint,
     image_label: values.imageLabel,
@@ -62,6 +61,7 @@ function editableFields(values: OfferFormValues) {
 export function toCreateOfferBody(values: OfferFormValues): CreateOfferRequest {
   return {
     ...editableFields(values),
+    commercial_basis: requiredBasis(values.commercialBasis),
     ...(values.slug === '' ? {} : { slug: values.slug }),
   };
 }
@@ -69,11 +69,22 @@ export function toCreateOfferBody(values: OfferFormValues): CreateOfferRequest {
 /**
  * An edit sends every editable field. The slug and status are not editable and are never sent. The review token
  * of the version the form shows goes with it: the API needs it when the commercial basis changes, so a form that
- * was loaded before somebody else changed the basis cannot undo that change.
+ * was loaded before somebody else changed the basis cannot undo that change. A basis nobody has chosen (a
+ * retailer's submission whose placeholder the form shows as not chosen) is omitted when `basisOptional` is set.
  */
 export function toUpdateOfferBody(
   values: OfferFormValues,
-  reviewToken?: string
+  reviewToken?: string,
+  options: { basisOptional?: boolean } = {}
 ): UpdateOfferRequest {
-  return { ...editableFields(values), ...(reviewToken ? { review_token: reviewToken } : {}) };
+  // An unchosen basis is only ever left out on purpose (`basisOptional`): the stored one then stays as it is.
+  const basis =
+    options.basisOptional && values.commercialBasis === ''
+      ? {}
+      : { commercial_basis: requiredBasis(values.commercialBasis) };
+  return {
+    ...editableFields(values),
+    ...basis,
+    ...(reviewToken ? { review_token: reviewToken } : {}),
+  };
 }

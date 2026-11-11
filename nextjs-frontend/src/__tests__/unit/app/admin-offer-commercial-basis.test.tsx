@@ -419,3 +419,174 @@ describe('editing the basis of a saved offer', SLOW, () => {
     );
   });
 });
+
+describe('publishing a retailer submission whose basis is only a placeholder', () => {
+  const placeholder = (props: Partial<React.ComponentProps<typeof OfferLifecycleButtons>> = {}) =>
+    lifecycle({ basisIsPlaceholder: true, commercialBasis: 'SPONSORED', ...props });
+  const group = () => screen.getByRole('radiogroup', { name: /Commercial basis/ });
+
+  it('asks for a choice with nothing selected, and never offers the placeholder as the current basis', () => {
+    render(placeholder());
+
+    const options = within(group()).getAllByRole('radio');
+    expect(options.map((option) => (option as HTMLInputElement).value)).toEqual([
+      'EDITORIAL',
+      'AFFILIATE',
+      'SPONSORED',
+    ]);
+    expect(options.every((option) => !(option as HTMLInputElement).checked)).toBe(true);
+    for (const option of options) {
+      expect(option).toHaveAccessibleDescription(
+        COMMERCIAL_BASIS_HELP[(option as HTMLInputElement).value]
+      );
+    }
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByText(/nobody has chosen yet how it is paid for/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/basis is Sponsored/i);
+  });
+
+  it('holds Publish until a basis is chosen, says why, and sends the editor to the choice', async () => {
+    const user = userEvent.setup();
+    render(placeholder());
+    const publish = screen.getByRole('button', { name: 'Publish' });
+
+    expect(publish).toHaveAttribute('aria-disabled', 'true');
+    expect(publish).toHaveAccessibleDescription('Choose the commercial basis to publish.');
+    await user.click(publish);
+
+    expect(within(group()).getAllByRole('radio')[0]).toHaveFocus();
+    expect(mocks.offerLifecycleAction).not.toHaveBeenCalled();
+  });
+
+  it.each(['Editorial', 'Affiliate', 'Sponsored'])(
+    'publishes with the %s the editor chose',
+    async (name) => {
+      const user = userEvent.setup();
+      render(placeholder());
+
+      await user.click(within(group()).getByRole('radio', { name }));
+      const publish = screen.getByRole('button', { name: 'Publish' });
+      expect(publish).not.toHaveAttribute('aria-disabled');
+      await user.click(publish);
+
+      await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledTimes(1));
+      expect(mocks.offerLifecycleAction).toHaveBeenCalledWith(
+        'o1',
+        'publish',
+        'tok-1',
+        name.toUpperCase()
+      );
+    }
+  );
+
+  it('lets the editor change the choice before publishing', async () => {
+    const user = userEvent.setup();
+    render(placeholder());
+
+    await user.click(within(group()).getByRole('radio', { name: 'Sponsored' }));
+    await user.click(within(group()).getByRole('radio', { name: 'Editorial' }));
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+
+    await waitFor(() => expect(mocks.offerLifecycleAction).toHaveBeenCalledTimes(1));
+    expect(mocks.offerLifecycleAction.mock.calls[0][3]).toBe('EDITORIAL');
+  });
+
+  it('asks again when the offer has moved on to a new review token', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(placeholder());
+    await user.click(within(group()).getByRole('radio', { name: 'Affiliate' }));
+
+    rerender(placeholder({ reviewToken: 'tok-2' }));
+
+    expect(
+      within(group())
+        .getAllByRole('radio')
+        .every((option) => !(option as HTMLInputElement).checked)
+    ).toBe(true);
+    expect(screen.getByRole('button', { name: 'Publish' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+  });
+
+  it('asks for nothing when the API does not need a confirmation, or the offer is live', () => {
+    const { rerender } = render(placeholder({ confirmBasisToPublish: false }));
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+
+    rerender(placeholder({ status: 'PUBLISHED' }));
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+  });
+});
+
+describe('editing an offer whose basis is only a placeholder', SLOW, () => {
+  const placeholderForm = () =>
+    render(
+      <OfferForm
+        mode="edit"
+        offerId="o1"
+        status="DRAFT"
+        initialValues={{ ...filled, slug: 'free-coffee-sample', commercialBasis: '' }}
+        categories={categories}
+        merchants={merchants}
+        basisIsPlaceholder
+      />
+    );
+
+  it('shows nothing chosen, says so, and does not mark the field required', () => {
+    placeholderForm();
+
+    const group = screen.getByRole('radiogroup', { name: /Commercial basis/ });
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .every((option) => !(option as HTMLInputElement).checked)
+    ).toBe(true);
+    expect(group).not.toHaveAttribute('aria-required');
+    expect(group).toHaveAccessibleDescription(/Not chosen by an editor yet/);
+    expect(screen.getByText(/Not chosen by an editor yet/)).toBeInTheDocument();
+  });
+
+  it('shows no Sponsored label in the preview for it', () => {
+    placeholderForm();
+
+    expect(within(screen.getByRole('complementary')).queryByRole('note')).toBeNull();
+  });
+
+  it('saves other changes without a basis, and sends none', async () => {
+    const user = userEvent.setup();
+    placeholderForm();
+
+    await user.clear(screen.getByLabelText(/^Title/));
+    await user.type(screen.getByLabelText(/^Title/), 'A new title');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mocks.updateOfferAction).toHaveBeenCalledTimes(1));
+    expect(mocks.updateOfferAction.mock.calls[0][1]).toMatchObject({
+      title: 'A new title',
+      commercialBasis: '',
+    });
+  });
+
+  it('sends the basis the editor picked', async () => {
+    const user = userEvent.setup();
+    placeholderForm();
+
+    await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mocks.updateOfferAction).toHaveBeenCalledTimes(1));
+    expect(mocks.updateOfferAction.mock.calls[0][1]).toMatchObject({
+      commercialBasis: 'AFFILIATE',
+    });
+  });
+
+  it('still requires a basis on an offer that is not a placeholder', async () => {
+    const user = userEvent.setup();
+    render(editForm({ commercialBasis: '' }));
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Choose the commercial basis.')).toBeInTheDocument();
+    expect(mocks.updateOfferAction).not.toHaveBeenCalled();
+  });
+});

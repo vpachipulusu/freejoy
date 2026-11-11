@@ -110,6 +110,8 @@ describe('offerToFormValues and the basis', () => {
       importProvider: null,
       sourceChangedAt: null,
       provenance: null,
+      partnerSubmission: null,
+      partnerRef: null,
       reviewToken: 'tok',
       summary: 'S',
       description: [],
@@ -131,6 +133,7 @@ describe('offerToFormValues and the basis', () => {
       createdAt: '2026-01-01T00:00:00Z',
       links: [],
       needsBasisConfirmation: false,
+      basisIsPlaceholder: false,
     }) as OfferDetailView;
 
   it.each(COMMERCIAL_BASIS_VALUES)('selects the saved basis %s', (basis) => {

@@ -8,7 +8,7 @@ to ``context.merchant_id``.
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.partner.auth import PartnerContextDep
 from app.partner.deps import KeyStoreDep
@@ -19,13 +19,17 @@ KEY_GONE_MESSAGE = "Unauthorized"
 
 
 class MeData(BaseModel):
-    merchant_name: str
-    key_label: str
+    merchant_name: str = Field(
+        description="The name of the merchant this key was issued to."
+    )
+    key_label: str = Field(
+        description="The label the key was given when it was issued."
+    )
 
 
 class MeResponse(BaseModel):
-    success: Literal[True] = True
-    data: MeData
+    success: Literal[True] = Field(default=True, description="Always true.")
+    data: MeData = Field(description="Who this key belongs to.")
 
 
 @router.get(

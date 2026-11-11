@@ -82,7 +82,7 @@
     "/partner/v1/clicks": {
       "get": {
         "summary": "Clicks on your offers, per offer per day",
-        "description": "Outbound clicks on your merchant's published and ended offers over a range of UTC days, per offer and per day. The range is `from` to `to`, both included, written YYYY-MM-DD, at most 92 days. At most 100 offers are returned, busiest first. A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity.",
+        "description": "Outbound clicks on your merchant's published and ended offers over a range of UTC days, per offer and per day. The range is `from` to `to`, both included, written YYYY-MM-DD, at most 92 days. At most 100 offers are returned, busiest first. A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Counts can also be overstated by automated traffic that does not identify itself as automated. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute, or when many clicks on one offer come from one network in a minute, some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity.",
         "operationId": "partner-clicks",
         "security": [
           {
@@ -184,6 +184,430 @@
           }
         }
       }
+    },
+    "/partner/v1/offers/{ref}": {
+      "put": {
+        "tags": [
+          "offers"
+        ],
+        "summary": "Create or update an offer submission",
+        "description": "Send the whole offer. It is stored for our editors to review: nothing you send is ever published by this API,\nand an editor decides whether it goes live. Send the same body again and nothing changes; send changed content and\nthe answer's `outcome` says what happened (see the field's description).\n\n`ref` is your own id for the offer. Two merchants may use the same ref; yours are only ever yours.\n\nA `PUT` on a ref one of our editors has archived is always a 409 (`offer_closed`); that is permanent, so submit\nagain under a new ref. New refs are limited to 50 offers waiting for review (`open_submission_cap`, which clears\nonly as our editors review them) and 20 new offers a day (`daily_submission_cap`); updating an existing ref is\nnever refused for either. Each merchant has 2,000 writes a day across all its keys (`daily_write_budget`).",
+        "operationId": "partner-offers-put",
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
+              "title": "Ref"
+            },
+            "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionResultResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value the rules refuse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests or too many submissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The offer was archived by an editor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodedErrorResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "A new submission was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionResultResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "offers"
+        ],
+        "summary": "Read one submission",
+        "description": "One of your submissions. A ref that is not yours is answered exactly like one that does not exist (404).",
+        "operationId": "partner-offers-get",
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
+              "title": "Ref"
+            },
+            "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No offer with this ref",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner/v1/offers": {
+      "get": {
+        "tags": [
+          "offers"
+        ],
+        "summary": "List your submissions",
+        "description": "Your submissions, newest first, with each one's status (pending_review, live, ended or declined), the public\npage while it is live and whether an update is waiting for our editors.",
+        "operationId": "partner-offers-list",
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionsPageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/partner/v1/offers/{ref}/end": {
+      "post": {
+        "tags": [
+          "offers"
+        ],
+        "summary": "End an offer: the sample ran out",
+        "description": "Use this when the sample has run out. The offer's end date becomes now, so it stops being offered at once.\n\nEnding cannot be undone by this API: sending the offer again without a future `end_at` does not reopen it, and\nan update that was waiting for our editors when you ended the offer is discarded. Calling it again changes\nnothing (`changed` is false).",
+        "operationId": "partner-offers-end",
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
+              "title": "Ref"
+            },
+            "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndResultResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No offer with this ref",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -213,7 +637,8 @@
         "properties": {
           "title": {
             "type": "string",
-            "title": "Title"
+            "title": "Title",
+            "description": "The offer's title as it is published."
           },
           "slug": {
             "type": "string",
@@ -304,14 +729,15 @@
             "description": "True when you have more offers than were returned."
           },
           "retention": {
-            "$ref": "#/components/schemas/ClickRetention"
+            "$ref": "#/components/schemas/ClickRetention",
+            "description": "How far back click records are kept, so you can tell a quiet day from a missing one."
           },
           "definition": {
             "type": "string",
             "title": "Definition",
             "description": "What a click is and is not, in plain words.",
             "examples": [
-              "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity."
+              "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Counts can also be overstated by automated traffic that does not identify itself as automated. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute, or when many clicks on one offer come from one network in a minute, some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity."
             ]
           }
         },
@@ -332,10 +758,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/ClicksData"
+            "$ref": "#/components/schemas/ClicksData",
+            "description": "The click counts you asked for."
           }
         },
         "type": "object",
@@ -344,15 +772,163 @@
         ],
         "title": "ClicksResponse"
       },
+      "CodedErrorResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false,
+            "title": "Success",
+            "description": "Always false.",
+            "default": false
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "A short fixed message. Do not match on it: use the status."
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "invalid_url",
+                  "link_host_not_allowed",
+                  "unknown_category",
+                  "invalid_postage",
+                  "invalid_window",
+                  "empty_text",
+                  "subscription_terms_required",
+                  "offer_closed",
+                  "open_submission_cap",
+                  "daily_submission_cap",
+                  "daily_write_budget"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code",
+            "description": "A stable code to branch on. open_submission_cap: you have 50 offers waiting for review and it clears only as our editors review them, not with time. daily_submission_cap: 20 new offers a day (UTC); try again tomorrow. daily_write_budget: 2,000 writes a day (UTC). offer_closed: one of our editors archived this offer, which is permanent; use a new ref."
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "CodedErrorResponse",
+        "description": "An error with a fixed message and, for a rule refusal, a stable ``code`` a retailer's software can branch on.\n\nA body that is not the documented shape is a plain 422 with no ``code``."
+      },
+      "EndResult": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_review",
+              "live",
+              "ended",
+              "declined"
+            ],
+            "title": "Status",
+            "description": "pending_review: with our editors, waiting to be published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The title as it is stored now."
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
+          },
+          "update_pending": {
+            "type": "boolean",
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed",
+            "description": "True if this call ended the offer, false if it had already ended (nothing was changed)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "status",
+          "title",
+          "public_url",
+          "update_pending",
+          "submitted_at",
+          "ends_at",
+          "changed"
+        ],
+        "title": "EndResult",
+        "description": "The answer to ``end``: ``changed`` is false when the offer had already ended."
+      },
+      "EndResultResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "Always true.",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/EndResult",
+            "description": "The submission after the call."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "EndResultResponse"
+      },
       "MeData": {
         "properties": {
           "merchant_name": {
             "type": "string",
-            "title": "Merchant Name"
+            "title": "Merchant Name",
+            "description": "The name of the merchant this key was issued to."
           },
           "key_label": {
             "type": "string",
-            "title": "Key Label"
+            "title": "Key Label",
+            "description": "The label the key was given when it was issued."
           }
         },
         "type": "object",
@@ -368,10 +944,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/MeData"
+            "$ref": "#/components/schemas/MeData",
+            "description": "Who this key belongs to."
           }
         },
         "type": "object",
@@ -380,12 +958,188 @@
         ],
         "title": "MeResponse"
       },
+      "OfferSubmission": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "description": "The offer's title, up to 120 characters of plain text (markup is removed)."
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Summary",
+            "description": "One line under the title, up to 200 characters."
+          },
+          "description": {
+            "items": {
+              "type": "string",
+              "maxLength": 600,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Description",
+            "description": "Up to 5 paragraphs of up to 600 characters. Optional; omitting it and sending [] are the same."
+          },
+          "offer_type": {
+            "type": "string",
+            "enum": [
+              "FREE_SAMPLE",
+              "FREE_TRIAL"
+            ],
+            "title": "Offer Type",
+            "description": "FREE_SAMPLE or FREE_TRIAL. No other kind of offer can be submitted."
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 80,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Category",
+            "description": "The slug of one of our categories that is currently open to submissions."
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "description": "Where the visitor claims the offer: an https address on your own website's host (or its www form)."
+          },
+          "postage_kind": {
+            "type": "string",
+            "enum": [
+              "FREE",
+              "COST",
+              "CHECK_TERMS"
+            ],
+            "title": "Postage Kind",
+            "description": "FREE, COST (the visitor pays postage; send the amount and currency) or CHECK_TERMS."
+          },
+          "postage_amount_minor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postage Amount Minor",
+            "description": "The postage in the smallest currency unit (pence). Send it exactly when postage_kind is COST."
+          },
+          "postage_currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postage Currency",
+            "description": "Three capital letters, for example GBP. Send it exactly when postage_kind is COST."
+          },
+          "requires_card": {
+            "type": "boolean",
+            "title": "Requires Card",
+            "description": "True if the visitor has to give a payment card to claim the offer."
+          },
+          "subscription_terms": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 600,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Terms",
+            "description": "What the visitor commits to and how to cancel, up to 600 characters. Required for FREE_TRIAL; send null for a sample with nothing to cancel."
+          },
+          "eligibility": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Eligibility",
+            "description": "Who can claim it, up to 400 characters."
+          },
+          "availability": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Availability",
+            "description": "How long or where it is available, up to 300 characters."
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepIn"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "title": "Steps",
+            "description": "Up to 6 steps to claim it. Optional."
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At",
+            "description": "When the offer starts, an ISO 8601 date-time with a time zone, or null. At most 90 days ahead."
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At",
+            "description": "When the offer ends, an ISO 8601 date-time with a time zone, or null for no end date. Must be in the future."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "summary",
+          "offer_type",
+          "category",
+          "url",
+          "postage_kind",
+          "requires_card",
+          "subscription_terms",
+          "eligibility",
+          "availability",
+          "start_at",
+          "end_at"
+        ],
+        "title": "OfferSubmission",
+        "description": "The body of ``PUT /partner/v1/offers/{ref}``: the whole offer, every time (a PUT replaces)."
+      },
       "PartnerErrorResponse": {
         "properties": {
           "success": {
             "type": "boolean",
             "const": false,
             "title": "Success",
+            "description": "Always false.",
             "default": false
           },
           "error": {
@@ -407,6 +1161,7 @@
             "type": "boolean",
             "const": false,
             "title": "Success",
+            "description": "Always false.",
             "default": false
           },
           "error": {
@@ -434,6 +1189,284 @@
         ],
         "title": "PartnerRangeErrorResponse",
         "description": "The body of a refused date range: the fixed range message and a stable code."
+      },
+      "StepIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "description": "A short heading for the step, up to 80 characters of plain text."
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Detail",
+            "description": "What the visitor does in this step, up to 300 characters of plain text."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "detail"
+        ],
+        "title": "StepIn"
+      },
+      "SubmissionResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "Always true.",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/SubmissionView",
+            "description": "The submission."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SubmissionResponse"
+      },
+      "SubmissionResult": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_review",
+              "live",
+              "ended",
+              "declined"
+            ],
+            "title": "Status",
+            "description": "pending_review: with our editors, waiting to be published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The title as it is stored now."
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
+          },
+          "update_pending": {
+            "type": "boolean",
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "created",
+              "refreshed",
+              "pending_update",
+              "unchanged"
+            ],
+            "title": "Outcome",
+            "description": "created: a new submission. refreshed: our editors had not touched it, so it took your new content. pending_update: our editors have edited, published or ended it, so your new content waits for them and the published page is unchanged. unchanged: nothing needed to change (the same content again, or content that matches what the offer already shows)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "status",
+          "title",
+          "public_url",
+          "update_pending",
+          "submitted_at",
+          "ends_at",
+          "outcome"
+        ],
+        "title": "SubmissionResult",
+        "description": "The answer to a ``PUT``: what happened to it."
+      },
+      "SubmissionResultResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "Always true.",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/SubmissionResult",
+            "description": "The submission and what happened to it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SubmissionResultResponse"
+      },
+      "SubmissionView": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_review",
+              "live",
+              "ended",
+              "declined"
+            ],
+            "title": "Status",
+            "description": "pending_review: with our editors, waiting to be published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The title as it is stored now."
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
+          },
+          "update_pending": {
+            "type": "boolean",
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "status",
+          "title",
+          "public_url",
+          "update_pending",
+          "submitted_at",
+          "ends_at"
+        ],
+        "title": "SubmissionView",
+        "description": "What a retailer sees of one of its submissions."
+      },
+      "SubmissionsPage": {
+        "properties": {
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/SubmissionView"
+            },
+            "type": "array",
+            "title": "Offers",
+            "description": "This page of your submissions, newest first."
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count",
+            "description": "How many submissions you have in all."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "The page size that was used."
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "description": "How many submissions were skipped."
+          }
+        },
+        "type": "object",
+        "required": [
+          "offers",
+          "total_count",
+          "limit",
+          "offset"
+        ],
+        "title": "SubmissionsPage"
+      },
+      "SubmissionsPageResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "Always true.",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/SubmissionsPage",
+            "description": "A page of submissions."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SubmissionsPageResponse"
       }
     },
     "securitySchemes": {

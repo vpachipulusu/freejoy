@@ -47,6 +47,7 @@ EXPECTED_TABLES = {
     "network_report_rows",
     # partner API (ADR-013)
     "partner_api_keys",
+    "partner_submissions",
 }
 
 BILLING_COLUMNS = {

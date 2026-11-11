@@ -24,7 +24,7 @@ import { NOINDEX_ROBOTS, openGraphFor } from '@/lib/seo/metadata';
 
 const TITLE = 'Partner API';
 const DESCRIPTION =
-  'How a retailer that Freejoy has agreed to work with reads its own click counts: the key, each endpoint with examples, the answers and limits, and what a click means.';
+  'How a retailer that Freejoy has agreed to work with sends its offers for review, checks their status and reads its own click counts: the key, each endpoint with examples, the answers and limits, and what a click means.';
 const PATH = '/developers/partner-api';
 
 /**
@@ -60,7 +60,7 @@ export default function PartnerApiPage() {
   return (
     <LegalPage
       title="Freejoy partner API"
-      summary="How a retailer that Freejoy has agreed to work with reads its own click counts. Today it can only read: it cannot change anything."
+      summary="How a retailer that Freejoy has agreed to work with sends its offers for review, checks their status and reads its own click counts. What it sends is only ever a draft: an editor decides what is published."
       lastReviewed="Not yet reviewed"
     >
       <h2>Before you start</h2>
@@ -72,8 +72,8 @@ export default function PartnerApiPage() {
         use the key. We cannot say when a request will be answered.
       </p>
       <p>
-        Nothing is published through this API. Freejoy&apos;s editors check and write every listing
-        before it goes live, and no call here changes that. See the{' '}
+        Nothing is published through this API. What you send is stored as a draft. Freejoy&apos;s
+        editors check and write every listing before it goes live, and no call here changes that. See the{' '}
         <Link href="/partners">page for retailers</Link> for how listings are checked.
       </p>
 
@@ -113,7 +113,7 @@ export default function PartnerApiPage() {
         refused, so send none.
       </p>
       <ul>
-        <li>A key belongs to one merchant and can read only that merchant&apos;s data.</li>
+        <li>A key belongs to one merchant and reaches only that merchant&apos;s offers and counts.</li>
         <li>
           Freejoy shows you the key once, when it is made, and keeps only a one-way hash. If you
           lose it, ask the person at Freejoy who gave you the key for a new one. The old one is then
@@ -148,8 +148,8 @@ export default function PartnerApiPage() {
       <h2>Answers and errors</h2>
       <p>
         An error has one of these messages, except a refused date range, which has its own message
-        and the code <code className={CODE}>invalid_range</code> (below). No error repeats anything
-        you sent. What a status means for one endpoint can be more specific: see its own table.
+        and the code <code className={CODE}>invalid_range</code> (below). A request that a rule refuses
+        keeps the general message and adds its own code. No error repeats anything you sent. What a status means for one endpoint can be more specific: see its own table.
       </p>
       <ScrollTable
         caption="Statuses and messages"

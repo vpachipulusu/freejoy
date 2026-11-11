@@ -13,8 +13,9 @@ Differences from the admin report, all on purpose:
 * only offers in ``LISTED_STATUSES`` are read. A draft or an archived offer is never named, even if it has clicks
   (the admin report lists those with clicks; a retailer must not see the title or slug of an unpublished offer);
 * it selects the columns the restricted role may read and no others (``commands/sql/partner_role.sql`` grants
-  exactly ``offers (id, merchant_id, title, slug, status)`` and ``click_events (offer_id, occurred_at,
-  user_agent_class)``; ``test_partner_role_script.py`` ties the grants to the definitions below).
+  ``click_events (offer_id, occurred_at, user_agent_class)`` for this report, and the offers columns it reads,
+  ``id, merchant_id, title, slug, status``, are among the submission story's wider offers grant;
+  ``test_partner_role_script.py`` ties the grants to the definitions).
 
 Time ranges are half open (``start <= occurred_at < end``) on UTC midnights. The offers statement is driven from the
 merchant's offers (``ix_offers_merchant_id``) and reaches the clicks only through
@@ -41,28 +42,11 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-# The same stored values as ``OfferStatus`` and ``UserAgentClass`` (the drift test compares them with the models).
+from app.partner.tables import offers
+
+# ``offers`` is the one Core definition in ``app/partner/tables.py`` (the click report reads five of its columns). The
+# same stored values as ``UserAgentClass`` (the drift test compares them with the model).
 _ENUM_LENGTH = 16
-offers = table(
-    "offers",
-    column("id", Text),
-    column("merchant_id", Text),
-    column("title", Text),
-    column("slug", Text),
-    column(
-        "status",
-        Enum(
-            "DRAFT",
-            "PUBLISHED",
-            "EXPIRED",
-            "ARCHIVED",
-            name="offer_status",
-            native_enum=False,
-            create_constraint=False,
-            length=_ENUM_LENGTH,
-        ),
-    ),
-)
 click_events = table(
     "click_events",
     column("offer_id", Text),

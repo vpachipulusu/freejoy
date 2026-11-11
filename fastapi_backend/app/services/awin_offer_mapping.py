@@ -24,6 +24,7 @@ offer; a later mismatch means a person changed the offer, so it is no longer an 
 
 from typing import Any
 
+from app.core.offer_content import IMAGE_ALT, IMAGE_LABEL_LENGTH, IMAGE_TINT
 from app.core.plain_text import fit_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import (
@@ -35,9 +36,6 @@ from app.models.platform.offer import (
 from app.repositories.awin_import import IMPORT_CATEGORY_SLUG
 from app.services.awin_promotions import PROVIDER, Promotion
 
-IMAGE_TINT = "cream"
-IMAGE_ALT = "Illustration of an offer"
-IMAGE_LABEL_LENGTH = 40
 DEFAULT_ELIGIBILITY = "See the offer terms on the merchant's site before you claim."
 AVAILABILITY = (
     "Listed for UK customers. Check the merchant's terms for dates and exclusions."

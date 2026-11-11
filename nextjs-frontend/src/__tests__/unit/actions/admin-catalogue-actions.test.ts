@@ -281,6 +281,40 @@ describe('offer actions', () => {
     expect(mocks.revalidateCatalogue).toHaveBeenCalledWith(['/freebies', '/freebies/free-coffee']);
   });
 
+  it('saves an offer whose basis nobody has chosen yet, leaving the basis out of the update', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok({ ...OFFER, status: 'DRAFT' }));
+
+    const result = await updateOfferAction('o1', { ...offerInput, commercialBasis: '' }, TOKEN);
+
+    expect(result).toMatchObject({ success: true });
+    const body = mocks.patchAdminOffer.mock.calls[0][1];
+    expect('commercial_basis' in body).toBe(false);
+    expect(body).toMatchObject({ title: 'Free coffee', review_token: TOKEN });
+  });
+
+  it('sends the basis an editor did choose', async () => {
+    mocks.patchAdminOffer.mockResolvedValue(ok({ ...OFFER, status: 'DRAFT' }));
+
+    await updateOfferAction('o1', { ...offerInput, commercialBasis: 'AFFILIATE' }, TOKEN);
+
+    expect(mocks.patchAdminOffer.mock.calls[0][1]).toMatchObject({
+      commercial_basis: 'AFFILIATE',
+    });
+  });
+
+  it("answers a retailer's submission moved to another merchant (422 partner_merchant_fixed) with one curated message on the merchant field", async () => {
+    mocks.patchAdminOffer.mockResolvedValue(fail(422, 'partner_merchant_fixed'));
+
+    const result = await updateOfferAction('o1', offerInput);
+
+    expect(result).toEqual({
+      success: false,
+      error: "A retailer's submission cannot be moved to another merchant.",
+      fieldErrors: { merchantId: "A retailer's submission cannot be moved to another merchant." },
+    });
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+  });
+
   it('does not touch the public catalogue when a draft is edited', async () => {
     mocks.patchAdminOffer.mockResolvedValue(ok({ ...OFFER, status: 'DRAFT' }));
     await updateOfferAction('o1', offerInput);
