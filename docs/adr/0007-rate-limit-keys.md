@@ -54,6 +54,13 @@ many IPs.
 `enforce_rate_limit` helper on top of the read limit. None of them bounds database work for unauthenticated callers (ADR-013). Never keyed by client address: partner code does not read forwarded client-IP headers. The
   enforcement helpers and the limiter singleton live in `app/core` (`rate_limit_enforcement.py`, `rate_limiter_provider.py`) so the partner
   package, which imports only `app.core`, uses them; `app.api.rate_limit` and `app.api.deps` re-export the names.
+- Outbound clicks (`POST /v1/catalogue/offers/{id}/click`, called only by the `/go/` route): `rl:outbound_click:ip:{client key}`
+  (60 per minute, fails open) and, per offer, one of two buckets chosen by the device class the route sends (FREEJ-62):
+  `rl:outbound_offer:offer:{offer id}` (600 per minute) for every class except `BOT` and for a missing class, and
+  `rl:outbound_offer_bot:offer:{offer id}` (60 per minute) for `BOT`. Both fail open and exactly one is hit per request, so
+  automated traffic cannot spend the budget that counted clicks need. Past either cap the visitor is still redirected and no click row
+  is written. Residual: a flood that claims a non-bot user agent still fills the main bucket (see
+  [freejoy-affiliate.md](../developer/freejoy-affiliate.md)).
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.
   Fail-closed policies (sign-in, data export, admin sync) get a 1 s deadline per identifier, because a cold
   connection to a distant region can exceed 200 ms and a fail-closed timeout locks users out. A fail-closed call

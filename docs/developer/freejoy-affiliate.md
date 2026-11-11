@@ -167,13 +167,29 @@ merchant's website can change after a `direct` link was saved. A link that fails
   is fine for local runs and previews behind a single caller; do not rely on this limiter alone behind another host.
 - The backend limits `POST .../click` twice:
   - `OUTBOUND_CLICK_POLICY`, 60 per minute per forwarded client IP. Over it the answer is `429` with `Retry-After`.
-  - `OUTBOUND_OFFER_POLICY`, 600 per minute per offer id (`app/core/rate_limit.py`). Over it the visitor is **still
-    redirected** (the click endpoint answers `200` with the destination) but **no click row is written**.
-    **Trade-off:** click counts are capped at 600 per offer per minute, so a crowd of distinct clients cannot inflate
-    one offer's count faster than that, and a genuine surge is undercounted rather than turned into refused visitors.
-    The redirect itself is never refused because of this cap. A cap-spent request still goes through every other
-    check (public offer, usable link, allowed host).
-  - Both fail open like the other public catalogue routes (a limiter outage records the click as usual).
+  - A per-offer budget, in one of two buckets chosen by `user_agent_class` (FREEJ-62; `app/core/rate_limit.py`, the
+    choice is made in `app/api/v1/catalogue_click.py` once the body is read). Exactly one is spent per request:
+    - `OUTBOUND_OFFER_POLICY`, 600 per minute per offer id (key `outbound_offer:offer:{offer id}`), for every class
+      except `BOT` and for a request with no class. Over it the visitor is **still redirected** (the click endpoint
+      answers `200` with the destination) but **no click row is written**.
+      **Trade-off:** click counts are capped at 600 clicks for one offer in a minute, so a crowd of distinct clients cannot inflate
+      one offer's count faster than that, and a genuine surge is undercounted rather than turned into refused visitors.
+      The redirect itself is never refused because of this cap. A cap-spent request still goes through every other
+      check (public offer, usable link, allowed host).
+    - `OUTBOUND_OFFER_BOT_POLICY`, 60 per minute per offer id (key `outbound_offer_bot:offer:{offer id}`), for requests
+      classed `BOT`. A `BOT` request never spends the 600 budget, so automated traffic from many addresses cannot
+      use it up and leave genuine clicks unrecorded (before FREEJ-62 about ten addresses at the 60 per minute address
+      limit could). Past the bot cap the request is not recorded and the redirect is unchanged.
+  - Both fail open like the other public catalogue routes (a limiter outage records the click as usual, with a warning
+    and a Sentry report), whichever bucket was asked.
+  - **Where the class comes from.** The browser never calls the backend. The `/go/[offerId]` route handler
+    (`src/lib/outbound/respond.ts`) computes the class from the visitor's `User-Agent` header with `classifyUserAgent`
+    (`src/lib/outbound/validation.ts`) and sends it, with the internal key. The visitor controls that header, so
+    the class is a label, not proof.
+  - **Residual (out of scope of FREEJ-62).** A flood that sends a non-bot user agent still spends the main budget of 600
+    and its rows are counted as clicks. That is inflation (an offer's count is capped at 600 a minute, and the
+    per-address limit of 60 a minute applies), not suppression: the bot bucket means a flood cannot push genuine clicks
+    out by claiming to be a bot, but a flood claiming to be a browser can still fill the main budget in a minute.
 - The proxy keys IPv6 clients by their full address, while the backend groups them by /64. This pre-existing gap
   is not specific to `/go/`: one IPv6 subscriber can spread requests over many addresses to get more proxy
   buckets, though the backend limits above still apply.
@@ -194,6 +210,8 @@ directly. Send the CSV and say plainly:
   sales from clicks or call them redemptions.
 - Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
 - Recording is limited to 600 clicks for one offer in a minute (the cap above), so a very busy minute is undercounted.
+  Internally only: the figure is not given to retailers. Bot clicks have their own, smaller cap, so the number of bot
+  clicks left out is a minimum, not a count of all automated traffic.
 
 A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with its own text in the answer (what a click is, bots left out, UTC days, the retention, and that recording is rate limited, without the figure) ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
 

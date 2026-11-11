@@ -60,6 +60,14 @@ are left out of every count and reported once, in `excluded_bot_clicks`; every o
 is counted. That is the only filtering (the class is a coarse label computed in the `/go/` route; it does not guarantee
 that no automated traffic remains).
 
+**What `excluded_bot_clicks` means.** Since FREEJ-62 the click endpoint records at most 60 `BOT` clicks a minute for one
+offer (`OUTBOUND_OFFER_BOT_POLICY`; the rest are redirected and not stored), in a bucket separate from the 600 a minute
+for every other class (`OUTBOUND_OFFER_POLICY`), so automated traffic cannot use up the budget genuine clicks need. The
+figure is therefore a **lower bound** on automated traffic, not a full count; the admin page says "minimum" and the
+`bot_rule` text says so. Rows stored before the change were not capped. The residual: a flood that sends a non-bot user
+agent still fills the 600 budget and those rows are counted as clicks (inflation, not suppression); it is not handled
+here. See [freejoy-affiliate.md](freejoy-affiliate.md).
+
 **Days.** A day is a UTC calendar day: a click at 23:59:59 UTC belongs to that day, 00:00:00 to the next, whatever the
 database session time zone (`timezone('UTC', occurred_at)`). `occurred_at` is already truncated to the minute. The query
 range is half open on UTC midnights (`from 00:00` up to `to + 1 day 00:00`).
