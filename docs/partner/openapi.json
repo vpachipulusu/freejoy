@@ -78,10 +78,272 @@
           }
         ]
       }
+    },
+    "/partner/v1/clicks": {
+      "get": {
+        "summary": "Clicks on your offers, per offer per day",
+        "description": "Outbound clicks on your merchant's published and ended offers over a range of UTC days, per offer and per day. The range is `from` to `to`, both included, written YYYY-MM-DD, at most 92 days. At most 100 offers are returned, busiest first. A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is limited to 600 clicks for one offer in a minute: past that a visitor is still sent on but the click is not recorded, so a very busy minute is undercounted. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity.",
+        "operationId": "partner-clicks",
+        "security": [
+          {
+            "PartnerKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First UTC day, YYYY-MM-DD.",
+              "examples": [
+                "2026-03-01"
+              ],
+              "title": "From"
+            },
+            "description": "First UTC day, YYYY-MM-DD."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last UTC day, YYYY-MM-DD, included.",
+              "examples": [
+                "2026-03-31"
+              ],
+              "title": "To"
+            },
+            "description": "Last UTC day, YYYY-MM-DD, included."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClicksResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request. A refused range has the code `invalid_range`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable (the database or a limiter)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ClickDay": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date",
+            "description": "A UTC calendar day."
+          },
+          "clicks": {
+            "type": "integer",
+            "title": "Clicks",
+            "description": "Clicks counted on that day."
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "clicks"
+        ],
+        "title": "ClickDay"
+      },
+      "ClickOffer": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "The offer's public slug."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The offer's public page on the Freejoy website."
+          },
+          "total_clicks": {
+            "type": "integer",
+            "title": "Total Clicks",
+            "description": "The sum of days."
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/ClickDay"
+            },
+            "type": "array",
+            "title": "Days",
+            "description": "Only days with at least one click, oldest first. Empty when the offer had none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "slug",
+          "url",
+          "total_clicks",
+          "days"
+        ],
+        "title": "ClickOffer"
+      },
+      "ClickRetention": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days",
+            "description": "How long click records are kept, in days."
+          },
+          "earliest_complete_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Earliest Complete Date",
+            "description": "The first UTC day all of whose clicks are still kept. Earlier days can be incomplete."
+          },
+          "starts_before_retention": {
+            "type": "boolean",
+            "title": "Starts Before Retention",
+            "description": "True when from is earlier than earliest_complete_date."
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "earliest_complete_date",
+          "starts_before_retention"
+        ],
+        "title": "ClickRetention"
+      },
+      "ClicksData": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date",
+            "description": "The first day asked for, as sent."
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date",
+            "description": "The last day asked for, as sent."
+          },
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/ClickOffer"
+            },
+            "type": "array",
+            "title": "Offers",
+            "description": "Your published and ended offers, busiest first, at most 100."
+          },
+          "offers_truncated": {
+            "type": "boolean",
+            "title": "Offers Truncated",
+            "description": "True when you have more offers than were returned."
+          },
+          "retention": {
+            "$ref": "#/components/schemas/ClickRetention"
+          },
+          "definition": {
+            "type": "string",
+            "title": "Definition",
+            "description": "What a click is and is not, in plain words.",
+            "examples": [
+              "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is limited to 600 clicks for one offer in a minute: past that a visitor is still sent on but the click is not recorded, so a very busy minute is undercounted. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_date",
+          "to_date",
+          "offers",
+          "offers_truncated",
+          "retention",
+          "definition"
+        ],
+        "title": "ClicksData"
+      },
+      "ClicksResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/ClicksData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "ClicksResponse"
+      },
       "ErrorResponse": {
         "properties": {
           "success": {
@@ -137,6 +399,38 @@
           "data"
         ],
         "title": "MeResponse"
+      },
+      "PartnerErrorResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false,
+            "title": "Success",
+            "default": false
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "invalid_range"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "PartnerErrorResponse",
+        "description": "An error body that may carry a stable machine-readable ``code`` (only ``invalid_range`` today)."
       }
     },
     "securitySchemes": {

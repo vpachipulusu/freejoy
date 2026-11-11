@@ -549,8 +549,10 @@ async def test_a_websocket_is_refused() -> None:
 def test_the_surface_exposes_its_routes_for_the_confinement_walk() -> None:
     surface, _ = _throwaway_surface()
 
+    real = {c.path for c in iter_route_contexts(create_partner_api().routes)}
+    assert "/me" in real
     assert {c.path for c in iter_route_contexts(surface.routes)} == {
-        "/me",
+        *real,
         "/echo",
         "/boom",
         "/typed",

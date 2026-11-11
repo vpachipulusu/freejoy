@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from app.core.config import settings
 from app.core.errors import ERROR_RESPONSES, ErrorResponse, register_error_handlers
@@ -10,6 +11,8 @@ from app.core.partner_keys import running_environment
 from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
+from app.partner.clicks_routes import partner_validation_handler
+from app.partner.clicks_routes import router as clicks_router
 from app.partner.limits import PARTNER_LIMIT_RESPONSES
 from app.partner.mount import PartnerMount
 from app.partner.routes import router
@@ -53,7 +56,14 @@ def create_partner_api() -> FastAPI:
         dependencies=[Depends(require_partner_key)],
     )
     register_error_handlers(api)
+    # The shared 422, except that a refused from or to (clicks) gets its own fixed text and code. Any other partner
+    # route that takes a query parameter named from or to would get that text too: give it other names, or scope this.
+    api.add_exception_handler(
+        RequestValidationError,
+        partner_validation_handler,  # type: ignore[arg-type]  # Starlette types handlers on Exception; as in register_error_handlers
+    )
     api.include_router(router)
+    api.include_router(clicks_router)
     return api
 
 

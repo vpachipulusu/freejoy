@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg  # type: ignore[import-untyped]
@@ -33,7 +34,9 @@ from app.core.database import (
 )
 from app.core.ids import new_id
 from app.core.partner_keys import generate_key
+from app.partner.clicks_store import PartnerClickStore
 from app.partner.keys import PartnerKeyStore
+from tests.api.test_catalogue_e2e import add_category, add_offer
 from tests.partner_role_support import (
     DEFAULT_CONNECTION_LIMIT,
     apply_partner_role,
@@ -60,6 +63,14 @@ EXPECTED_COLUMN_PRIVILEGES = {
     ("merchants", "id", "SELECT"),
     ("merchants", "name", "SELECT"),
     ("merchants", "active", "SELECT"),
+    ("offers", "id", "SELECT"),
+    ("offers", "merchant_id", "SELECT"),
+    ("offers", "title", "SELECT"),
+    ("offers", "slug", "SELECT"),
+    ("offers", "status", "SELECT"),
+    ("click_events", "offer_id", "SELECT"),
+    ("click_events", "occurred_at", "SELECT"),
+    ("click_events", "user_agent_class", "SELECT"),
 }
 TABLE_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER"
 CONFIGURE = (
@@ -489,7 +500,8 @@ async def test_it_cannot_read_a_table_the_partner_surface_does_not_need(
                     text(
                         "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
                         "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f') "
-                        "AND c.relname NOT IN ('partner_api_keys', 'merchants') ORDER BY 1"
+                        "AND c.relname NOT IN ('partner_api_keys', 'merchants', 'offers', 'click_events') "
+                        "ORDER BY 1"
                     )
                 )
             ).all()
@@ -517,6 +529,14 @@ async def test_it_cannot_read_a_table_the_partner_surface_does_not_need(
         "DELETE FROM offers",
         "DELETE FROM users",
         "INSERT INTO offers (id) VALUES ('x')",
+        "UPDATE offers SET title = 'x'",
+        "UPDATE offers SET merchant_id = 'x'",
+        "INSERT INTO click_events (id, offer_id) VALUES ('x', 'x')",
+        "UPDATE click_events SET user_agent_class = 'OTHER'",
+        "UPDATE click_events SET occurred_at = now()",
+        "DELETE FROM click_events",
+        "TRUNCATE click_events",
+        "TRUNCATE offers",
     ],
 )
 async def test_it_is_refused_on_users_admins_billing_offers_and_the_like(
@@ -557,6 +577,29 @@ async def test_it_reads_only_the_listed_columns_and_changes_nothing_but_last_use
 @pytest.mark.parametrize(
     "statement",
     [
+        "SELECT source_url FROM offers",
+        "SELECT summary FROM offers",
+        "SELECT description FROM offers",
+        "SELECT publisher_notes FROM offers",
+        "SELECT commercial_basis FROM offers",
+        "SELECT * FROM offers",
+        "SELECT referrer_host FROM click_events",
+        "SELECT affiliate_link_id FROM click_events",
+        "SELECT id FROM click_events",
+        "SELECT * FROM click_events",
+        "SELECT offer_id, referrer_host FROM click_events",
+        "SELECT o.title FROM offers o WHERE o.source_url IS NOT NULL",
+    ],
+)
+async def test_it_reads_only_the_click_columns_the_query_needs(
+    partner: AsyncEngine, statement: str
+) -> None:
+    assert await denied(partner, statement)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
         "SELECT 1 FROM audit_logs",
         "SELECT id FROM audit_logs",
         "INSERT INTO audit_logs (id, action, resource) VALUES ('x', 'partner.test', 'partner_api_keys')",
@@ -579,6 +622,10 @@ async def test_the_role_has_no_access_to_the_audit_trail_at_all(
         "ALTER TABLE partner_api_keys ADD COLUMN x int",
         "ALTER TABLE merchants DROP COLUMN name",
         "CREATE INDEX ix_partner_made_this ON merchants (name)",
+        "CREATE INDEX ix_partner_made_this ON click_events (offer_id)",
+        "DROP TABLE click_events",
+        "DROP TABLE offers",
+        "ALTER TABLE click_events ADD COLUMN x int",
         "CREATE SCHEMA partner_made_this",
         "CREATE ROLE partner_made_this",
         "TRUNCATE merchants",
@@ -632,6 +679,40 @@ async def test_the_key_lookup_works_as_the_role(
     assert profile is not None
     assert (profile.merchant_name, profile.key_label) == ("Shop", "Feed")
     assert missing is None
+
+
+async def test_the_role_runs_the_clicks_query_and_nothing_of_another_merchant_comes_back(
+    owner: AsyncEngine, partner_url: str, partner: AsyncEngine
+) -> None:
+    mine, _ = await seed_key(owner)
+    other, _ = await seed_key(owner)
+    category = await add_category(owner, "beauty")
+    mine_offer = await add_offer(owner, category, mine, "mine")
+    theirs = await add_offer(owner, category, other, "theirs")
+    at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    for offer in (mine_offer, theirs, theirs):
+        await seed_click(owner, offer, at)
+    start, end = datetime(2026, 3, 10, tzinfo=UTC), datetime(2026, 3, 11, tzinfo=UTC)
+    provider = PartnerSessionProvider(partner_url)
+
+    async with provider.session() as session:
+        store = PartnerClickStore(session)
+        page = await store.offers(mine, start, end, 100)
+        days = await store.daily(mine, [mine_offer, theirs], start, end)
+
+    assert [(o.offer_id, o.clicks) for o in page.offers] == [(mine_offer, 1)]
+    assert [(d.offer_id, d.clicks) for d in days] == [(mine_offer, 1)]
+
+
+async def seed_click(owner: AsyncEngine, offer_id: str, at: datetime) -> None:
+    async with owner.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO click_events (id, offer_id, occurred_at, user_agent_class) "
+                "VALUES (:id, :offer, :at, 'DESKTOP')"
+            ),
+            {"id": new_id(), "offer": offer_id, "at": at},
+        )
 
 
 async def test_the_role_can_move_last_used_at_and_the_lookup_then_says_it_is_not_due(

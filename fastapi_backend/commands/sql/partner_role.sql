@@ -74,7 +74,10 @@ DECLARE
     'partner_api_keys.id.SELECT', 'partner_api_keys.merchant_id.SELECT', 'partner_api_keys.key_hash.SELECT',
     'partner_api_keys.label.SELECT', 'partner_api_keys.revoked_at.SELECT', 'partner_api_keys.last_used_at.SELECT',
     'partner_api_keys.last_used_at.UPDATE',
-    'merchants.id.SELECT', 'merchants.name.SELECT', 'merchants.active.SELECT'];
+    'merchants.id.SELECT', 'merchants.name.SELECT', 'merchants.active.SELECT',
+    'offers.id.SELECT', 'offers.merchant_id.SELECT', 'offers.title.SELECT', 'offers.slug.SELECT',
+    'offers.status.SELECT',
+    'click_events.offer_id.SELECT', 'click_events.occurred_at.SELECT', 'click_events.user_agent_class.SELECT'];
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('freejoy.partner_role'));
 
@@ -145,6 +148,10 @@ BEGIN
   EXECUTE format('GRANT UPDATE (last_used_at) ON partner_api_keys TO %I', role_name);
   -- The merchant a key belongs to: the columns the code reads, read only.
   EXECUTE format('GRANT SELECT (id, name, active) ON merchants TO %I', role_name);
+  -- Click counts (GET /partner/v1/clicks, FREEJ-59): the columns the query reads and no others. Not offers.source_url,
+  -- summary, description or any commercial column; not click_events.referrer_host, affiliate_link_id or id. Read only.
+  EXECUTE format('GRANT SELECT (id, merchant_id, title, slug, status) ON offers TO %I', role_name);
+  EXECUTE format('GRANT SELECT (offer_id, occurred_at, user_agent_class) ON click_events TO %I', role_name);
   -- No grant on audit_logs: no partner code writes an audit row yet. The story that first does adds one,
   -- constrained (a policy or a trigger that fixes user_id and the action prefix), not the bare table.
 

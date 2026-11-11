@@ -1,7 +1,7 @@
 """The partner OpenAPI document and its freshness check (ADR-013).
 
-The partner contract is its own committed file, ``docs/partner/openapi.json``. Today it has one path,
-``/partner/v1/me``; the generator is also exercised on a throwaway sub-app with one more route, to prove
+The partner contract is its own committed file, ``docs/partner/openapi.json``. Every path is under
+``/partner/v1/``; the generator is also exercised on a throwaway sub-app with one more route, to prove
 the check stays meaningful as endpoints are added.
 """
 
@@ -49,10 +49,9 @@ def test_paths_are_written_as_a_retailer_calls_them() -> None:
 
     schema = partner_openapi_schema(api)
 
-    assert list(schema["paths"]) == [
-        "/partner/v1/me",
-        "/partner/v1/things/{thing_id}",
-    ]
+    real = list(partner_openapi_schema(create_partner_api())["paths"])
+    assert "/partner/v1/me" in real
+    assert list(schema["paths"]) == [*real, "/partner/v1/things/{thing_id}"]
     assert all(path.startswith(f"{PARTNER_PREFIX}/") for path in schema["paths"])
 
 
@@ -63,7 +62,8 @@ def test_asking_twice_does_not_prefix_twice_or_change_the_cached_schema() -> Non
     second = partner_openapi_schema(api)
 
     assert first == second
-    assert list(api.openapi()["paths"]) == ["/me", "/things/{thing_id}"]
+    assert list(api.openapi()["paths"])[-1] == "/things/{thing_id}"
+    assert not any(path.startswith("/partner") for path in api.openapi()["paths"])
 
 
 def test_the_internal_schema_has_no_partner_path() -> None:
@@ -112,7 +112,9 @@ def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -
     raw = target.read_bytes()
     assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert list(json.loads(raw)["paths"]) == ["/partner/v1/me"]
+    assert list(json.loads(raw)["paths"]) == list(
+        partner_openapi_schema(create_partner_api())["paths"]
+    )
 
 
 def test_the_committed_partner_schema_is_what_the_generator_writes(
@@ -153,3 +155,31 @@ def test_the_check_fails_when_the_schema_file_is_missing(
 
     assert checker.main() == 1
     assert "missing" in capsys.readouterr().out
+
+
+def test_the_generator_writes_identical_copies_when_given_them(tmp_path: Path) -> None:
+    target = tmp_path / "openapi.json"
+    copy = tmp_path / "public" / "partner-openapi.json"
+
+    generator.generate_partner_openapi_schema(target, copy)
+
+    assert copy.read_bytes() == target.read_bytes()
+
+
+def test_the_committed_frontend_copy_is_identical_to_the_committed_schema() -> None:
+    copy = REPO_ROOT / "nextjs-frontend" / "public" / "partner-openapi.json"
+
+    assert copy.read_bytes() == PARTNER_SCHEMA.read_bytes()
+
+
+def test_the_check_fails_when_the_frontend_copy_differs_or_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    differing = tmp_path / "copy.json"
+    differing.write_text("{}", encoding="utf-8")
+
+    for copy in (differing, tmp_path / "missing.json"):
+        monkeypatch.setattr(checker, "PUBLIC_COPY_FILE", copy)
+
+        assert checker.main() == 1
+        assert "partner-openapi.json is missing or differs" in capsys.readouterr().out
