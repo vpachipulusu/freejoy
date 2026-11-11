@@ -144,6 +144,7 @@ async def test_the_report_states_what_a_click_is_and_the_retention_limit(harness
     assert "not a sale" in data["basis"]["definition"]
     assert "unique" in data["basis"]["definition"]
     assert "BOT" in data["basis"]["bot_rule"]
+    assert "lower bound" in data["basis"]["bot_rule"]
     assert data["retention"] == {
         "days": 395,
         "earliest_complete_date": "2025-09-18",

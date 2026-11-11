@@ -220,6 +220,7 @@ describe('MerchantClicksResults', () => {
     const markup = html(await MerchantClicksResults({ query: QUERY }));
 
     expect(markup).toContain('1,500 clicks from automated visitors (bots) were left out');
+    expect(markup).toContain('This is a minimum');
   });
 
   it('says nothing about bots when none were left out', async () => {
