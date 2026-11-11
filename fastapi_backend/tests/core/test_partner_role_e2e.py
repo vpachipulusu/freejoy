@@ -48,19 +48,72 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-# Exactly what the role may hold in public: column privileges, nothing at table level.
-EXPECTED_COLUMN_PRIVILEGES = {
-    ("partner_api_keys", "id", "SELECT"),
-    ("partner_api_keys", "merchant_id", "SELECT"),
-    ("partner_api_keys", "key_hash", "SELECT"),
-    ("partner_api_keys", "label", "SELECT"),
-    ("partner_api_keys", "revoked_at", "SELECT"),
-    ("partner_api_keys", "last_used_at", "SELECT"),
-    ("partner_api_keys", "last_used_at", "UPDATE"),
-    ("merchants", "id", "SELECT"),
-    ("merchants", "name", "SELECT"),
-    ("merchants", "active", "SELECT"),
+# Exactly what the role may hold in public: column privileges, nothing at table level. Written out here by hand,
+# independently of the script, so a slip in either shows up.
+SELECT_COLUMNS = {
+    "partner_api_keys": "id merchant_id key_hash label revoked_at last_used_at",
+    "merchants": "id name website active",
+    "offers": (
+        "id title slug summary description category_id merchant_id offer_type status featured image_tint "
+        "image_label image_alt source_url postage_kind postage_amount_minor postage_currency requires_card "
+        "subscription_terms eligibility availability steps start_at end_at last_verified_at freshness "
+        "publisher_notes"
+    ),
+    "affiliate_links": "id offer_id provider destination_url tracking_id active",
+    "offer_imports": (
+        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at "
+        "source_changed_at"
+    ),
+    "categories": "id slug enabled",
+    "partner_submissions": (
+        "id merchant_id ref offer_id content_hash pending_payload pending_hash pending_at submitted_at "
+        "key_id first_published_at created_at"
+    ),
 }
+INSERT_COLUMNS = {
+    "offers": (
+        "id title slug summary description category_id merchant_id offer_type image_tint image_label image_alt "
+        "postage_kind postage_amount_minor postage_currency requires_card subscription_terms eligibility "
+        "availability steps start_at end_at"
+    ),
+    "affiliate_links": "id offer_id destination_url",
+    "offer_imports": (
+        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at "
+        "source_changed_at"
+    ),
+    "partner_submissions": "id merchant_id ref offer_id content_hash key_id",
+    "audit_logs": "id action resource resource_id metadata",
+}
+UPDATE_COLUMNS = {
+    "partner_api_keys": "last_used_at",
+    "offers": (
+        "title summary description category_id offer_type postage_kind postage_amount_minor postage_currency "
+        "requires_card subscription_terms eligibility availability steps start_at end_at updated_at"
+    ),
+    "affiliate_links": "destination_url updated_at",
+    "offer_imports": "source_hash applied_source_hash applied_content_hash applied_at source_changed_at updated_at",
+    "partner_submissions": (
+        "content_hash pending_payload pending_hash pending_at submitted_at key_id updated_at"
+    ),
+}
+EXPECTED_COLUMN_PRIVILEGES = {
+    (table, column, privilege)
+    for privilege, columns in (
+        ("SELECT", SELECT_COLUMNS),
+        ("INSERT", INSERT_COLUMNS),
+        ("UPDATE", UPDATE_COLUMNS),
+    )
+    for table, names in columns.items()
+    for column in names.split()
+}
+# Tables the role may touch at all; the "refused everywhere else" tests skip them.
+PARTNER_TABLES = sorted(
+    {
+        name
+        for mapping in (SELECT_COLUMNS, INSERT_COLUMNS, UPDATE_COLUMNS)
+        for name in mapping
+    }
+)
 TABLE_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER"
 CONFIGURE = (
     "SELECT set_config('freejoy.partner_role', $1, true), "
@@ -489,8 +542,9 @@ async def test_it_cannot_read_a_table_the_partner_surface_does_not_need(
                     text(
                         "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
                         "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f') "
-                        "AND c.relname NOT IN ('partner_api_keys', 'merchants') ORDER BY 1"
-                    )
+                        "AND c.relname <> ALL (:partner_tables) ORDER BY 1"
+                    ),
+                    {"partner_tables": PARTNER_TABLES},
                 )
             ).all()
         ]
@@ -516,7 +570,6 @@ async def test_it_cannot_read_a_table_the_partner_surface_does_not_need(
         "UPDATE users SET email = 'x'",
         "DELETE FROM offers",
         "DELETE FROM users",
-        "INSERT INTO offers (id) VALUES ('x')",
     ],
 )
 async def test_it_is_refused_on_users_admins_billing_offers_and_the_like(
@@ -531,7 +584,7 @@ async def test_it_is_refused_on_users_admins_billing_offers_and_the_like(
         "SELECT created_by FROM partner_api_keys",
         "SELECT * FROM partner_api_keys",
         "SELECT slug FROM merchants",
-        "SELECT website FROM merchants",
+        "SELECT logo_url FROM merchants",
         "SELECT * FROM merchants",
         "UPDATE merchants SET name = 'x'",
         "UPDATE merchants SET active = false",
@@ -559,7 +612,6 @@ async def test_it_reads_only_the_listed_columns_and_changes_nothing_but_last_use
     [
         "SELECT 1 FROM audit_logs",
         "SELECT id FROM audit_logs",
-        "INSERT INTO audit_logs (id, action, resource) VALUES ('x', 'partner.test', 'partner_api_keys')",
         "UPDATE audit_logs SET action = 'x'",
         "DELETE FROM audit_logs",
         "TRUNCATE audit_logs",

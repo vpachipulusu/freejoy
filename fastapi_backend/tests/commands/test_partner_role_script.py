@@ -16,6 +16,41 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SQL = SCRIPT.read_text(encoding="utf-8")
 GRANT_SELECT = re.compile(r"GRANT SELECT \(([^)]*)\) ON (\w+) TO", re.IGNORECASE)
 GRANT_UPDATE = re.compile(r"GRANT UPDATE \(([^)]*)\) ON (\w+) TO", re.IGNORECASE)
+GRANT_INSERT = re.compile(r"GRANT INSERT \(([^)]*)\) ON (\w+) TO", re.IGNORECASE)
+# Columns no grant may ever cover, per table and privilege: what makes an offer live, verified, featured or
+# differently paid for, how a link is paid, whose a row is, and who an audit row blames.
+NEVER_INSERT = {
+    "offers": {
+        "status",
+        "last_verified_at",
+        "featured",
+        "commercial_basis",
+        "freshness",
+        "publisher_notes",
+    },
+    "affiliate_links": {"provider", "active", "tracking_id"},
+    "audit_logs": {
+        "user_id",
+        "organization_id",
+        "ip_address",
+        "user_agent",
+        "created_at",
+    },
+    "partner_submissions": {
+        "pending_payload",
+        "pending_hash",
+        "pending_at",
+        "first_published_at",
+    },
+}
+NEVER_UPDATE = {
+    "offers": NEVER_INSERT["offers"]
+    | {"slug", "merchant_id", "source_url", "image_tint", "image_alt"},
+    "affiliate_links": {"provider", "active", "tracking_id", "offer_id"},
+    "offer_imports": {"provider", "external_id", "offer_id"},
+    "partner_submissions": {"merchant_id", "ref", "offer_id", "first_published_at"},
+}
+AUDIT_INSERT_COLUMNS = {"id", "action", "resource", "resource_id", "metadata"}
 
 
 def test_no_alter_role_mentions_an_attribute_a_managed_postgres_reserves_to_superusers() -> (
@@ -105,14 +140,27 @@ def test_the_three_role_timeouts_are_set() -> None:
         assert f"SET {setting}" in SQL
 
 
-def test_nothing_is_granted_on_the_audit_trail() -> None:
+def _columns(pattern: re.Pattern[str]) -> dict[str, set[str]]:
+    return {
+        table: {c.strip() for c in cols.split(",")}
+        for cols, table in pattern.findall(SQL)
+    }
+
+
+def test_the_audit_trail_is_append_only_and_the_role_cannot_name_a_user() -> None:
     granted = [
         line
         for line in SQL.splitlines()
         if "GRANT" in line.upper() and "--" not in line.split("GRANT")[0]
     ]
 
-    assert not any("audit_logs" in line for line in granted)
+    assert _columns(GRANT_INSERT)["audit_logs"] == AUDIT_INSERT_COLUMNS
+    assert "audit_logs" not in _columns(GRANT_SELECT)
+    assert "audit_logs" not in _columns(GRANT_UPDATE)
+    assert not any("DELETE" in line.upper() for line in granted)
+    assert not any(
+        "audit_logs" in line for line in granted if "INSERT" not in line.upper()
+    )
 
 
 def test_the_stripped_body_has_no_psql_only_line() -> None:
@@ -122,35 +170,99 @@ def test_the_stripped_body_has_no_psql_only_line() -> None:
     assert "BEGIN;" not in body and "COMMIT;" not in body
 
 
-def test_the_select_grants_are_exactly_the_columns_the_partner_package_names() -> None:
-    granted = {
-        table: {c.strip() for c in cols.split(",")}
-        for cols, table in GRANT_SELECT.findall(SQL)
-    }
+def test_every_column_the_partner_package_names_is_granted_and_nothing_else_is() -> (
+    None
+):
+    granted: dict[str, set[str]] = {}
+    for pattern in (GRANT_SELECT, GRANT_INSERT, GRANT_UPDATE):
+        for table, columns in _columns(pattern).items():
+            granted[table] = granted.get(table, set()) | columns
     core = {t.name: {c.name for c in t.columns} for t in discovered_core_tables()}
 
     assert granted == core
 
 
-def test_the_only_update_grant_is_last_used_at() -> None:
-    updates = {
-        table: {c.strip() for c in cols.split(",")}
-        for cols, table in GRANT_UPDATE.findall(SQL)
+def test_the_select_grants_are_a_subset_of_the_columns_the_package_names() -> None:
+    core = {t.name: {c.name for c in t.columns} for t in discovered_core_tables()}
+
+    for table, columns in _columns(GRANT_SELECT).items():
+        assert columns <= core[table], table
+
+
+def test_the_update_grants_are_exactly_these() -> None:
+    assert _columns(GRANT_UPDATE) == {
+        "partner_api_keys": {"last_used_at"},
+        "offers": {
+            "title",
+            "summary",
+            "description",
+            "category_id",
+            "offer_type",
+            "postage_kind",
+            "postage_amount_minor",
+            "postage_currency",
+            "requires_card",
+            "subscription_terms",
+            "eligibility",
+            "availability",
+            "steps",
+            "start_at",
+            "end_at",
+            "updated_at",
+        },
+        "affiliate_links": {"destination_url", "updated_at"},
+        "offer_imports": {
+            "source_hash",
+            "applied_source_hash",
+            "applied_content_hash",
+            "applied_at",
+            "source_changed_at",
+            "updated_at",
+        },
+        "partner_submissions": {
+            "content_hash",
+            "pending_payload",
+            "pending_hash",
+            "pending_at",
+            "submitted_at",
+            "key_id",
+            "updated_at",
+        },
     }
 
-    assert updates == {"partner_api_keys": {"last_used_at"}}
+
+def test_no_grant_covers_an_editor_owned_or_identity_column_and_merchants_is_read_only() -> (
+    None
+):
+    for table, columns in _columns(GRANT_UPDATE).items():
+        assert not columns & NEVER_UPDATE.get(table, set()), table
+    for table, columns in _columns(GRANT_INSERT).items():
+        assert not columns & NEVER_INSERT.get(table, set()), table
+    assert "merchants" not in _columns(GRANT_INSERT)
+    assert "merchants" not in _columns(GRANT_UPDATE)
 
 
 def test_the_verification_list_matches_the_grants() -> None:
-    expected = set(re.findall(r"'(\w+\.\w+\.(?:SELECT|UPDATE))'", SQL))
+    expected = set(re.findall(r"'(\w+\.\w+\.(?:SELECT|INSERT|UPDATE))'", SQL))
     from_grants = {
-        f"{table}.{column.strip()}.SELECT"
-        for cols, table in GRANT_SELECT.findall(SQL)
-        for column in cols.split(",")
-    } | {
-        f"{table}.{column.strip()}.UPDATE"
-        for cols, table in GRANT_UPDATE.findall(SQL)
-        for column in cols.split(",")
+        f"{table}.{column}.{privilege}"
+        for privilege, pattern in (
+            ("SELECT", GRANT_SELECT),
+            ("INSERT", GRANT_INSERT),
+            ("UPDATE", GRANT_UPDATE),
+        )
+        for table, columns in _columns(pattern).items()
+        for column in columns
     }
 
     assert expected == from_grants
+
+
+def test_the_script_refuses_to_grant_anything_without_the_guard_triggers() -> None:
+    for trigger in (
+        "trg_offers_insert_defaults",
+        "trg_affiliate_links_insert_defaults",
+        "trg_audit_logs_insert_guard",
+    ):
+        assert trigger in SQL
+    assert "run alembic upgrade head first" in SQL

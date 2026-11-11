@@ -3,7 +3,7 @@
 -- The partner surface connects as this role (PARTNER_DATABASE_URL) and never as the owner. It gets exactly the
 -- grants below and nothing else in the public schema: no users, admins, organisations, memberships, subscribers,
 -- billing, TOTP or login tables, and no DDL in public. Later partner stories extend THIS file (one grant per
--- column the partner reads, written next to the Core table definition in app/partner/keys.py).
+-- column the partner uses, written next to the Core table definitions in app/partner/keys.py and tables.py).
 --
 -- Run it as the database OWNER (any role that may create roles and grant on these tables; it does not need to
 -- be a superuser), on the DIRECT (unpooled) owner URL, once per database after `alembic upgrade head`, and again
@@ -72,9 +72,57 @@ DECLARE
   -- Every column privilege the role may hold in public, as table.column.PRIVILEGE. Nothing else.
   expected text[] := ARRAY[
     'partner_api_keys.id.SELECT', 'partner_api_keys.merchant_id.SELECT', 'partner_api_keys.key_hash.SELECT',
-    'partner_api_keys.label.SELECT', 'partner_api_keys.revoked_at.SELECT', 'partner_api_keys.last_used_at.SELECT',
-    'partner_api_keys.last_used_at.UPDATE',
-    'merchants.id.SELECT', 'merchants.name.SELECT', 'merchants.active.SELECT'];
+    'partner_api_keys.label.SELECT', 'partner_api_keys.revoked_at.SELECT',
+    'partner_api_keys.last_used_at.SELECT', 'partner_api_keys.last_used_at.UPDATE', 'merchants.id.SELECT',
+    'merchants.name.SELECT', 'merchants.website.SELECT', 'merchants.active.SELECT', 'offers.id.SELECT',
+    'offers.title.SELECT', 'offers.slug.SELECT', 'offers.summary.SELECT', 'offers.description.SELECT',
+    'offers.category_id.SELECT', 'offers.merchant_id.SELECT', 'offers.offer_type.SELECT',
+    'offers.status.SELECT', 'offers.featured.SELECT', 'offers.image_tint.SELECT', 'offers.image_label.SELECT',
+    'offers.image_alt.SELECT', 'offers.source_url.SELECT', 'offers.postage_kind.SELECT',
+    'offers.postage_amount_minor.SELECT', 'offers.postage_currency.SELECT', 'offers.requires_card.SELECT',
+    'offers.subscription_terms.SELECT', 'offers.eligibility.SELECT', 'offers.availability.SELECT',
+    'offers.steps.SELECT', 'offers.start_at.SELECT', 'offers.end_at.SELECT', 'offers.last_verified_at.SELECT',
+    'offers.freshness.SELECT', 'offers.publisher_notes.SELECT', 'offers.id.INSERT', 'offers.title.INSERT',
+    'offers.slug.INSERT', 'offers.summary.INSERT', 'offers.description.INSERT', 'offers.category_id.INSERT',
+    'offers.merchant_id.INSERT', 'offers.offer_type.INSERT', 'offers.image_tint.INSERT',
+    'offers.image_label.INSERT', 'offers.image_alt.INSERT', 'offers.postage_kind.INSERT',
+    'offers.postage_amount_minor.INSERT', 'offers.postage_currency.INSERT', 'offers.requires_card.INSERT',
+    'offers.subscription_terms.INSERT', 'offers.eligibility.INSERT', 'offers.availability.INSERT',
+    'offers.steps.INSERT', 'offers.start_at.INSERT', 'offers.end_at.INSERT', 'offers.title.UPDATE',
+    'offers.summary.UPDATE', 'offers.description.UPDATE', 'offers.category_id.UPDATE',
+    'offers.offer_type.UPDATE', 'offers.postage_kind.UPDATE', 'offers.postage_amount_minor.UPDATE',
+    'offers.postage_currency.UPDATE', 'offers.requires_card.UPDATE', 'offers.subscription_terms.UPDATE',
+    'offers.eligibility.UPDATE', 'offers.availability.UPDATE', 'offers.steps.UPDATE', 'offers.start_at.UPDATE',
+    'offers.end_at.UPDATE', 'offers.updated_at.UPDATE', 'affiliate_links.id.SELECT',
+    'affiliate_links.offer_id.SELECT', 'affiliate_links.provider.SELECT',
+    'affiliate_links.destination_url.SELECT', 'affiliate_links.tracking_id.SELECT',
+    'affiliate_links.active.SELECT', 'affiliate_links.id.INSERT', 'affiliate_links.offer_id.INSERT',
+    'affiliate_links.destination_url.INSERT', 'affiliate_links.destination_url.UPDATE',
+    'affiliate_links.updated_at.UPDATE', 'offer_imports.id.SELECT', 'offer_imports.provider.SELECT',
+    'offer_imports.external_id.SELECT', 'offer_imports.offer_id.SELECT', 'offer_imports.source_hash.SELECT',
+    'offer_imports.applied_source_hash.SELECT', 'offer_imports.applied_content_hash.SELECT',
+    'offer_imports.applied_at.SELECT', 'offer_imports.source_changed_at.SELECT', 'offer_imports.id.INSERT',
+    'offer_imports.provider.INSERT', 'offer_imports.external_id.INSERT', 'offer_imports.offer_id.INSERT',
+    'offer_imports.source_hash.INSERT', 'offer_imports.applied_source_hash.INSERT',
+    'offer_imports.applied_content_hash.INSERT', 'offer_imports.applied_at.INSERT',
+    'offer_imports.source_changed_at.INSERT', 'offer_imports.source_hash.UPDATE',
+    'offer_imports.applied_source_hash.UPDATE', 'offer_imports.applied_content_hash.UPDATE',
+    'offer_imports.applied_at.UPDATE', 'offer_imports.source_changed_at.UPDATE',
+    'offer_imports.updated_at.UPDATE', 'categories.id.SELECT', 'categories.slug.SELECT',
+    'categories.enabled.SELECT', 'partner_submissions.id.SELECT', 'partner_submissions.merchant_id.SELECT',
+    'partner_submissions.ref.SELECT', 'partner_submissions.offer_id.SELECT',
+    'partner_submissions.content_hash.SELECT', 'partner_submissions.pending_payload.SELECT',
+    'partner_submissions.pending_hash.SELECT', 'partner_submissions.pending_at.SELECT',
+    'partner_submissions.submitted_at.SELECT', 'partner_submissions.key_id.SELECT',
+    'partner_submissions.first_published_at.SELECT', 'partner_submissions.created_at.SELECT',
+    'partner_submissions.id.INSERT', 'partner_submissions.merchant_id.INSERT',
+    'partner_submissions.ref.INSERT', 'partner_submissions.offer_id.INSERT',
+    'partner_submissions.content_hash.INSERT', 'partner_submissions.key_id.INSERT',
+    'partner_submissions.content_hash.UPDATE', 'partner_submissions.pending_payload.UPDATE',
+    'partner_submissions.pending_hash.UPDATE', 'partner_submissions.pending_at.UPDATE',
+    'partner_submissions.submitted_at.UPDATE', 'partner_submissions.key_id.UPDATE',
+    'partner_submissions.updated_at.UPDATE', 'audit_logs.id.INSERT', 'audit_logs.action.INSERT',
+    'audit_logs.resource.INSERT', 'audit_logs.resource_id.INSERT', 'audit_logs.metadata.INSERT'];
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('freejoy.partner_role'));
 
@@ -134,6 +182,15 @@ BEGIN
   EXECUTE format('REVOKE ALL ON SCHEMA public FROM %I', role_name);
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM %I', database_name, role_name);
 
+  -- The grants below lean on the triggers of migration 0008 (the audit guard, and the defaults the role cannot set).
+  -- Refuse to grant anything if they are missing or disabled: run alembic upgrade head first.
+  IF (SELECT count(*) FROM pg_trigger
+       WHERE NOT tgisinternal AND tgenabled = 'O'
+         AND tgname IN ('trg_offers_insert_defaults', 'trg_affiliate_links_insert_defaults',
+                        'trg_audit_logs_insert_guard')) <> 3 THEN
+    RAISE EXCEPTION 'the partner guard triggers of migration 0008 are missing or disabled; run alembic upgrade head first';
+  END IF;
+
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', database_name, role_name);
   EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', role_name);
 
@@ -143,10 +200,63 @@ BEGIN
   EXECUTE format(
     'GRANT SELECT (id, merchant_id, key_hash, label, revoked_at, last_used_at) ON partner_api_keys TO %I', role_name);
   EXECUTE format('GRANT UPDATE (last_used_at) ON partner_api_keys TO %I', role_name);
-  -- The merchant a key belongs to: the columns the code reads, read only.
-  EXECUTE format('GRANT SELECT (id, name, active) ON merchants TO %I', role_name);
-  -- No grant on audit_logs: no partner code writes an audit row yet. The story that first does adds one,
-  -- constrained (a policy or a trigger that fixes user_id and the action prefix), not the bare table.
+  -- The merchant a key belongs to: the columns the code reads (website judges the host of a link), read only. The
+  -- role can never write merchants, so the API cannot change what a direct link may point at.
+  EXECUTE format('GRANT SELECT (id, name, website, active) ON merchants TO %I', role_name);
+
+  -- Partner submissions (FREEJ-58). A submission becomes a DRAFT offer; nothing here can publish it.
+  --
+  -- offers: INSERT on the content columns only. status is not granted, so the column default (DRAFT) supplies it, and
+  -- featured (default false), last_verified_at (null), freshness and publisher_notes (null) stay at their defaults.
+  -- commercial_basis (NOT NULL, no default) is not granted either: the trigger of migration 0008 gives a writer that
+  -- may not set it the placeholder EDITORIAL, and the editor sets the real basis at review. UPDATE: the same content
+  -- columns minus the identity (slug, merchant_id) and the editor-owned columns; end_at is how a retailer ends an offer.
+  -- Never status, last_verified_at, featured, verified_* or commercial_basis. SELECT is the content plus what the
+  -- fingerprint of an untouched draft reads.
+  EXECUTE format(
+    'GRANT SELECT (id, title, slug, summary, description, category_id, merchant_id, offer_type, status, featured, image_tint, image_label, image_alt, source_url, postage_kind, postage_amount_minor, postage_currency, requires_card, subscription_terms, eligibility, availability, steps, start_at, end_at, last_verified_at, freshness, publisher_notes) ON offers TO %I', role_name);
+  EXECUTE format(
+    'GRANT INSERT (id, title, slug, summary, description, category_id, merchant_id, offer_type, image_tint, image_label, image_alt, postage_kind, postage_amount_minor, postage_currency, requires_card, subscription_terms, eligibility, availability, steps, start_at, end_at) ON offers TO %I', role_name);
+  EXECUTE format(
+    'GRANT UPDATE (title, summary, description, category_id, offer_type, postage_kind, postage_amount_minor, postage_currency, requires_card, subscription_terms, eligibility, availability, steps, start_at, end_at, updated_at) ON offers TO %I', role_name);
+
+  -- affiliate_links: provider is not granted (the trigger sets direct), nor are active (default true) or tracking_id;
+  -- the only update is a new destination.
+  EXECUTE format(
+    'GRANT SELECT (id, offer_id, provider, destination_url, tracking_id, active) ON affiliate_links TO %I', role_name);
+  EXECUTE format(
+    'GRANT INSERT (id, offer_id, destination_url) ON affiliate_links TO %I', role_name);
+  EXECUTE format(
+    'GRANT UPDATE (destination_url, updated_at) ON affiliate_links TO %I', role_name);
+
+  -- offer_imports: the provenance row (provider partner) that puts a submission in the editors' review queue and holds
+  -- the hashes that tell the retailer changed it from an editor changed it. No DELETE.
+  EXECUTE format(
+    'GRANT SELECT (id, provider, external_id, offer_id, source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at) ON offer_imports TO %I', role_name);
+  EXECUTE format(
+    'GRANT INSERT (id, provider, external_id, offer_id, source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at) ON offer_imports TO %I', role_name);
+  EXECUTE format(
+    'GRANT UPDATE (source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at, updated_at) ON offer_imports TO %I', role_name);
+
+  -- categories: read, to check that the category a retailer names is one an editor enabled.
+  EXECUTE format(
+    'GRANT SELECT (id, slug, enabled) ON categories TO %I', role_name);
+
+  -- partner_submissions: the table of this API. merchant_id, ref and offer_id are written once and never updated;
+  -- first_published_at is set by a trigger and only read.
+  EXECUTE format(
+    'GRANT SELECT (id, merchant_id, ref, offer_id, content_hash, pending_payload, pending_hash, pending_at, submitted_at, key_id, first_published_at, created_at) ON partner_submissions TO %I', role_name);
+  EXECUTE format(
+    'GRANT INSERT (id, merchant_id, ref, offer_id, content_hash, key_id) ON partner_submissions TO %I', role_name);
+  EXECUTE format(
+    'GRANT UPDATE (content_hash, pending_payload, pending_hash, pending_at, submitted_at, key_id, updated_at) ON partner_submissions TO %I', role_name);
+
+  -- audit_logs: append only. The role may insert the five columns an audit row needs and nothing else: no SELECT (it
+  -- cannot read the trail), no UPDATE or DELETE, and not user_id or organization_id. The trigger of migration 0008
+  -- (freejoy_audit_insert_guard) then lets a writer that may not name a user append only rows whose action is
+  -- partner.<area>.<verb>, so the role cannot forge an admin. row.
+  EXECUTE format(
+    'GRANT INSERT (id, action, resource, resource_id, metadata) ON audit_logs TO %I', role_name);
 
   -- Verify from the catalog, counting what reaches the role through PUBLIC. Raise on anything not listed.
   IF has_schema_privilege(role_name, 'public', 'CREATE') THEN
