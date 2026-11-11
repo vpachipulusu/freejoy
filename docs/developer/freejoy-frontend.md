@@ -164,8 +164,9 @@ the admin publish, unpublish and expire actions (FREEJ-22); nothing calls it yet
   section I.3.
 - A demo (fixture) offer has no destination, so its CTA opens a "Demo offer" dialog. A real offer's CTA links
   to the first-party `/go/<offerId>` redirect (FREEJ-23). The "Ad" label before the button and the commission
-  sentence after it appear only when the offer's `earnsCommission` is true (FREEJ-60: the link `/go/` would follow is on
-  an affiliate network); a direct-only offer shows neither. A missing flag counts as true. No element on any page has an external `href`.
+  sentence after it appear unless the offer's `earnsCommission` is false (FREEJ-60: the offer earns commission when its basis
+  is affiliate or the followed link is on a network); an offer that earns nothing shows neither and its link carries
+  `?nd=1`. An unknown flag (null) discloses. No element on any page has an external `href`.
 - The alerts form validates with Zod, requires consent, and submits through a server action
   (FREEJ-24). It answers "check your inbox" the same way for every address, and nothing starts until
   the visitor opens the emailed link and presses the button on `/alerts/confirm`. Until

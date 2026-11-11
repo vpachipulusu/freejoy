@@ -123,7 +123,7 @@ with the admin UI story. Status changes are serialised by the offer row lock.
 ## Commercial basis
 
 `offers.commercial_basis` is `EDITORIAL` (no payment or benefit), `AFFILIATE` (commission through a network) or
-`SPONSORED` (the merchant pays or gives a benefit for the listing or its placement). It is **not null with no default**
+`SPONSORED` (the merchant pays or gives a benefit for the listing or its placement). On the public page an offer shows the "Ad" label and the commission sentence when its basis is `AFFILIATE` or its followed link is on a network, and the "Sponsored" label when its basis is `SPONSORED`; **`direct` link with `EDITORIAL` basis is the only combination shown without either** (so choose `AFFILIATE` for a `direct` link that carries a commission tag; see [freejoy-affiliate.md](freejoy-affiliate.md#when-the-page-says-ad)). It is **not null with no default**
 anywhere (model, migration or code): `POST /v1/admin/offers` requires it (422 without it), `PATCH` may change it (never
 null), and both read models (`OfferSummaryOut`, `OfferOut`) return it. It is audited like the other enum fields: the
 `create` row's `after` carries it and an `update` row has it in `before`/`after` and in `details.fields`.

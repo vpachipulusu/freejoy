@@ -29,6 +29,7 @@ the `affiliate_links` row, the backend response to the Next.js server, and the `
 | Outcome | `/go/<id>` answers | Backend answer | Click row |
 |---|---|---|---|
 | Live offer, usable link | `307` to the destination | `200 {"success": true, "data": {"destination_url": ...}}` | one |
+| Offer that earns commission, link marked `?nd=1` (the page showed no "Ad") | `303` to the **relative** `/freebies/<slug>`, page cache expired | `409` code `disclosure_required` with the slug, `no-store` | none |
 | Offer that was public and has ended | `302` to the **relative** `/freebies/<slug>?ended=1` | `410` with `expired: true` and the slug (same body as `GET /v1/catalogue/offers/{slug}`) | none |
 | Unknown, draft, archived, never-live, hidden category or inactive merchant | `404` | `404 Offer not found` (one identical body) | none |
 | Live offer with no usable link (none active, bad URL, host not allowed) | `404` | the same `404 Offer not found` | none |
@@ -85,8 +86,8 @@ only. Neither logs query strings, headers or request bodies.
 **Not stored, anywhere:** IP address, cookie or device id, user id, session id, email, raw user agent, full referrer
 URL, query string, destination URL. The client address reaches the backend only as `X-Client-IP` for the rate limit
 (from `x-vercel-forwarded-for` on Vercel and nowhere else; see `getBackendClient`), and the rate limiter keeps a
-counter, not a click. The backend request body accepts only `referrer_host` and `user_agent_class`
-(`extra="forbid"`), so a caller cannot add more.
+counter, not a click. The backend request body accepts only `referrer_host`, `user_agent_class` and `commission_disclosed`
+(`extra="forbid"`), so a caller cannot add more; the last is a boolean the route sets to false only for `?nd=1`.
 
 ## No cookie
 
@@ -254,48 +255,70 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
 
 ## When the page says "Ad"
 
-The "Ad" label and the commission sentence appear beside the button only when the link `/go/` would really follow for
-the offer, right now, is on an affiliate network that pays commission (FREEJ-60). "Sponsored" is a different
-disclosure and does not depend on it.
+The "Ad" label and the commission sentence appear beside the button only when the offer earns Freejoy a commission
+(FREEJ-60): its confirmed commercial basis is `AFFILIATE`, or the link `/go/` would follow right now is on an affiliate
+network. "Sponsored" is a different disclosure and does not depend on it.
 
 - **The flag.** `GET /v1/catalogue/offers/{slug}` returns one extra required boolean, `earns_commission`, on the
   detail body only (`OfferDetailData`, which extends the list item `OfferData`). The list endpoint does not carry it: a
-  card links to the offer page and never to the provider, so no list page needs it, and leaving it off keeps the list a
-  single query. It never exposes the provider, the commercial basis, the link id or the destination.
-- **One rule, two callers.** `app/core/followed_link.py` holds the selection: take the active links in stored order
-  (oldest first), skip any whose destination is not a clean https URL or whose host the provider may not use, follow the
-  first one left. `OutboundClickService` uses it to pick the destination of a click; `OfferCommissionService`
-  (`app/services/offer_commission.py`) uses it to compute the flag. The flag is true when the chosen link's provider is
-  not `direct` and not `sample`. No usable link gives false. `tests/services/test_offer_commission.py` runs both callers
-  over the same stored links (both orders, an unusable first link, no links, the sample provider) and asserts the click
-  and the flag describe the same link; `tests/api/test_catalogue_e2e.py` does the same against Postgres.
+  card links to the offer page and never to the provider, so no list page needs it, and leaving it off avoids a link
+  lookup per list item. It never exposes the provider, the commercial basis, the link id or the destination.
+- **One rule, three uses.** `app/core/followed_link.py` holds the selection and the rule. Selection: take the active
+  links in stored order (oldest first), skip any whose destination is not a clean https URL or whose host the provider
+  may not use, follow the first one left (`first_usable_link`). Rule (`offer_earns_commission`, which takes the basis as a
+  plain boolean so `core` imports no models): the offer earns when its basis is `AFFILIATE` or the followed link's
+  provider is not `direct` and not `sample`; no usable link and a basis other than `AFFILIATE` gives false. The same
+  function serves `OutboundClickService` (to pick the destination and to run the click guard below) and
+  `OfferCommissionService` (`app/services/offer_commission.py`, which takes the offer record and so reads its basis
+  without another query; it computes the page flag). `tests/services/test_offer_commission.py` runs the click, the guard
+  and the flag over the same stored links for every basis (both orders, an unusable first link, no links, the sample
+  provider); `tests/api/test_catalogue_e2e.py` does the same against Postgres.
+- **Why the basis counts.** A `direct` link to a merchant's own domain can still pay commission (a merchant-domain
+  programme with a `?tag=` or `?ref=` link); the admin API accepts only `direct` for the merchant's own host, so the link
+  cannot say so. The editor's confirmed basis does: `AFFILIATE` on a `direct` link means "this earns a commission".
 - **What each state shows.**
 
-  | Followed link | Sponsored | Shown |
+  | Basis | Followed link | Shown |
   |---|---|---|
-  | network | no | "Ad", then the button, then "Freejoy is paid a commission by the brand ..." |
-  | network | yes | "Sponsored" badge, "Ad", the sponsored sentence plus "Freejoy may also earn a commission ..." |
-  | `direct` or none usable | no | the button and the redirect notice only: no "Ad", no commission sentence |
-  | `direct` or none usable | yes | "Sponsored" badge and the sponsored sentence only: no "Ad", no commission wording |
+  | any | network | "Ad", then the button, then "Freejoy is paid a commission by the brand ..." (sponsored: plus "Freejoy may also earn a commission ...") |
+  | `AFFILIATE` | `direct` or none usable | the same as above |
+  | `SPONSORED` | `direct` or none usable | "Sponsored" badge and the sponsored sentence only: no "Ad", no commission wording |
+  | `EDITORIAL` | `direct` or none usable | the button and the redirect notice only: no "Ad", no commission sentence, no "Sponsored" |
 
-  A link that is not shown as an "Ad" still goes through `/go/` with the `sponsored nofollow noopener` rel.
-- **A missing flag discloses.** `mapOffer` (`src/lib/catalogue/api-mapper.ts`) reads `earns_commission` and, when it is
-  absent or not a boolean, treats it as `true` and keeps the offer: showing "Ad" on a link that earns nothing
-  over-discloses, which is the safe side under UK ASA rules, whereas hiding it would not be. List items never carry the
-  flag, so they map to `true`; no list page reads it.
-- **Freshness.** The detail response is cached for up to 60 seconds (backend `Cache-Control` and the frontend data
-  cache), while a click always reads the live rows. After an editor changes the links, the page can describe the previous
-  choice for up to a minute. A change from a network link to a direct one only over-discloses for that minute. A change
-  the other way (a network link added in front of, or replacing, the direct one) can leave the page without "Ad" for up
-  to a minute while the click already follows the network link. Only an admin action that calls
-  `refreshPublicCatalogue` clears the cache sooner; the Awin import and direct database edits do not. This is
-  accepted for now; if it is not, shorten `CATALOGUE_REVALIDATE_SECONDS` or revalidate the `catalogue` tag when links
-  are saved.
+  `direct` with `EDITORIAL` is therefore the only combination shown without "Ad" or "Sponsored". A link that is not
+  shown as an "Ad" still goes through `/go/` with the `sponsored nofollow noopener` rel.
+- **The click guard.** The page cannot be trusted to be current (below), so the link says what the page disclosed. When
+  the page shows no "Ad", `AffiliateCta` renders `/go/<id>?nd=1` ("not disclosed"); otherwise the plain `/go/<id>`. The
+  route (`src/lib/outbound/respond.ts`) accepts exactly one `nd` parameter with the exact value `1`; any other value, a
+  repeated `nd` and every other parameter count as disclosed. For `nd=1` it sends `commission_disclosed: false` in the click
+  body (the field is left out otherwise; the backend default is true). After the link is chosen and before any row is
+  written, `OutboundClickService.record_click` runs the same `offer_earns_commission` rule: if the click is undisclosed
+  and the offer earns, the outcome is `DisclosureNeeded(slug)`, the router answers `409` with code `disclosure_required`
+  and the slug (`Cache-Control: no-store`, no destination), and nothing is recorded. The route then calls
+  `refreshPublicCatalogue(slug)` (tag expiry) and answers a relative `303` to `/freebies/<slug>` built from a slug that
+  passes `isOfferSlug`; the fresh page shows "Ad" and a plain `/go/<id>` link, so there is no loop. The parameter can only
+  make the redirect stricter, so a forged `nd=1` gains a bounce back to the offer page and nothing else. Nothing is logged
+  beyond the offer id and the reason.
+- **A missing flag discloses.** `mapOfferDetail` (`src/lib/catalogue/api-mapper.ts`) carries a boolean as sent and, when
+  the flag is absent or not a boolean (an older backend), keeps the offer, logs a warning with the slug and stores `null`
+  ("unknown"); list items map to `null` too. `OfferHero` passes `earnsCommission !== false` to the call to action, whose
+  `earnsCommission` and `sponsored` props are required, so "unknown" shows "Ad" and the commission sentence: that
+  over-discloses, which is the safe side under UK ASA rules.
+- **Freshness.** The detail read is cached by the frontend for 60 seconds. `unstable_cache` would serve a stale entry of
+  any age while it refreshes in the background, so `fetchOffer` stamps each entry with the time it was read and reads the
+  backend directly when the entry is older than `CATALOGUE_REVALIDATE_SECONDS`. After an editor changes the links or the
+  basis, the page can therefore describe the previous state for at most about a minute in the normal case. A page that
+  over-discloses for that minute does no harm. A page that under-discloses (a stale "no Ad" link whose offer now earns,
+  or a tab opened earlier) is caught by the click guard: the visitor is bounced back to the refreshed offer page and
+  nothing is recorded or sent to the brand. What remains: a bounce for the visitor in that case, and the fact that a link
+  without `?nd=1` followed by hand or from a bookmark (no page involved) is unaffected. Only an admin action that calls
+  `refreshPublicCatalogue` clears the cache sooner; the Awin import and direct database edits do not.
 - **Deploy order: backend first, then frontend.** The generated client and the schema treat `earns_commission` as
-  required, so the backend that sends it must be live before the frontend that reads it. Against an older backend the
-  frontend still works and over-discloses (a missing flag counts as true), but that is a fallback, not a supported
-  order. No migration and no data change: the flag is computed from rows that already exist. To roll back, revert the
-  frontend first, then the backend.
+  required, and the frontend sends `commission_disclosed`, so the backend that understands both must be live before the
+  frontend. Against an older backend the frontend still works and discloses (a missing flag is unknown), but the click
+  guard would be absent and `commission_disclosed` rejected with a 422 (the body is `extra="forbid"`), so that order is
+  not supported. No migration and no data change: everything is computed from rows that already exist. To roll back,
+  revert the frontend first, then the backend.
 
 ## Known limits and follow-ups
 
@@ -305,7 +328,8 @@ disclosure and does not depend on it.
   nothing about the link says how the listing is paid for; that is what the offer's commercial basis is for. A
   `direct` link on an offer marked `SPONSORED` means "the merchant pays or gives a benefit for this listing, and there is
   no network in between": visitors see the "Sponsored" label and a sentence next to the button, and the click is still
-  counted like any other. A `direct` link on an `EDITORIAL` offer means no payment at all. Publishing an offer with no network link
+  counted like any other. A `direct` link on an `EDITORIAL` offer means no payment at all, and one on an `AFFILIATE` offer
+  means a commission through the merchant's own programme (the page then shows "Ad"). Publishing an offer with no network link
   needs the editor to confirm the basis ([backend-admin-catalogue.md](backend-admin-catalogue.md#commercial-basis)). The
   outbound `rel` is `sponsored nofollow noopener` for every basis. A sponsored offer's call to action does not state
   as fact that a commission is paid: it says the listing is sponsored and that Freejoy "may also earn a commission"

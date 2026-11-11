@@ -107,16 +107,17 @@ featured offer can be sponsored; nothing lets `sponsored` be hidden. No sort or 
 basis (`tests/repositories/test_catalogue.py` compiles them and checks), so sponsorship does not change the order of results.
 
 `earns_commission` is on the **detail** body only (`OfferDetailData` extends `OfferData`; the list items do not carry it, because
-a card links to the offer page and never to the provider). It is `true` only when the link `/go/<offerId>` would follow
-right now is on an affiliate network that pays commission (its provider is not `direct` and not the sample provider); it is
-`false` when that link is `direct` or the offer has no usable link. It is computed with the same function the outbound
-click uses to choose its link (`app/core/followed_link.py`), so the page cannot describe a different link from the one a
-visitor is sent to. The frontend shows the "Ad" label and the commission sentence only when it is `true`. The provider,
+a card links to the offer page and never to the provider). It is `true` when the offer's confirmed commercial basis is
+`AFFILIATE`, or the link `/go/<offerId>` would follow right now is on an affiliate network (its provider is not `direct` and
+not the sample provider); it is `false` otherwise, including when the offer has no usable link and a basis other than
+`AFFILIATE`. It is computed with the same function the outbound click uses to choose its link and to guard an undisclosed
+click (`app/core/followed_link.py`), so for the same stored links at the same moment the page describes the very link a
+visitor is sent to. The frontend shows the "Ad" label and the commission sentence unless it is `false`. The provider,
 the link id and the destination are never in the response; see
 [freejoy-affiliate.md](freejoy-affiliate.md#when-the-page-says-ad) (including the deploy order: backend, then frontend).
 
 Never exposed: `publisher_notes`, the three-way `commercial_basis`, `status`, category and merchant ids, `source_url`, merchant `website`, timestamps other than the ones
-above, and anything from `affiliate_links` (destinations are resolved server-side by the outbound click endpoint, see [freejoy-affiliate.md](freejoy-affiliate.md)). The
+above, and anything from `affiliate_links` except the derived `earns_commission` flag (destinations are resolved server-side by the outbound click endpoint, see [freejoy-affiliate.md](freejoy-affiliate.md)). The
 repository selects an explicit column list, so those columns never leave the database layer, and the response models
 are a second, independent allowlist. To expose another field, add it to `OfferRecord`, the select list, `OfferData` and
 the allowlist test together.
