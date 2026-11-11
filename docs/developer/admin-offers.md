@@ -58,7 +58,7 @@ of them.
 An offer a retailer sent through the partner API ([backend-partner-api.md](backend-partner-api.md#offer-submissions-freej-58)) is a draft with
 an `offer_imports` row of provider `partner`, so it is in the review queue with no query change. The list badge says **Submitted by
 retailer** with the ref (`partner_ref` on the list read), or **Retailer update waiting** when the marker is set. The offer page replaces the
-Provenance panel with the retailer panel: merchant, ref, when it was last sent, and a reminder that the commercial basis is a placeholder.
+Provenance panel with the retailer panel: merchant, ref, when it was last sent, and a reminder that the commercial basis is a placeholder (`SPONSORED`, the cautious label; the form shows `basis_is_placeholder`).
 
 When the retailer sent an update for an offer an editor has already touched (an edited draft, a live, ended or expired offer) the page also
 shows the proposal beside the current content: each changed field is a group with two labelled regions, Current and Proposed, stacked below
@@ -69,11 +69,20 @@ showed (409 `offer_changed` if either moved):
   `AdminPartnerUpdateService` writes the proposal through the normal edit path (`_stage_update`: same validation, publish checks and audit row
   as a hand edit; a proposal never carries the commercial basis, so `_guard_basis_change` has nothing to refuse) and the retailer's one `direct`
   link through the normal link edit (host rule included), then clears the proposal and the marker, in one transaction. An offer that has already
-  ended keeps its end date unless the proposal gives a new one in the future. The offer stays "edited by a person", so a later retailer update
+  ended keeps its end date: the proposed end date is dropped when it is empty or past, or when the proposal is older than the end (the retailer
+  ended it after sending it; ending also discards a waiting proposal, so this is the case of an update sent just before the end that raced it). A
+  proposal sent *after* the end with a future `end_at` reopens it, because an editor approved that on purpose. A proposal is re-validated field by
+  field and against its hash and payload version on apply (409 or 422 `invalid_pending_payload`: dismiss it). On a live offer the button asks for a
+  confirmation first, naming that the public page changes at once. The offer stays "edited by a person", so a later retailer update
   waits again. Audit rows: `admin.offers.update`, `admin.offer_links.update`, `admin.offers.partner_update_applied`.
 - **Dismiss retailer update** (`POST .../dismiss-partner-update`, `offers.publish`, after a confirmation) clears the proposal and the marker and
   changes nothing else (`admin.offers.partner_update_dismissed`). The generic *dismiss source change* refuses a partner offer (409), so a
   proposal is never half-cleared.
+
+Publishing a partner offer needs the editor to **state the commercial basis in the publish request** (no radio is preselected; `commercial_basis_required`
+otherwise), and it is stored. For a partner draft that was never live the slug is rebuilt from the title at the first publish. The offer cannot be moved
+to another merchant (`partner_merchant_fixed`). An apply refused for lack of the permission says so in plain words, and a failed write leaves a lasting
+alert beside the buttons as well as the toast.
 
 After either, focus moves to a stable "dealt with" paragraph. The partner sees `declined` when an editor archives a submission that was never
 published.

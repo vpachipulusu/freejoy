@@ -28,8 +28,9 @@ Guards on what the role may write (each needs the offer to belong to a partner s
 * ``offer_imports`` BEFORE INSERT OR UPDATE: a writer without ``UPDATE`` on ``provider`` may write only provider
   ``partner`` rows of an offer that has a submission.
 * ``partner_submissions`` BEFORE INSERT: a writer without ``UPDATE`` on ``first_published_at`` may attach a submission
-  only to a DRAFT of its own merchant that has no link and no provenance row yet (so a bare hand-made draft is not
-  adoptable). The service therefore inserts offer, submission, link, import, in that order.
+  only to a DRAFT of its own merchant that has no link and no provenance row yet (a draft that already has either, such
+  as an imported one, cannot be adopted; a bare draft of the same merchant can, which is part of the residual below).
+  The service therefore inserts offer, submission, link, import, in that order.
 * ``audit_logs`` BEFORE INSERT: a writer that may not name a user may append only the three partner actions, about
   ``offers``, with no user and no organisation and a bounded id and metadata, so it cannot forge an ``admin.`` row or
   bury the trail.

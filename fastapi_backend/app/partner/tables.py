@@ -2,8 +2,8 @@
 
 ``app/partner`` may import only ``app.core`` and itself, so it cannot use the ORM models. It names the tables and
 columns it touches here (``merchants`` is in ``keys.py``) and reaches them through the restricted
-``freejoy_partner`` role, whose column grants in ``commands/sql/partner_role.sql`` are exactly the columns used here
-in the way they are used. ``tests/api/partner/test_partner_table_definitions.py`` checks every table, column and
+``freejoy_partner`` role, whose column grants in ``commands/sql/partner_role.sql`` cover the columns used here
+in the way they are used (the ``SELECT`` grants may be wider, for the fingerprint and the click report). ``tests/api/partner/test_partner_table_definitions.py`` checks every table, column and
 type against the ORM metadata, and ``tests/commands/test_partner_role_script.py`` ties the script's grants to these
 definitions, so the two cannot drift.
 

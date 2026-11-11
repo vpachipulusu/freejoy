@@ -6,8 +6,9 @@ is no way to ask for a row by its own id alone, so a ref or an offer of another 
 one query, exactly like one that does not exist. ``tests/api/partner/test_partner_submission_store.py`` asserts the
 argument is there on every public method.
 
-The caller owns the session and the transaction. Nothing here commits. The role's grants (``partner_role.sql``)
-are exactly the columns used below in the way they are used; ``RETURNING`` lists only columns the role may read.
+The caller owns the session and the transaction. Nothing here commits. The role's ``INSERT`` and ``UPDATE`` grants
+(``partner_role.sql``) are the columns written below; its ``SELECT`` grants also cover columns that only the shared
+untouched-draft fingerprint and the click report read. ``RETURNING`` lists only columns the role may read.
 """
 
 from dataclasses import dataclass

@@ -224,7 +224,7 @@ BEGIN
   -- offers: INSERT on the content columns only. status is not granted, so the column default (DRAFT) supplies it, and
   -- featured (default false), last_verified_at (null), freshness and publisher_notes (null) stay at their defaults.
   -- commercial_basis (NOT NULL, no default) is not granted either: the trigger of migration 0008 gives a writer that
-  -- may not set it the placeholder EDITORIAL, and the editor sets the real basis at review. UPDATE: the same content
+  -- may not set it the placeholder SPONSORED (the cautious label), and the editor states the real basis in the publish request. UPDATE: the same content
   -- columns minus the identity (slug, merchant_id) and the editor-owned columns; end_at is how a retailer ends an offer.
   -- Never status, last_verified_at, featured, verified_* or commercial_basis. SELECT is the content plus what the
   -- fingerprint of an untouched draft reads.
@@ -268,8 +268,8 @@ BEGIN
 
   -- audit_logs: append only. The role may insert the five columns an audit row needs and nothing else: no SELECT (it
   -- cannot read the trail), no UPDATE or DELETE, and not user_id or organization_id. The trigger of migration 0008
-  -- (freejoy_audit_insert_guard) then lets a writer that may not name a user append only rows whose action is
-  -- partner.<area>.<verb>, so the role cannot forge an admin. row.
+  -- (freejoy_audit_insert_guard) then lets a writer that may not name a user append only the three partner actions,
+  -- about offers, with a bounded id and metadata, so the role cannot forge an admin. row or bury the trail.
   EXECUTE format(
     'GRANT INSERT (id, action, resource, resource_id, metadata) ON audit_logs TO %I', role_name);
 
