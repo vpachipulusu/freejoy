@@ -111,6 +111,39 @@ class ScopedOutageRateLimiter(FakeRateLimiter):
         return await super().hit(identifier, policy)
 
 
+class ScriptedRateLimiter(FakeRateLimiter):
+    """Counts like ``FakeRateLimiter``, with some policy scopes scripted: never limited, always denied, or down.
+
+    Every hit is recorded in ``hits``, scripted or not, so a test can assert the exact sequence of hits.
+    """
+
+    def __init__(
+        self,
+        *,
+        unlimited_scopes: set[str] | None = None,
+        denied_scopes: set[str] | None = None,
+        failing_scopes: set[str] | None = None,
+        reset_at: float = 4_000_000_000.0,
+    ) -> None:
+        super().__init__(reset_at)
+        self._unlimited = unlimited_scopes or set()
+        self._denied = denied_scopes or set()
+        self._failing = failing_scopes or set()
+        self._reset = reset_at
+
+    async def hit(self, identifier: str, policy: RateLimitPolicy) -> RateLimitDecision:
+        scope = policy.scope
+        if scope in self._failing:
+            self.hits.append((identifier, policy))
+            raise RateLimiterUnavailable("redis down")
+        if scope in self._unlimited or scope in self._denied:
+            self.hits.append((identifier, policy))
+            return RateLimitDecision(
+                scope in self._unlimited, policy.limit, 0, self._reset
+            )
+        return await super().hit(identifier, policy)
+
+
 def as_limiter(limiter: FakeRateLimiter | RaisingRateLimiter) -> RateLimiter:
     """Static proof that the fakes satisfy the protocol (checked by mypy)."""
     return limiter

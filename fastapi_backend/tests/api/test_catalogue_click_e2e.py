@@ -23,12 +23,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.api.deps import get_rate_limiter, get_session_provider
 from app.core.database import DefaultSessionProvider, build_engine
-from app.core.rate_limit import OUTBOUND_OFFER_BOT_POLICY, OUTBOUND_OFFER_POLICY
+from app.core.rate_limit import (
+    OUTBOUND_CLICK_OFFER_POLICY,
+    OUTBOUND_CLICK_POLICY,
+    OUTBOUND_OFFER_BOT_POLICY,
+    OUTBOUND_OFFER_POLICY,
+)
 from app.main import create_app
 from app.repositories.admin_merchants import AdminMerchantRepository
 from commands.prune_click_events import prune_click_events
 from tests.api.test_catalogue_e2e import add_category, add_merchant, add_offer, insert
-from tests.fakes import FakeRateLimiter, as_limiter
+from tests.fakes import FakeRateLimiter, ScriptedRateLimiter, as_limiter
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -450,6 +455,46 @@ async def test_a_flood_of_bot_requests_cannot_use_up_the_budget_genuine_clicks_n
     classes = [row.user_agent_class for row in await click_rows(engine)]
     assert classes.count("BOT") == OUTBOUND_OFFER_BOT_POLICY.limit
     assert classes.count("DESKTOP") == 1
+
+
+async def test_one_address_flooding_with_an_ordinary_user_agent_records_only_its_share(
+    engine: AsyncEngine, shop: dict[str, str]
+) -> None:
+    offer = await add_offer(engine, shop["category"], shop["merchant"], "lipstick")
+    await add_link(engine, offer)
+    app = create_app()
+    provider = DefaultSessionProvider(
+        async_sessionmaker(engine, expire_on_commit=False)
+    )
+    app.dependency_overrides[get_session_provider] = lambda: provider
+    # The per-address 429 (60 a minute) is off, to show the recording limit on its own.
+    limiter = as_limiter(
+        ScriptedRateLimiter(unlimited_scopes={OUTBOUND_CLICK_POLICY.scope})
+    )
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    flood = OUTBOUND_OFFER_POLICY.limit
+    desktop = {"user_agent_class": "DESKTOP"}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+        headers={"X-Internal-Key": KEY},
+    ) as http:
+        flooded = [
+            await http.post(
+                click_path(offer), json=desktop, headers={"X-Client-IP": "198.51.100.7"}
+            )
+            for _ in range(flood)
+        ]
+        genuine = await http.post(
+            click_path(offer), json=desktop, headers={"X-Client-IP": "198.51.100.8"}
+        )
+
+    assert [r.status_code for r in flooded] == [200] * flood
+    assert {r.json()["data"]["destination_url"] for r in flooded} == {AWIN}
+    assert genuine.status_code == 200
+    rows = await click_rows(engine)
+    assert len(rows) == OUTBOUND_CLICK_OFFER_POLICY.limit + 1
 
 
 # --- retention --------------------------------------------------------------------

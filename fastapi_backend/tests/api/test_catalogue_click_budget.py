@@ -15,6 +15,7 @@ from app.api.deps import get_rate_limiter
 from app.api.v1 import catalogue_click
 from app.api.v1.catalogue_click import get_click_service
 from app.core.rate_limit import (
+    OUTBOUND_CLICK_OFFER_POLICY,
     OUTBOUND_CLICK_POLICY,
     OUTBOUND_OFFER_BOT_POLICY,
     OUTBOUND_OFFER_POLICY,
@@ -143,6 +144,7 @@ async def test_every_other_class_and_a_missing_class_spends_only_the_main_bucket
     assert response.status_code == 200
     assert limiter.hits == [
         ("outbound_click:ip:10.0.1.1", OUTBOUND_CLICK_POLICY),
+        ("outbound_click_offer:ip:10.0.1.1:offer:offer_1", OUTBOUND_CLICK_OFFER_POLICY),
         ("outbound_offer:offer:offer_1", OUTBOUND_OFFER_POLICY),
     ]
     assert len(store.clicks) == 1
@@ -160,6 +162,7 @@ async def test_a_bot_request_spends_only_the_bot_bucket_under_its_own_identifier
     assert response.status_code == 200
     assert limiter.hits == [
         ("outbound_click:ip:10.0.1.1", OUTBOUND_CLICK_POLICY),
+        ("outbound_click_offer:ip:10.0.1.1:offer:offer_1", OUTBOUND_CLICK_OFFER_POLICY),
         ("outbound_offer_bot:offer:offer_1", OUTBOUND_OFFER_BOT_POLICY),
     ]
     assert len(store.clicks) == 1
@@ -174,7 +177,7 @@ async def test_each_offer_has_its_own_bot_bucket() -> None:
             "/v1/catalogue/offers/other_offer/click", json={"user_agent_class": "BOT"}
         )
 
-    assert limiter.hits[1][0] == "outbound_offer_bot:offer:other_offer"
+    assert limiter.hits[2][0] == "outbound_offer_bot:offer:other_offer"
 
 
 @pytest.mark.parametrize(
@@ -246,4 +249,8 @@ async def test_every_body_shape_still_works_with_the_class_read_by_the_dependenc
     assert response.status_code == 200
     assert response.json()["data"]["destination_url"] == DESTINATION
     assert len(store.clicks) == 1
-    assert scopes(limiter) == [OUTBOUND_CLICK_POLICY.scope, MAIN]
+    assert scopes(limiter) == [
+        OUTBOUND_CLICK_POLICY.scope,
+        OUTBOUND_CLICK_OFFER_POLICY.scope,
+        MAIN,
+    ]
