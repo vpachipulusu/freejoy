@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   getUserProfileAction: vi.fn(),
@@ -61,7 +61,7 @@ describe('ProfilePage structure', () => {
       success: true,
       data: { user: PROFILE_USER },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
 
@@ -76,7 +76,7 @@ describe('ProfilePage structure', () => {
   it('keeps saved values when Cancel is pressed after a save', async () => {
     mocks.getUserProfileAction.mockResolvedValue({ success: true, data: { user: PROFILE_USER } });
     mocks.updateUserProfileAction.mockResolvedValue({ success: true });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
     const location = await screen.findByLabelText('Location');
@@ -116,7 +116,7 @@ describe('ProfilePage saving', () => {
         finish = resolve;
       })
     );
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
     await user.click(await screen.findByRole('button', { name: /save changes/i }));
@@ -135,7 +135,7 @@ describe('ProfilePage saving', () => {
   it('shows a destructive toast and restores the button when saving fails', async () => {
     mocks.getUserProfileAction.mockResolvedValue({ success: true, data: { user: PROFILE_USER } });
     mocks.updateUserProfileAction.mockResolvedValue({ success: false, error: 'Server said no' });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
     await user.click(await screen.findByRole('button', { name: /save changes/i }));
@@ -150,7 +150,7 @@ describe('ProfilePage saving', () => {
 
   it('links a display name error to its input', async () => {
     mocks.getUserProfileAction.mockResolvedValue({ success: true, data: { user: PROFILE_USER } });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
     const name = await screen.findByLabelText('Display Name');
@@ -183,7 +183,7 @@ describe('ProfilePage form labels', () => {
 describe('ProfilePage website validation', () => {
   it('shows the application message for an invalid website URL instead of native validation', async () => {
     mocks.getUserProfileAction.mockResolvedValue({ success: true, data: { user: PROFILE_USER } });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<ProfilePage />);
 

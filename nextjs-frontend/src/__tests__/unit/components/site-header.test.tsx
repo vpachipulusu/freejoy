@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { SiteHeader } from '@/components/site/site-header';
 import { SITE_TAB_ITEMS, activeTabHref } from '@/components/site/nav-items';
 
@@ -36,7 +36,7 @@ describe('SiteHeader', () => {
   });
 
   it('opens and closes the phone menu sheet', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SiteHeader />);
 
     await user.click(screen.getByRole('button', { name: 'Open menu' }));
@@ -47,7 +47,7 @@ describe('SiteHeader', () => {
   });
 
   it('toggles the phone search form', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SiteHeader />);
 
     await user.click(screen.getByRole('button', { name: 'Search freebies' }));
@@ -101,7 +101,7 @@ describe('SiteHeader sign-in state', () => {
   });
 
   it('shows Dashboard in the phone menu sheet too when signed in', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     answerWith(new Response(JSON.stringify({ signedIn: true }), { status: 200 }));
     render(<SiteHeader />);
     await screen.findByRole('link', { name: 'Dashboard' });

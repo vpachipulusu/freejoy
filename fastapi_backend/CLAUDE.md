@@ -114,5 +114,8 @@ session makers: those live behind `app.core.database` (`SessionProvider`), and r
 - API tests use `httpx.AsyncClient` with `ASGITransport` (`raise_app_exceptions=False` to see the 500
   envelope); `asyncio_mode = auto`, so async tests need no marker.
 - For Sentry, use a recording `Transport` (see `tests/core/test_sentry.py`); never send real events.
+- **Waiting rules (FREEJ-64).** No wall-clock assertions; a fixture never holds a session across a schema rebuild;
+  every subprocess has a timeout (rebuild schemas with `tests/alembic_support.run_alembic`); never run two pytest
+  sessions on the same `TEST_DATABASE_URL` (the second fails at start). See `docs/developer/testing.md`.
 - Fix the implementation, not the test, unless the test is wrong. New code ships with tests; keep coverage at or
   above the floor.

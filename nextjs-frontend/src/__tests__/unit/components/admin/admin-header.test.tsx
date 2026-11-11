@@ -1,7 +1,7 @@
 /** the admin header keeps its menu and meets the 44px target rule. */
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 vi.mock('@/app/actions/auth-actions', () => ({ logoutAction: vi.fn() }));
 
@@ -20,7 +20,7 @@ describe('AdminHeader', () => {
     const trigger = screen.getByRole('button', { name: /account menu/i });
     expect(trigger.className).toContain('h-11');
     expect(trigger.className).toContain('w-11');
-    await userEvent.setup().click(trigger);
+    await setupUser().click(trigger);
     expect(await screen.findByRole('menuitem', { name: /back to dashboard/i })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: /logout/i })).toBeVisible();
   });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 /** the redesigned security page (StatusPill history, 2FA code field, accessible errors, danger zone). */
 const mocks = vi.hoisted(() => ({
@@ -76,7 +76,7 @@ describe('SecurityPage redesign', () => {
   });
 
   it('marks the mismatched confirmation invalid and describes it, without calling the server', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Change Password' }));
     await user.type(await screen.findByLabelText('Current Password'), 'old-password');
@@ -97,7 +97,7 @@ describe('SecurityPage redesign', () => {
   });
 
   it('uses a single 56px one-time-code field for the 2FA disable dialog', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Disable 2FA' }));
 
@@ -117,7 +117,7 @@ describe('SecurityPage redesign', () => {
       success: false,
       error: 'Invalid authenticator code',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Disable 2FA' }));
     const dialog = await screen.findByRole('dialog', { name: 'Disable Two-Factor Authentication' });
@@ -137,7 +137,7 @@ describe('SecurityPage redesign', () => {
   });
 
   it('confirms account deletion in a dialog with a destructive button', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Delete Account' }));
 
@@ -148,7 +148,7 @@ describe('SecurityPage redesign', () => {
   });
 
   it('clears the typed passwords when the dialog is dismissed with Escape', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Change Password' }));
     await user.type(await screen.findByLabelText('Current Password'), 'old-password');
@@ -168,7 +168,7 @@ describe('SecurityPage redesign', () => {
 
   it('does not mark the code field invalid for a wrong-password error', async () => {
     mocks.reauthenticate.mockResolvedValue({ idToken: null, error: 'Incorrect password' });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SecurityPage />);
     await user.click(await screen.findByRole('button', { name: 'Disable 2FA' }));
     const dialog = await screen.findByRole('dialog', { name: 'Disable Two-Factor Authentication' });

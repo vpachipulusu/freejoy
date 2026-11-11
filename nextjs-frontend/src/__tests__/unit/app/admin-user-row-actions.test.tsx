@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   banUserAction: vi.fn(),
@@ -27,7 +27,7 @@ import { UserRowActions } from '@/app/(admin)/admin/users/user-row-actions';
 const ok = { success: true, data: { message: 'done' } };
 
 async function openMenu(
-  user: ReturnType<typeof userEvent.setup>,
+  user: TestUser,
   name: string | RegExp = /open menu/i
 ) {
   await user.click(screen.getByRole('button', { name }));
@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe('UserRowActions menu', () => {
   it('links View Details and Edit User to their pages', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
 
     await openMenu(user, 'Open menu for Ada');
@@ -60,7 +60,7 @@ describe('UserRowActions menu', () => {
   });
 
   it('encodes the user id in both links', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserRowActions userId="a b" userLabel="Ada" />);
 
     await openMenu(user, 'Open menu for Ada');
@@ -76,7 +76,7 @@ describe('UserRowActions menu', () => {
   });
 
   it('gives every menu item a 44px touch target', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
 
     await openMenu(user, 'Open menu for Ada');
@@ -94,7 +94,7 @@ describe('UserRowActions menu', () => {
 });
 
 describe('suspending a user', () => {
-  async function openSuspend(user: ReturnType<typeof userEvent.setup>) {
+  async function openSuspend(user: TestUser) {
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     await openMenu(user, 'Open menu for Ada');
     await user.click(screen.getByRole('menuitem', { name: /suspend user/i }));
@@ -102,7 +102,7 @@ describe('suspending a user', () => {
   }
 
   it('asks for confirmation and does not call the action until confirmed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openSuspend(user);
 
     expect(within(dialog).getByText('Suspend this user?')).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('suspending a user', () => {
   });
 
   it('calls the action with the optional reason, announces success and refreshes', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openSuspend(user);
 
     await user.type(within(dialog).getByLabelText(/reason/i), '  spam  ');
@@ -129,7 +129,7 @@ describe('suspending a user', () => {
   });
 
   it('sends no reason when the box is left empty', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openSuspend(user);
 
     await user.click(within(dialog).getByRole('button', { name: 'Suspend user' }));
@@ -142,7 +142,7 @@ describe('suspending a user', () => {
       success: false,
       error: 'You do not have permission to do that',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openSuspend(user);
 
     await user.click(within(dialog).getByRole('button', { name: 'Suspend user' }));
@@ -157,7 +157,7 @@ describe('suspending a user', () => {
 
   it('shows a generic message when the action call itself throws', async () => {
     mocks.banUserAction.mockRejectedValue(new Error('network'));
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openSuspend(user);
 
     await user.click(within(dialog).getByRole('button', { name: 'Suspend user' }));
@@ -169,7 +169,7 @@ describe('suspending a user', () => {
 });
 
 describe('suspend dialog focus and in-flight behaviour', () => {
-  async function openSuspend(user: ReturnType<typeof userEvent.setup>) {
+  async function openSuspend(user: TestUser) {
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     const trigger = screen.getByRole('button', { name: 'Open menu for Ada' });
     await openMenu(user, 'Open menu for Ada');
@@ -178,7 +178,7 @@ describe('suspend dialog focus and in-flight behaviour', () => {
   }
 
   it('returns focus to the row trigger and releases the page after Cancel', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { trigger, dialog } = await openSuspend(user);
 
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -189,7 +189,7 @@ describe('suspend dialog focus and in-flight behaviour', () => {
   });
 
   it('returns focus to the row trigger and releases the page after a successful suspend', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { trigger, dialog } = await openSuspend(user);
 
     await user.click(within(dialog).getByRole('button', { name: 'Suspend user' }));
@@ -201,7 +201,7 @@ describe('suspend dialog focus and in-flight behaviour', () => {
 
   it('runs once while in flight: one call, a busy button, Cancel disabled, Escape ignored', async () => {
     mocks.banUserAction.mockReturnValue(new Promise(() => {}));
-    const user = userEvent.setup();
+    const user = setupUser();
     const { dialog } = await openSuspend(user);
 
     const confirm = within(dialog).getByRole('button', { name: 'Suspend user' });
@@ -221,7 +221,7 @@ describe('suspend dialog focus and in-flight behaviour', () => {
 
 describe('restoring a user', () => {
   it('confirms, calls the unban action and announces success', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     await openMenu(user, 'Open menu for Ada');
     await user.click(screen.getByRole('menuitem', { name: /restore access/i }));
@@ -241,7 +241,7 @@ describe('restoring a user', () => {
 
   it('shows the refusal in the dialog when restoring fails', async () => {
     mocks.unbanUserAction.mockResolvedValue({ success: false, error: 'User not found' });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     await openMenu(user, 'Open menu for Ada');
     await user.click(screen.getByRole('menuitem', { name: /restore access/i }));

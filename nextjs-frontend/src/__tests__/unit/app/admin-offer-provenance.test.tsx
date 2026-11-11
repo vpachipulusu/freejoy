@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   dismissSourceChangeAction: vi.fn(),
@@ -107,7 +107,7 @@ const trigger = () => screen.queryByRole('button', { name: 'Dismiss source chang
 const confirmButton = (dialog: HTMLElement) =>
   within(dialog).getByRole('button', { name: 'Dismiss change' });
 
-async function confirmDismissal(user: ReturnType<typeof userEvent.setup>) {
+async function confirmDismissal(user: TestUser) {
   await user.click(trigger()!);
   await user.click(confirmButton(await screen.findByRole('dialog')));
 }
@@ -180,7 +180,7 @@ describe('OfferProvenancePanel', () => {
 
 describe('Dismiss source change', () => {
   it('asks for confirmation first and calls nothing when cancelled', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await user.click(trigger()!);
@@ -195,7 +195,7 @@ describe('Dismiss source change', () => {
   });
 
   it('names the trigger and the confirmation differently', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await user.click(trigger()!);
@@ -208,7 +208,7 @@ describe('Dismiss source change', () => {
   });
 
   it.each(['{Enter}', ' '])('opens with the %j key from the keyboard', async (key) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     trigger()!.focus();
@@ -220,7 +220,7 @@ describe('Dismiss source change', () => {
   });
 
   it('closes on Escape and returns focus to the trigger, calling nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await user.click(trigger()!);
@@ -233,7 +233,7 @@ describe('Dismiss source change', () => {
   });
 
   it('returns focus to the trigger after Cancel', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await user.click(trigger()!);
@@ -246,7 +246,7 @@ describe('Dismiss source change', () => {
   });
 
   it('dismisses with the review token and the marker the page loaded, announces it and refreshes', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -267,7 +267,7 @@ describe('Dismiss source change', () => {
   it('runs once, keeps focus on the trigger and says what it is doing while it is pending', async () => {
     const pending = deferred<{ success: true; data: { id: string } }>();
     mocks.dismissSourceChangeAction.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -298,7 +298,7 @@ describe('Dismiss source change', () => {
         previousReviewToken: 'tok-other',
       },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -312,7 +312,7 @@ describe('Dismiss source change', () => {
       error: `${CHANGED_NOTICE} Review it again.`,
       reason: 'offer_changed',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -335,7 +335,7 @@ describe('Dismiss source change', () => {
       success: false,
       error: 'You do not have permission to do that',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -352,7 +352,7 @@ describe('Dismiss source change', () => {
 
   it('turns a server action that throws into a curated failure', async () => {
     mocks.dismissSourceChangeAction.mockRejectedValue(new Error('SECRET network drop'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -371,7 +371,7 @@ describe('Dismiss source change', () => {
 
 describe('Dismiss source change waits like the other status buttons', () => {
   it('waits while the form beside it holds unsaved edits, opening nothing and calling nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED, {}, { dirty: true });
 
     expect(trigger()).toHaveAttribute('aria-disabled', 'true');
@@ -382,7 +382,7 @@ describe('Dismiss source change waits like the other status buttons', () => {
   });
 
   it('waits while a save is reloading into the page, opening nothing and calling nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPanel(MOVED, {}, { reloading: true });
 
     expect(trigger()).toHaveAttribute('aria-disabled', 'true');
@@ -394,7 +394,7 @@ describe('Dismiss source change waits like the other status buttons', () => {
   });
 
   it('waits while another write on the page is running, opening nothing and calling nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     function OtherWriter() {
       const review = useOfferReview();
       return (
@@ -439,7 +439,7 @@ describe('Dismiss source change waits like the other status buttons', () => {
 
 describe('focus after the button goes away', () => {
   it('moves to the replacement text once the dismissal lands and the marker is gone', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const view = renderPanel(MOVED);
 
     await confirmDismissal(user);
@@ -453,7 +453,7 @@ describe('focus after the button goes away', () => {
   });
 
   it('does not pull focus anywhere when the admin was elsewhere on the page', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const page = (provenance: OfferProvenanceView) => (
       <div>
         <button type="button">Elsewhere</button>

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 /**
  * the password change re-authenticates with the CURRENT password, forwards that fresh ID token and the
@@ -41,7 +41,7 @@ import SecurityPage from '@/app/dashboard/security/page';
 import { isSessionRefreshPaused } from '@/lib/firebase/session-refresh-pause';
 
 async function submitPasswordChange() {
-  const user = userEvent.setup();
+  const user = setupUser();
   render(<SecurityPage />);
   await user.click(await screen.findByRole('button', { name: 'Change Password' }));
   await user.type(await screen.findByLabelText('Current Password'), 'old-password');

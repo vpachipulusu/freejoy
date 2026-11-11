@@ -8,8 +8,6 @@ the 404 and 410 paths, category counts, and that editorial-only data never leave
 """
 
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +26,7 @@ from app.core.ids import new_id
 from app.main import create_app
 from app.repositories.catalogue import CatalogueRepository
 from app.services.catalogue import CatalogueService
+from tests.alembic_support import run_alembic
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -44,13 +43,7 @@ JSON_COLUMNS = {"description", "steps"}
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

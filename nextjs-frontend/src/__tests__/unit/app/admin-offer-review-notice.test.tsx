@@ -5,7 +5,8 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({
   offerLifecycleAction: vi.fn(),
@@ -72,7 +73,7 @@ afterEach(() => {
 describe('the notice that the offer changed', () => {
   it('stays after the 5 second toast is gone and clears after a later success', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = setupUser({ advanceTimers: vi.advanceTimersByTime });
     mocks.offerLifecycleAction.mockResolvedValueOnce({
       success: false,
       error: CHANGED_ERROR,
@@ -102,7 +103,7 @@ describe('the notice that the offer changed', () => {
   });
 
   it('shows no notice after an ordinary success whose refresh lands with the token it returned', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
     const { rerender } = render(page(HEX('a')));
 
@@ -114,7 +115,7 @@ describe('the notice that the offer changed', () => {
   });
 
   it('shows the notice when the refresh brings a token other than the one the editor action returned', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
     const { rerender } = render(page(HEX('a')));
 
@@ -126,7 +127,7 @@ describe('the notice that the offer changed', () => {
   });
 
   it('does not mistake the editor own refresh landing before the action result for a change', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const pending = deferred<ReturnType<typeof written>>();
     mocks.offerLifecycleAction.mockReturnValueOnce(pending.promise);
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('d')));
@@ -149,7 +150,7 @@ describe('the notice that the offer changed', () => {
   });
 
   it('shows the notice when a different version lands while the editor action is still in flight', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const pending = deferred<ReturnType<typeof written>>();
     mocks.offerLifecycleAction.mockReturnValueOnce(pending.promise);
     const { rerender } = render(page(HEX('a')));
@@ -164,7 +165,7 @@ describe('the notice that the offer changed', () => {
   it.each(['Unpublish', 'Expire', 'Archive'])(
     'alerts when the state %s replaced was not the one the editor loaded (a foreign change came first)',
     async (label) => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'EXPIRED', HEX('x')));
       render(page(HEX('a'), 'PUBLISHED'));
 
@@ -180,7 +181,7 @@ describe('the notice that the offer changed', () => {
   );
 
   it('does not alert when the state a step replaced is the one the editor loaded', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'EXPIRED', HEX('a')));
     render(page(HEX('a'), 'PUBLISHED'));
 
@@ -191,7 +192,7 @@ describe('the notice that the offer changed', () => {
   });
 
   it('alerts when a refused step is followed by a reload that brings a different token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce({
       success: false,
       error: 'That change is not allowed for an offer in its current status.',
@@ -217,7 +218,7 @@ describe('the notice that the offer changed', () => {
 
 describe('verify, then publish', () => {
   it('sends the token of the version the first success returned', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'DRAFT', HEX('a')));
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('c'), 'PUBLISHED', HEX('b')));
     const { rerender } = render(page(HEX('a')));
@@ -228,7 +229,7 @@ describe('verify, then publish', () => {
     );
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
     rerender(page(HEX('b')));
-    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await user.click(await findIdleControl('button', 'Publish'));
 
     await waitFor(() =>
       expect(mocks.offerLifecycleAction).toHaveBeenLastCalledWith('o1', 'publish', HEX('b'))
@@ -238,7 +239,7 @@ describe('verify, then publish', () => {
 
 describe('focus after the pressed button goes away', () => {
   it('moves into the group when Publish disappears because the offer is now published', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'PUBLISHED', HEX('a')));
     const { rerender } = render(page(HEX('a'), 'DRAFT'));
 
@@ -253,7 +254,7 @@ describe('focus after the pressed button goes away', () => {
   });
 
   it('moves to the status line when the offer has no step left (archived)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValueOnce(written(HEX('b'), 'ARCHIVED', HEX('a')));
     const { rerender } = render(page(HEX('a'), 'DRAFT'));
 

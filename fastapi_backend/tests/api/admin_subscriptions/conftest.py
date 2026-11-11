@@ -6,9 +6,6 @@ with the real Alembic migrations. Only Firebase (identity from an ``X-Test-Uid``
 and Stripe (``FakeStripeAdmin``, never the network) are replaced.
 """
 
-import os
-import subprocess
-import sys
 import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Annotated
@@ -26,8 +23,8 @@ from app.api.v1.admin_subscriptions import stripe_admin
 from app.core.database import DefaultSessionProvider, build_engine
 from app.core.firebase import VerifiedIdentity
 from app.main import create_app
+from tests.alembic_support import run_alembic
 from tests.api.admin_subscriptions.support import (
-    BACKEND_ROOT,
     KEY,
     LOCAL_HOSTS,
     TEST_DATABASE_URL,
@@ -36,13 +33,7 @@ from tests.fakes_admin_subscriptions import FakeStripeAdmin
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

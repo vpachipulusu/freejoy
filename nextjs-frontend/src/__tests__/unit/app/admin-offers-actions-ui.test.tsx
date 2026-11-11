@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   offerLifecycleAction: vi.fn(),
@@ -45,7 +45,7 @@ beforeEach(() => {
   mocks.setMerchantActiveAction.mockResolvedValue(ok);
 });
 
-async function openMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
+async function openMenu(user: TestUser, title: string) {
   await user.click(screen.getByRole('button', { name: `Open menu for ${title}` }));
   return screen.findByRole('menu');
 }
@@ -57,7 +57,7 @@ describe('OfferRowActions', () => {
     ['EXPIRED', ['Edit', 'Review', 'Archive']],
     ['ARCHIVED', ['Edit']],
   ])('offers the right steps for a %s offer', async (status, expected) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status={status as 'DRAFT'} />);
 
     const menu = await openMenu(user, 'Free coffee');
@@ -83,7 +83,7 @@ describe('OfferRowActions', () => {
   });
 
   it('runs a step through the server action, announces it and refreshes', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
 
     await openMenu(user, 'Free coffee');
@@ -107,7 +107,7 @@ describe('OfferRowActions', () => {
       error:
         'That change is not allowed for an offer in its current status. Refresh the page and try again.',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
 
     await openMenu(user, 'Free coffee');
@@ -124,7 +124,7 @@ describe('OfferRowActions', () => {
   });
 
   it('asks before archiving, and archives only after confirmation', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
 
     await openMenu(user, 'Free coffee');
@@ -153,7 +153,7 @@ describe('a publish or verify refused because the offer changed', () => {
 
   it('the edit page buttons send the token they were given, and the new one after a refresh', async () => {
     mocks.offerLifecycleAction.mockResolvedValue({ success: false, error: CHANGED });
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(
       <OfferLifecycleButtons
         commercialBasis="EDITORIAL"
@@ -192,7 +192,7 @@ describe('a publish or verify refused because the offer changed', () => {
 describe('a server action call that throws', () => {
   it('toasts a curated failure instead of crashing', async () => {
     mocks.offerLifecycleAction.mockRejectedValue(new Error('SECRET'));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <OfferLifecycleButtons
         commercialBasis="EDITORIAL"
@@ -235,7 +235,7 @@ describe('OfferLifecycleButtons', () => {
   });
 
   it('publishes through the server action', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <OfferLifecycleButtons
         commercialBasis="EDITORIAL"
@@ -270,7 +270,7 @@ describe('OfferLifecycleButtons', () => {
 
 describe('StateToggleButton', () => {
   it('disables an enabled category and names it for screen readers', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<StateToggleButton kind="category" id="c1" name="Beauty" on />);
 
     await user.click(screen.getByRole('button', { name: 'Disable Beauty' }));
@@ -281,7 +281,7 @@ describe('StateToggleButton', () => {
   });
 
   it('activates an inactive merchant', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<StateToggleButton kind="merchant" id="m1" name="Acme" on={false} />);
 
     await user.click(screen.getByRole('button', { name: 'Activate Acme' }));
@@ -295,7 +295,7 @@ describe('StateToggleButton', () => {
       success: false,
       error: 'You do not have permission to do that',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<StateToggleButton kind="category" id="c1" name="Beauty" on />);
 
     await user.click(screen.getByRole('button', { name: 'Disable Beauty' }));
@@ -321,7 +321,7 @@ describe('while an action is in flight', () => {
   it('the row menu runs the action once, keeps focus on its trigger and announces the wait', async () => {
     const pending = deferred<typeof ok>();
     mocks.offerLifecycleAction.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
 
     const trigger = screen.getByRole('button', { name: 'Open menu for Free coffee' });
@@ -344,7 +344,7 @@ describe('while an action is in flight', () => {
   });
 
   it('returns focus to the row trigger after the archive confirmation', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferRowActions offerId="o1" offerTitle="Free coffee" status="PUBLISHED" />);
     const trigger = screen.getByRole('button', { name: 'Open menu for Free coffee' });
 
@@ -363,7 +363,7 @@ describe('while an action is in flight', () => {
   it('the lifecycle buttons run once, stay focused and say what they are doing', async () => {
     const pending = deferred<typeof ok>();
     mocks.offerLifecycleAction.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <OfferLifecycleButtons
         commercialBasis="EDITORIAL"
@@ -391,7 +391,7 @@ describe('while an action is in flight', () => {
   });
 
   it('the lifecycle buttons return focus to Archive after the confirmation', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <OfferLifecycleButtons
         commercialBasis="EDITORIAL"
@@ -418,7 +418,7 @@ describe('while an action is in flight', () => {
   it('the category toggle runs once and keeps focus', async () => {
     const pending = deferred<typeof ok>();
     mocks.setCategoryEnabledAction.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<StateToggleButton kind="category" id="c1" name="Beauty" on />);
 
     const button = screen.getByRole('button', { name: 'Disable Beauty' });
@@ -457,7 +457,7 @@ describe('beside a form with unsaved changes', () => {
   }
 
   it('waits, says why, and runs nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<Editor dirty />);
 
     const publish = screen.getByRole('button', { name: 'Publish' });
@@ -468,7 +468,7 @@ describe('beside a form with unsaved changes', () => {
   });
 
   it('works as usual when the form is clean', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<Editor dirty={false} />);
 
     const publish = screen.getByRole('button', { name: 'Publish' });

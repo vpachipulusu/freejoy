@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { KpiStrip, type KpiCell } from '@/components/dashboard/kpi-strip';
 
 /** fixtures only, no data API exists yet. */
@@ -164,6 +164,7 @@ describe('KpiStrip empty', () => {
 
 describe('KpiStrip error', () => {
   it('shows a retry for the failed cell only and leaves the others intact', async () => {
+    const user = setupUser();
     const onRetry = vi.fn();
     const cells: KpiCell[] = [
       READY[0],
@@ -180,7 +181,7 @@ describe('KpiStrip error', () => {
     expect(within(cell('Revenue')).getByText('£4,280')).toBeInTheDocument();
     expect(within(cell('Conversion')).getByText('2.4%')).toBeInTheDocument();
 
-    await userEvent.click(retry);
+    await user.click(retry);
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 

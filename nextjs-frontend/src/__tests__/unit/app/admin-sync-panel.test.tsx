@@ -4,7 +4,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({ sync: vi.fn() }));
 vi.mock('@/app/actions/admin/analytics-actions', () => ({
@@ -52,7 +53,7 @@ describe('SyncPanel', () => {
     mocks.sync.mockResolvedValue({ success: true, data: REPORT });
     render(<SyncPanel />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /check against stripe/i }));
+    await setupUser().click(screen.getByRole('button', { name: /check against stripe/i }));
 
     expect(await screen.findByText(/Read 5 Stripe subscriptions: 3 in sync/)).toBeInTheDocument();
     expect(screen.getByText(/1 old ones ignored/)).toBeInTheDocument();
@@ -69,7 +70,7 @@ describe('SyncPanel', () => {
     });
     render(<SyncPanel />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /check against stripe/i }));
+    await setupUser().click(screen.getByRole('button', { name: /check against stripe/i }));
 
     expect(await screen.findByText(/result is partial/)).toBeInTheDocument();
   });
@@ -81,7 +82,7 @@ describe('SyncPanel', () => {
     });
     render(<SyncPanel />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /check against stripe/i }));
+    await setupUser().click(screen.getByRole('button', { name: /check against stripe/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong');
     expect(screen.queryByText(/Stripe subscriptions:/)).not.toBeInTheDocument();
@@ -91,7 +92,7 @@ describe('SyncPanel', () => {
     mocks.sync.mockRejectedValue(new Error('network'));
     render(<SyncPanel />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /check against stripe/i }));
+    await setupUser().click(screen.getByRole('button', { name: /check against stripe/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be completed');
   });
@@ -101,12 +102,14 @@ describe('SyncPanel', () => {
     mocks.sync.mockResolvedValueOnce({ success: true, data: REPORT });
     mocks.sync.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
     render(<SyncPanel />);
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.click(screen.getByRole('button', { name: /check against stripe/i }));
     await screen.findByText(/Read 5 Stripe subscriptions/);
+    // The report is shown while the first transition is still closing, when the button still reads
+    // "Checking...": wait for it to be the idle button again before the second click (FREEJ-64).
+    await user.click(await findIdleControl('button', /check against stripe/i));
 
-    await user.click(screen.getByRole('button', { name: /check against stripe/i }));
-
+    // The pending label is set synchronously by the click, so it is read without waiting.
     expect(screen.getByRole('button', { name: /checking/i })).toBeDisabled();
     finish({ success: false, error: 'Something went wrong.' });
     expect(await screen.findByRole('alert')).toBeInTheDocument();
@@ -117,7 +120,7 @@ describe('SyncPanel', () => {
     mocks.sync.mockResolvedValue({ success: true, data: { ...REPORT, skipped_rows: 2 } });
     render(<SyncPanel />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /check against stripe/i }));
+    await setupUser().click(screen.getByRole('button', { name: /check against stripe/i }));
 
     expect(await screen.findByText(/2 Stripe row\(s\) could not be read/)).toBeInTheDocument();
   });

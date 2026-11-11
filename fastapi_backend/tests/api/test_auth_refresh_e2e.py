@@ -7,8 +7,6 @@ service, repositories, transaction handling and routes are the production code.
 """
 
 import os
-import subprocess
-import sys
 import time
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -26,6 +24,7 @@ from app.core.config import settings
 from app.core.database import DefaultSessionProvider, build_engine
 from app.core.firebase import AuthenticationFailed
 from app.main import create_app
+from tests.alembic_support import run_alembic
 from tests.fakes import FakeRateLimiter, as_limiter
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -72,13 +71,7 @@ def claims(uid: str, verified: bool, age: int = 0) -> dict[str, Any]:
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

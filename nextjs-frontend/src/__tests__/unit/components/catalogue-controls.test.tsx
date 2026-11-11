@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { CataloguePagination, pageWindow } from '@/components/catalogue/catalogue-pagination';
 import { FilterDrawer } from '@/components/catalogue/filter-drawer';
 import { SortSelect } from '@/components/catalogue/sort-select';
@@ -8,7 +8,7 @@ import { DEFAULT_QUERY, SORT_LABELS, parseCatalogueParams } from '@/lib/catalogu
 
 describe('filter drawer', () => {
   it('opens from the Filter button and closes with Escape', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <FilterDrawer>
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- stand-in for a filter link */}
@@ -29,7 +29,7 @@ describe('filter drawer', () => {
   });
 
   it('closes when a filter link inside it is chosen', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <FilterDrawer>
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- stand-in for a filter link */}

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import {
   Table,
   TableBody,
@@ -229,6 +229,7 @@ describe('SortableTableHead', () => {
   });
 
   it('is a 44px button that calls onSort', async () => {
+    const user = setupUser();
     const onSort = vi.fn();
     render(
       <table>
@@ -243,7 +244,7 @@ describe('SortableTableHead', () => {
     );
     const btn = screen.getByRole('button', { name: /Joined/ });
     expect(btn.className).toContain('min-h-11');
-    await userEvent.click(btn);
+    await user.click(btn);
     expect(onSort).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 // Simple Button component for testing
 function Button({
@@ -41,7 +41,7 @@ describe('Button Component', () => {
 
   describe('Interactions', () => {
     it('should call onClick when clicked', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       const handleClick = vi.fn();
 
       render(<Button onClick={handleClick}>Click me</Button>);
@@ -52,7 +52,7 @@ describe('Button Component', () => {
     });
 
     it('should not call onClick when disabled', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       const handleClick = vi.fn();
 
       render(

@@ -6,8 +6,6 @@ way 0005 stored them (no basis column), then 0006 runs and the stored values are
 """
 
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
@@ -22,6 +20,7 @@ import app.models.platform  # noqa: F401  (registers the tables)
 from app.core.base import Base
 from app.core.database import build_engine
 from app.core.ids import new_id
+from tests.alembic_support import run_alembic
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -33,13 +32,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture

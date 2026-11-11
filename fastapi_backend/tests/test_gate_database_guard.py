@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._subprocess_support import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SENTINEL = "Zq9sentinelpw"
 
@@ -32,7 +34,11 @@ def find_bash() -> str | None:
         if not candidate or not Path(candidate).exists():
             continue
         probe = subprocess.run(
-            [candidate, "-c", "echo ready"], capture_output=True, text=True, check=False
+            [candidate, "-c", "echo ready"],
+            capture_output=True,
+            text=True,
+            timeout=CHILD_TIMEOUT_SECONDS,
+            check=False,
         )
         if probe.returncode == 0 and probe.stdout.strip() == "ready":
             return candidate
@@ -94,6 +100,7 @@ def run_guard(url: str) -> subprocess.CompletedProcess[str]:
         env={**os.environ, "GATE_GUARD_ONLY": "1", "GATE_TEST_DATABASE_URL": url},
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
         check=False,
     )
 

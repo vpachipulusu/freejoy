@@ -95,4 +95,21 @@ export default defineConfig([
       ],
     },
   },
+  {
+    // Tests use setupUser() (src/__tests__/unit/helpers/user.ts), never userEvent.* directly: the default
+    // setTimeout(0) between actions costs about 25 ms each on Windows and made sign-in tests fail under load
+    // (FREEJ-64). The helper itself is the one place that calls userEvent.setup.
+    files: ['src/__tests__/**/*.{ts,tsx}'],
+    ignores: ['src/__tests__/unit/helpers/user.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.object.name='userEvent']",
+          message:
+            'Use setupUser() from @/__tests__/unit/helpers/user instead of userEvent.* (no pause between actions).',
+        },
+      ],
+    },
+  },
 ]);

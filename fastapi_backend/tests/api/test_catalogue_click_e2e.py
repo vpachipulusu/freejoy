@@ -8,8 +8,6 @@ that the table has no column that could identify a visitor, and that the answer 
 """
 
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +30,7 @@ from app.core.rate_limit import (
 from app.main import create_app
 from app.repositories.admin_merchants import AdminMerchantRepository
 from commands.prune_click_events import prune_click_events
+from tests.alembic_support import run_alembic
 from tests.api.test_catalogue_e2e import add_category, add_merchant, add_offer, insert
 from tests.fakes import FakeRateLimiter, ScriptedRateLimiter, as_limiter
 
@@ -59,13 +58,7 @@ CLICK_COLUMNS = {
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

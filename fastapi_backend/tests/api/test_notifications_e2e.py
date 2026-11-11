@@ -6,8 +6,6 @@ Only Firebase is replaced (the session identity comes from an ``X-Test-Uid`` hea
 """
 
 import os
-import subprocess
-import sys
 import time
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -27,6 +25,7 @@ from app.core.database import DefaultSessionProvider, build_engine
 from app.core.firebase import VerifiedIdentity
 from app.core.ids import new_id
 from app.main import create_app
+from tests.alembic_support import run_alembic
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -41,13 +40,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

@@ -7,6 +7,9 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
+# A child that has not finished by now is stuck: fail the test instead of letting pytest wait for ever (FREEJ-64).
+CHILD_TIMEOUT_SECONDS = 120
+
 # A .env full of values that would change the app (brand, version, docs URL, error reporting).
 LEAKY_ENV_FILE = chr(10).join(
     [
@@ -60,6 +63,7 @@ def run_module(
         env=environment,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
         check=False,
     )
 

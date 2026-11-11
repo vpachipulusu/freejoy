@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { PlanUsageMeter, type UsageMeterItem } from '@/components/dashboard/plan-usage-meter';
 
 /** fixtures only. Meter semantics never rely on colour alone. */
@@ -90,6 +90,7 @@ describe('PlanUsageMeter', () => {
   });
 
   it('renders a 44px compare button when given a handler', async () => {
+    const user = setupUser();
     const onCompare = vi.fn();
     render(
       <PlanUsageMeter
@@ -100,7 +101,7 @@ describe('PlanUsageMeter', () => {
 
     const button = screen.getByRole('button', { name: 'Compare plans' });
     expect(button).toHaveClass('min-h-11');
-    await userEvent.click(button);
+    await user.click(button);
     expect(onCompare).toHaveBeenCalledTimes(1);
   });
 
@@ -131,13 +132,14 @@ describe('PlanUsageMeter states', () => {
   });
 
   it('shows an inline error with retry', async () => {
+    const user = setupUser();
     const onRetry = vi.fn();
     render(<PlanUsageMeter state="error" items={[]} onRetry={onRetry} />);
 
     expect(
       within(screen.getByRole('alert')).getByText('Could not load plan usage')
     ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry plan usage' }));
+    await user.click(screen.getByRole('button', { name: 'Retry plan usage' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 

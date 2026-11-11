@@ -1,7 +1,7 @@
 /** sign-up form states. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -16,7 +16,7 @@ vi.mock('@/app/actions/auth-actions', () => ({ verifyTokenAction: mocks.verifyTo
 
 import { SignupForm } from '@/components/auth/signup-form';
 
-async function fill(user: ReturnType<typeof userEvent.setup>, name = 'Test User') {
+async function fill(user: TestUser, name = 'Test User') {
   if (name) await user.type(screen.getByLabelText(/full name/i), name);
   await user.type(screen.getByLabelText(/email/i), 'a@b.com');
   await user.type(screen.getByLabelText(/^password$/i), 'ValidPass1');
@@ -29,7 +29,7 @@ describe('SignupForm', () => {
   afterEach(cleanup);
 
   it('focuses the first invalid field on submit', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SignupForm />);
 
     await fill(user, '');
@@ -40,7 +40,7 @@ describe('SignupForm', () => {
   });
 
   it('does not reveal that the email is already registered', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signUpWithEmail.mockResolvedValue({
       user: null,
       idToken: null,
@@ -57,7 +57,7 @@ describe('SignupForm', () => {
   });
 
   it('shows the network message', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signUpWithEmail.mockRejectedValue(new TypeError('Failed to fetch'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<SignupForm />);
@@ -68,7 +68,7 @@ describe('SignupForm', () => {
   });
 
   it('shows a loading label and submits once', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signUpWithEmail.mockReturnValue(new Promise(() => {}));
     render(<SignupForm />);
 
@@ -81,7 +81,7 @@ describe('SignupForm', () => {
   });
 
   it('names an outage when the action sets the typed flag', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signUpWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -96,7 +96,7 @@ describe('SignupForm', () => {
   });
 
   it('goes to verify-email on success', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signUpWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({ success: true });
     render(<SignupForm />);

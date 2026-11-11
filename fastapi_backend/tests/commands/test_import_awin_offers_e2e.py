@@ -35,6 +35,7 @@ from app.services.awin_import_run import RunOptions, RunReport, Unit, run_import
 from app.services.offer_lifecycle import OfferAction
 from commands.import_awin_offers import database_units
 from tests._subprocess_support import BACKEND_ROOT, inherited_environment
+from tests.alembic_support import run_alembic
 from tests.awin_samples import CODE, PUBLISHER_ID, raw_item, raw_page, tracking_for
 from tests.fakes_awin import FakeAwinClient
 
@@ -51,13 +52,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

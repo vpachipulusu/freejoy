@@ -26,6 +26,7 @@ from app.repositories.offer_health import OfferHealthRepository
 from app.services.audit import AuditService
 from app.services.offer_expiry import ExpiryFailed, expire_ended_offers
 from app.services.offer_reachability import TargetKind, collect_targets
+from tests.alembic_support import run_alembic
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -39,13 +40,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

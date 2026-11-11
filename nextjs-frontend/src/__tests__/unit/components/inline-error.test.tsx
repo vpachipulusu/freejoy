@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -41,7 +41,7 @@ describe('InlineError', () => {
 
 describe('RetryButton', () => {
   it('is a real button, reachable by keyboard, that re-runs the server render', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<RetryButton />);
 
     await user.tab();
@@ -54,7 +54,7 @@ describe('RetryButton', () => {
   });
 
   it('also works with the space key and a click', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<RetryButton />);
 
     await user.tab();
@@ -66,7 +66,7 @@ describe('RetryButton', () => {
 
   it('keeps focus and ignores a second click while the refresh is running', async () => {
     mocks.refresh.mockImplementation(() => new Promise<void>(() => {}));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<RetryButton />);
 
     await user.tab();
@@ -93,7 +93,7 @@ describe('RetryButton', () => {
     beforeEach(() => new Promise((resolve) => setTimeout(resolve, 20)));
 
     it('moves focus to the main landmark when the retry succeeds and the button disappears', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       const { rerender } = render(<Page failed />);
       await user.tab();
       await user.keyboard('{Enter}');
@@ -104,7 +104,7 @@ describe('RetryButton', () => {
     });
 
     it('leaves focus alone while the button is still on the page', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       render(<Page failed />);
       await user.tab();
       await user.keyboard('{Enter}');
@@ -125,7 +125,7 @@ describe('RetryButton', () => {
     });
 
     it('does not move focus that already went somewhere else', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       const { rerender } = render(
         <>
           <Page failed />

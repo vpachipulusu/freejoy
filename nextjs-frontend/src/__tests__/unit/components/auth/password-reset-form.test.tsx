@@ -1,7 +1,7 @@
 /** reset form states; the outcome never reveals whether an account exists. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -10,7 +10,7 @@ vi.mock('@/lib/firebase/auth-helpers', () => ({ resetPassword: mocks.resetPasswo
 
 import { PasswordResetForm } from '@/components/auth/password-reset-form';
 
-const submit = (user: ReturnType<typeof userEvent.setup>) =>
+const submit = (user: TestUser) =>
   user.click(screen.getByRole('button', { name: /send reset link|sending/i }));
 
 const failWith = (code: string) =>
@@ -21,7 +21,7 @@ describe('PasswordResetForm', () => {
   afterEach(cleanup);
 
   it('validates without the browser and focuses the email field', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<PasswordResetForm />);
 
     await user.type(screen.getByLabelText(/email/i), 'nope');
@@ -33,7 +33,7 @@ describe('PasswordResetForm', () => {
   });
 
   it('shows the same neutral confirmation whether or not the account exists', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     failWith('auth/user-not-found');
     render(<PasswordResetForm />);
 
@@ -46,7 +46,7 @@ describe('PasswordResetForm', () => {
   });
 
   it('shows the neutral confirmation for a disabled account too', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     failWith('auth/user-disabled');
     render(<PasswordResetForm />);
 
@@ -59,7 +59,7 @@ describe('PasswordResetForm', () => {
   });
 
   it('shows the network message in an alert and focuses it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     failWith('auth/network-request-failed');
     render(<PasswordResetForm />);
 
@@ -72,7 +72,7 @@ describe('PasswordResetForm', () => {
   });
 
   it('shows the rate limit message', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     failWith('auth/too-many-requests');
     render(<PasswordResetForm />);
 
@@ -83,7 +83,7 @@ describe('PasswordResetForm', () => {
   });
 
   it('shows a loading label and sends once', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.resetPassword.mockReturnValue(new Promise(() => {}));
     render(<PasswordResetForm />);
 

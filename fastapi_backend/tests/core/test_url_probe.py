@@ -298,7 +298,9 @@ async def test_timeouts_are_unreachable_with_reason_timeout(error: Exception) ->
 
 async def test_the_whole_check_has_a_deadline() -> None:
     async def slow(_request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(5)
+        # Cancelled by the 0.05 s deadline long before it ends: the margin (1,200x) is what keeps a starved
+        # machine from reaching the 200, which would turn the deadline test into a race (FREEJ-64).
+        await asyncio.sleep(60)
         return httpx.Response(200)
 
     probe, _, _ = make_probe(slow, total_timeout=0.05)

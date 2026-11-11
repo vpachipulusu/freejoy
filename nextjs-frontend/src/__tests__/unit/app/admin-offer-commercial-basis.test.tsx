@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const SLOW = { timeout: 30_000 };
 
@@ -96,7 +96,7 @@ describe('the commercial basis field', SLOW, () => {
   });
 
   it('refuses a submit with nothing chosen, names the problem on the group and focuses it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     createForm(filled);
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -112,7 +112,7 @@ describe('the commercial basis field', SLOW, () => {
   });
 
   it('sends the chosen basis with the other values', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     createForm(filled);
 
     await user.click(screen.getByRole('radio', { name: /Affiliate/ }));
@@ -135,7 +135,7 @@ describe('the commercial basis field', SLOW, () => {
 
 describe('the card preview and the basis', SLOW, () => {
   it('shows the Sponsored label once Sponsored is chosen, and only then', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     createForm(filled);
     const preview = within(screen.getByRole('complementary'));
     expect(preview.queryByRole('note')).toBeNull();
@@ -181,7 +181,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
   });
 
   it('does not publish while the confirmation is missing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle());
 
     await user.click(screen.getByRole('button', { name: 'Publish' }));
@@ -190,7 +190,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
   });
 
   it('publishes with the saved basis once it is confirmed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle());
 
     await user.click(screen.getByRole('checkbox', { name: /commercial basis is Sponsored/ }));
@@ -203,7 +203,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
   });
 
   it('asks again when the offer has moved on to a new review token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(lifecycle());
     await user.click(screen.getByRole('checkbox', { name: /commercial basis is Sponsored/ }));
 
@@ -219,7 +219,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
   });
 
   it('lets the editor take the confirmation back', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle());
     const box = screen.getByRole('checkbox', { name: /commercial basis is Sponsored/ });
 
@@ -234,7 +234,7 @@ describe('confirming the basis before publishing a direct-only offer', () => {
   });
 
   it('asks for nothing when the offer has a network link or a source URL, and publishes without a basis', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle({ confirmBasisToPublish: false }));
 
     expect(screen.queryByRole('checkbox')).toBeNull();
@@ -269,7 +269,7 @@ describe('accessible names and descriptions of the basis controls', SLOW, () => 
   });
 
   it('adds the group error to the description of every radio while there is one', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     createForm(filled);
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -313,7 +313,7 @@ describe('the publish control while it waits for the confirmation', () => {
   });
 
   it('moves focus to the confirmation when the held Publish is pressed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle());
 
     await user.click(screen.getByRole('button', { name: 'Publish' }));
@@ -323,7 +323,7 @@ describe('the publish control while it waits for the confirmation', () => {
   });
 
   it('does not describe Publish by the status once it is ticked and free to go', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle());
 
     await user.click(screen.getByRole('checkbox'));
@@ -332,7 +332,7 @@ describe('the publish control while it waits for the confirmation', () => {
   });
 
   it('holds Publish, and says what to do, when the saved basis is one this page does not know', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(lifecycle({ commercialBasis: 'SOMETHING_NEW' }));
     const publish = screen.getByRole('button', { name: 'Publish' });
 
@@ -346,7 +346,7 @@ describe('the publish control while it waits for the confirmation', () => {
   });
 
   it('keeps the confirmation ticked after a refusal that leaves the review token as it was', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValue({
       success: false,
       error: 'This offer cannot be published yet: it has not been verified.',
@@ -391,7 +391,7 @@ describe('editing the basis of a saved offer', SLOW, () => {
   });
 
   it('keeps the choice the editor made when the page reloads with another basis', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(editForm());
     await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
 
@@ -401,7 +401,7 @@ describe('editing the basis of a saved offer', SLOW, () => {
   });
 
   it('puts the error of a refused basis on its field and focuses the first radio', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.updateOfferAction.mockResolvedValue({
       success: false,
       error: 'Check the highlighted fields and try again.',
@@ -446,7 +446,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   });
 
   it('holds Publish until a basis is chosen, says why, and sends the editor to the choice', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(placeholder());
     const publish = screen.getByRole('button', { name: 'Publish' });
 
@@ -461,7 +461,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   it.each(['Editorial', 'Affiliate', 'Sponsored'])(
     'publishes with the %s the editor chose',
     async (name) => {
-      const user = userEvent.setup();
+      const user = setupUser();
       render(placeholder());
 
       await user.click(within(group()).getByRole('radio', { name }));
@@ -480,7 +480,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   );
 
   it('lets the editor change the choice before publishing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(placeholder());
 
     await user.click(within(group()).getByRole('radio', { name: 'Sponsored' }));
@@ -492,7 +492,7 @@ describe('publishing a retailer submission whose basis is only a placeholder', (
   });
 
   it('asks again when the offer has moved on to a new review token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(placeholder());
     await user.click(within(group()).getByRole('radio', { name: 'Affiliate' }));
 
@@ -553,7 +553,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('saves other changes without a basis, and sends none', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     placeholderForm();
 
     await user.clear(screen.getByLabelText(/^Title/));
@@ -568,7 +568,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('sends the basis the editor picked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     placeholderForm();
 
     await user.click(screen.getByRole('radio', { name: 'Affiliate' }));
@@ -581,7 +581,7 @@ describe('editing an offer whose basis is only a placeholder', SLOW, () => {
   });
 
   it('still requires a basis on an offer that is not a placeholder', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(editForm({ commercialBasis: '' }));
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor } from '@testing-library/react';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ subscribe: vi.fn() }));
 vi.mock('@/app/actions/alerts-actions', () => ({ subscribeToAlertsAction: mocks.subscribe }));
@@ -23,7 +23,7 @@ const UNAVAILABLE = {
 } as const;
 
 function setup() {
-  const user = userEvent.setup();
+  const user = setupUser();
   render(<AlertsForm categories={CATEGORIES} live />);
   const form = {
     user,
@@ -248,7 +248,7 @@ describe('AlertsForm submitting', () => {
     await screen.findByRole('alert');
 
     expect(document.activeElement).toBe(form.submit());
-    expect(form.submit()).not.toHaveAttribute('aria-disabled');
+    await waitFor(() => expect(form.submit()).not.toHaveAttribute('aria-disabled'));
   });
 
   it('puts the failure alert below the button and outside the polite live region', async () => {
@@ -275,8 +275,9 @@ describe('AlertsForm submitting', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(ALERTS_FAILURE_MESSAGES.unavailable);
     expect(form.email()).toHaveValue('sam@example.com');
-    expect(form.email()).toBeEnabled();
+    await waitFor(() => expect(form.email()).toBeEnabled());
     expect(screen.getByLabelText('Food & drink')).toBeChecked();
+    await waitFor(() => expect(form.submit()).not.toHaveAttribute('aria-disabled'));
 
     await form.user.click(form.submit());
 
