@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { MAX_CLICK_RANGE_DAYS } from '@/lib/admin-clicks/range';
 import {
   ADMIN_REQUEST_FAILED_MESSAGE,
   adminErrorMessage as baseAdminErrorMessage,
@@ -19,6 +20,7 @@ export const CATEGORY_NOT_FOUND_MESSAGE = 'That category no longer exists. Go ba
 export const MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists. Go back to the list.';
 export const PARTNER_KEY_NOT_FOUND_MESSAGE =
   'That key or merchant no longer exists. Refresh the page.';
+export const CLICKS_MERCHANT_NOT_FOUND_MESSAGE = 'That merchant no longer exists. Choose another.';
 export const OFFER_CHANGED_MESSAGE = 'This offer changed since you opened it. Review it again.';
 export const NO_SOURCE_CHANGE_MESSAGE =
   'There is no source change to dismiss on this offer. This page has been refreshed.';
@@ -44,6 +46,7 @@ const CODE_MESSAGES: Record<string, string> = {
   merchant_no_website: 'Add the merchant website before issuing a key.',
   keys_unavailable: 'Partner keys cannot be issued in this environment.',
   invalid_label: 'A label is a name, not a key. Do not paste a key.',
+  invalid_range: `Choose dates where the start is on or before the end, at most ${MAX_CLICK_RANGE_DAYS} days apart.`,
 };
 
 /** The backend's fixed publish rules (`PUBLISH_BLOCKERS`), mapped to our own wording. */
