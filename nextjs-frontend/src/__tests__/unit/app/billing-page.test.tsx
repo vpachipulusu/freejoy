@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({
   getSubscriptionDetailsAction: vi.fn(),
@@ -192,7 +193,7 @@ describe('BillingPage inline errors', () => {
     await user.click(screen.getByRole('switch', { name: 'Auto-renewal' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Stripe said no');
 
-    await user.click(screen.getByRole('switch', { name: 'Auto-renewal' }));
+    await user.click(await findIdleControl('switch', 'Auto-renewal'));
     await vi.waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 

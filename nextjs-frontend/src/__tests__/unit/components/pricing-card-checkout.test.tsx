@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 /** a failed checkout shows an inline error (no window.alert) and re-enables the button. */
 
@@ -94,7 +95,7 @@ describe('PricingCard checkout', () => {
 
     await userEvent.click(button);
     await screen.findByRole('alert');
-    await userEvent.click(screen.getByRole('button', { name: /upgrade to pro/i }));
+    await userEvent.click(await findIdleControl('button', /upgrade to pro/i));
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: /processing/i })).toBeDisabled();

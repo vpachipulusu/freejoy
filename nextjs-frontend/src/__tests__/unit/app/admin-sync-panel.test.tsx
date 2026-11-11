@@ -3,7 +3,7 @@
  * action's curated message.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ sync: vi.fn() }));
@@ -104,10 +104,14 @@ describe('SyncPanel', () => {
     const user = setupUser();
     await user.click(screen.getByRole('button', { name: /check against stripe/i }));
     await screen.findByText(/Read 5 Stripe subscriptions/);
+    // The report is shown while the first transition is still closing, when the button still reads
+    // "Checking…": wait for it to be the idle button again before the second click (FREEJ-64).
+    const idle = await screen.findByRole('button', { name: /check against stripe/i });
+    await waitFor(() => expect(idle).toBeEnabled());
 
-    await user.click(screen.getByRole('button', { name: /check against stripe/i }));
+    await user.click(idle);
 
-    expect(screen.getByRole('button', { name: /checking/i })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /checking/i })).toBeDisabled();
     finish({ success: false, error: 'Something went wrong.' });
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText(/Read 5 Stripe subscriptions/)).not.toBeInTheDocument();

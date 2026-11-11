@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({
   signInWithEmail: vi.fn(),
@@ -259,7 +260,7 @@ describe('two-factor code step', () => {
 
     await submitCode(user, '123');
     const first = await screen.findByRole('alert');
-    await user.click(screen.getByRole('button', { name: /verify and sign in/i }));
+    await user.click(await findIdleControl('button', /verify and sign in/i));
 
     const second = screen.getByRole('alert');
     expect(second).toHaveTextContent('Enter the six-digit code');

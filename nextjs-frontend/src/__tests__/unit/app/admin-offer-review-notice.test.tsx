@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({
   offerLifecycleAction: vi.fn(),
@@ -228,7 +229,7 @@ describe('verify, then publish', () => {
     );
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
     rerender(page(HEX('b')));
-    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await user.click(await findIdleControl('button', 'Publish'));
 
     await waitFor(() =>
       expect(mocks.offerLifecycleAction).toHaveBeenLastCalledWith('o1', 'publish', HEX('b'))

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 import { TokenActionPanel, type TokenActionCopy } from '@/components/alerts/token-action-panel';
 import { ALERTS_FAILURE_MESSAGES } from '@/lib/alerts/outcomes';
 
@@ -174,7 +175,7 @@ describe('TokenActionPanel', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Do it' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(ALERTS_FAILURE_MESSAGES.unavailable);
-    await user.click(screen.getByRole('button', { name: 'Do it' }));
+    await user.click(await findIdleControl('button', 'Do it'));
 
     expect(await screen.findByText('All done')).toBeInTheDocument();
     expect(action).toHaveBeenNthCalledWith(2, TOKEN);

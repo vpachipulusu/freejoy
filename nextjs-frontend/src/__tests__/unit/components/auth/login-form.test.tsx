@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -171,7 +172,7 @@ describe('LoginForm', () => {
     await fillAndSubmit(user);
     await screen.findByRole('alert');
 
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.click(await findIdleControl('button', /sign in/i));
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });

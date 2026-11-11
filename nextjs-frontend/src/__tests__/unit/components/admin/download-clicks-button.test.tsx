@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({ exportMerchantClicksAction: vi.fn(), saveCsvFile: vi.fn() }));
 
@@ -143,7 +144,7 @@ describe('DownloadClicksButton', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Try later'));
-    await userEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
+    await userEvent.click(await findIdleControl('button', 'Download CSV'));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(''));
     expect(mocks.saveCsvFile).toHaveBeenCalledTimes(1);
