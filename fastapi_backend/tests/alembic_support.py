@@ -23,7 +23,10 @@ import os
 import subprocess
 import sys
 import warnings
+from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
 from sqlalchemy.engine import make_url
@@ -70,6 +73,13 @@ async def _connect(url: str) -> asyncpg.Connection:
     )
 
 
+def _run(coroutine: Coroutine[Any, Any, Any]) -> Any:
+    """Run a coroutine to the end on a thread of its own: callers may be inside a running event loop
+    (a test that rebuilds the schema halfway, an async fixture), where ``asyncio.run`` refuses to start."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coroutine).result()
+
+
 async def _fetch(url: str, sql: str, *params: object) -> list[asyncpg.Record]:
     connection = await _connect(url)
     try:
@@ -81,7 +91,7 @@ async def _fetch(url: str, sql: str, *params: object) -> list[asyncpg.Record]:
 def describe_sessions(url: str) -> str:
     """One line per other session on the database, for a failure message."""
     try:
-        rows = asyncio.run(_fetch(url, _SESSIONS_SQL))
+        rows = _run(_fetch(url, _SESSIONS_SQL))
     except (OSError, TimeoutError, asyncpg.PostgresError) as error:
         return f"(could not list the sessions: {type(error).__name__})"
     if not rows:
@@ -101,7 +111,7 @@ def end_leftover_sessions(url: str) -> int:
     holds it), so a session still there when a fixture is about to rebuild the schema was leaked by a test.
     """
     try:
-        rows = asyncio.run(_fetch(url, _END_SESSIONS_SQL, GUARD_APPLICATION_NAME))
+        rows = _run(_fetch(url, _END_SESSIONS_SQL, GUARD_APPLICATION_NAME))
     except (OSError, TimeoutError, asyncpg.PostgresError) as error:
         warnings.warn(
             f"could not check for leftover sessions before the schema rebuild: {type(error).__name__}",

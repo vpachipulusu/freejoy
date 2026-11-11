@@ -41,7 +41,10 @@ def _isolate_worker_database() -> None:
     """
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     base_url = os.environ.get("TEST_DATABASE_URL")
-    if not worker or not base_url:
+    if not base_url:
+        return
+    if not worker:
+        _claim_database(base_url)
         return
 
     import asyncio
@@ -89,7 +92,9 @@ def _isolate_worker_database() -> None:
             f"{type(error).__name__}",
             4,
         )
-    os.environ["TEST_DATABASE_URL"] = worker_url.render_as_string(hide_password=False)
+    worker_url_text = worker_url.render_as_string(hide_password=False)
+    _claim_database(worker_url_text)
+    os.environ["TEST_DATABASE_URL"] = worker_url_text
 
 
 _isolate_worker_database()
