@@ -193,6 +193,9 @@ directly. Send the CSV and say plainly:
 - Your own figures (orders, visits from our referrer) are the only measure of what the clicks became; we never claim
   sales from clicks or call them redemptions.
 - Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
+- Recording is limited to 600 clicks for one offer in a minute (the cap above), so a very busy minute is undercounted.
+
+A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with the same words in the answer ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
 
 ## Retention
 

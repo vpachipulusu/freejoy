@@ -1,9 +1,9 @@
 # Backend: the partner surface
 
-The partner API is how retailers will submit offers to Freejoy. This page covers what exists after FREEJ-56 and
-FREEJ-57: the switched-off surface and its confinement tests, **per-merchant API keys, partner authentication,
-rate limits and the restricted database role**, with one harmless endpoint (`GET /partner/v1/me`) that proves the
-whole path. No offer can be touched yet (FREEJ-58 and FREEJ-59). The reasons are in
+The partner API is how retailers will submit offers to Freejoy and read what Freejoy sent them. This page covers what exists after
+FREEJ-56, FREEJ-57 and FREEJ-59: the switched-off surface and its confinement tests, **per-merchant API keys, partner authentication,
+rate limits and the restricted database role**, one harmless endpoint (`GET /partner/v1/me`) that proves the whole path, and
+**click counts** (`GET /partner/v1/clicks`) with the public page that documents the API. No offer can be touched yet (FREEJ-58). The reasons are in
 [ADR-013](../adr/0013-partner-api.md).
 
 ## What exists
@@ -27,6 +27,8 @@ whole path. No offer can be touched yet (FREEJ-58 and FREEJ-59). The reasons are
 | Rate limits | `app/partner/limits.py` (the sub-app dependency), policies in `app/core/rate_limit.py` |
 | Restricted role | `commands/sql/partner_role.sql`; `PartnerSessionProvider` in `app/core/database.py`; `app/partner/deps.py` |
 | The endpoint | `GET /partner/v1/me` in `app/partner/routes.py` |
+| Click counts | `GET /partner/v1/clicks`: route and response in `app/partner/clicks_routes.py`, rules in `app/partner/clicks_report.py`, the query in `app/partner/clicks_store.py` (see *Click counts*) |
+| The public documentation | `/developers/partner-api` in the frontend, built from the partner schema (see *The public documentation page*) |
 
 `app/partner/` imports only `app.core` and itself, never `app.api`, `app.services`, `app.repositories` or `app.models` ([ADR-004](../adr/0004-backend-layering.md)). That is why the key format, the rate-limit enforcement helpers and the rate limiter singleton live in `app/core` (`partner_keys.py`, `rate_limit_enforcement.py`, `rate_limiter_provider.py`; `app.api.rate_limit` and `app.api.deps` re-export them), and why `app/partner/keys.py` names its two tables with SQLAlchemy Core instead of importing the models (`tests/api/partner/test_partner_table_definitions.py` checks every table and column it names exists in the ORM metadata).
 
@@ -38,7 +40,8 @@ Every response under `/partner/v1`, errors and 404s included:
 - never `Set-Cookie`, and no `Access-Control-*` header, including on `OPTIONS` (a retailer calls from a server);
 - the usual envelope, `{"success": false, "error": "<fixed text>"}`. The messages are a closed set (`Unauthorized`,
   `Not Found`, `Method Not Allowed`, `Payload too large`, `Invalid request`, `Too many requests`, `Internal server
-  error`, `Service temporarily unavailable`) and `tests/api/partner/test_partner_errors.py` checks every partner error
+  error`, `Service temporarily unavailable`, and the one text for a refused clicks range, with its code `invalid_range`) and
+  `tests/api/partner/test_partner_errors.py` checks every partner error
   body against it and that none echoes the path, a header, the key or the body. The shared error handler still passes a
   string `detail` and the exception's `headers` through (a 405 carries `Allow`), so a new handler is checked by that
   test, not by eye.
@@ -185,7 +188,10 @@ much is refused too. It is a secret in `Settings`, documented in `.env.example` 
 - `SELECT (id, merchant_id, key_hash, label, revoked_at, last_used_at)` and `UPDATE (last_used_at)` on `partner_api_keys` (not
   `created_by`; `UPDATE (last_used_at)` lets the role set that one column to any value on any key, so a stolen key's use could be hidden
   from the admin page, and it cannot touch the hash or the revoke time);
-- `SELECT (id, name, active)` on `merchants`.
+- `SELECT (id, name, active)` on `merchants`;
+- `SELECT (id, merchant_id, title, slug, status)` on `offers` and `SELECT (offer_id, occurred_at, user_agent_class)` on `click_events`
+  (FREEJ-59, the columns the clicks query reads: not `offers.source_url`, the summary, the description or any commercial column, and not
+  `click_events.referrer_host`, `affiliate_link_id` or `id`). Read only: the role cannot write either table.
 
 There is **no grant on `audit_logs`**: no partner code writes an audit row yet. The story that first does adds one, constrained (a row
 policy or trigger that fixes `user_id` and the action prefix), not the bare table. The role has no access to users, admins, organisations,
@@ -255,6 +261,85 @@ are cluster-wide and the test cluster is shared, so the test never touches a rol
 dropped, with grants only inside its own database. `tests/commands/test_partner_role_script.py` checks the script text without a
 database, and ties its column grants to the Core table definitions so a new Core column without a grant fails a test, not production.
 
+## Click counts (`GET /partner/v1/clicks`, FREEJ-59)
+
+What Freejoy sent to a retailer, as the retailer can read it: counts only, per offer per UTC day, for **the key's own merchant**.
+Code: `app/partner/clicks_routes.py` (route, response models, the range error), `app/partner/clicks_report.py` (the rules, no HTTP),
+`app/partner/clicks_store.py` (the query). It reuses the query semantics of the admin report ([backend-admin-analytics.md](backend-admin-analytics.md)).
+
+**Request.** `GET /partner/v1/clicks?from=YYYY-MM-DD&to=YYYY-MM-DD`. Both days are UTC and included. `from` and `to` are written exactly
+`YYYY-MM-DD` (the shared `IsoDay` type, `app/core/iso_day.py`, also used by the admin report), `from <= to`, at most 92 days counting both
+ends (`MAX_RANGE_DAYS`), years 2000 to 2999. There is **no merchant or offer parameter**: the merchant is `PartnerContext.merchant_id`, from
+the key, so a key of merchant A cannot name merchant B and there is nothing to probe (no 404 oracle). An unknown query parameter is ignored.
+
+**Refused range.** Every problem with `from` or `to` (missing, not a real date, wrong shape, reversed, too long, out of bounds) is one
+`422` with one fixed text (`RANGE_MESSAGE`) and the code `invalid_range`: `{"success": false, "error": "<fixed text>", "code": "invalid_range"}`.
+Nothing the caller sent is echoed. `partner_validation_handler` (registered on the sub-app) gives every other validation error the shared
+`Invalid request`, without a code. The closed set of fixed messages in `test_partner_errors.py` has the range text and its one code.
+
+**Response** (`data`): `from_date`, `to_date`, `offers`, `offers_truncated`, `retention` (`days`, `earliest_complete_date`,
+`starts_before_retention`) and `definition`. Each offer: `title`, `slug`, `url` (`PUBLIC_SITE_URL` + `/freebies/<slug>`), `total_clicks` (the
+sum of its days) and `days` (`[{date, clicks}]`, only days with clicks, oldest first). It is **narrower than the admin report** on purpose:
+no internal merchant id, no internal offer id, no count of bots, no count of offers, no total over all offers. A test fails if an internal id
+reaches the body.
+
+- **Which offers.** Only `PUBLISHED` and `EXPIRED` offers (`LISTED_STATUSES` in `clicks_store.py`, the same two as the admin report's), and
+  here the only ones: a `DRAFT` or `ARCHIVED` offer is never read, so its title and slug never leave, even when it has clicks (the admin
+  report lists those with clicks). A listed offer with no clicks in the range appears with `total_clicks` 0 and no days.
+- **Order and cap.** Most clicks first, then title, then the internal id (the admin report's tie-break, so the two agree), at most 100
+  (`MAX_OFFERS`); `offers_truncated` is true when the merchant has more listed offers. With the 92-day cap the largest answer is 100 offers
+  of 92 day rows each.
+- **Bots.** Rows whose `user_agent_class` is `BOT` are left out of every count, exactly as in the admin report; a row with no class counts. The
+  count of left-out clicks is not returned.
+- **Retention.** Click rows are deleted after `CLICK_RETENTION_DAYS` (395, `app/core/click_retention.py`). `earliest_complete_date`
+  comes from `earliest_complete_date()` in that module (the admin service uses it too); `starts_before_retention` says the range starts before it.
+- **What a click is** (`definition`, one fixed text, `CLICK_DEFINITION` in `clicks_report.py`, also in the partner schema and on the public page): one
+  visitor sent from Freejoy to the destination; not a sale, a sign-up or a claim; not different people (a person who clicks twice counts
+  twice); visitors identified as automated are left out and nothing else is filtered; days are UTC; **recording is limited to 600 clicks for
+  one offer in a minute** (`OUTBOUND_OFFER_POLICY`: past it the visitor is still sent on and no row is written, so a very busy minute is
+  undercounted); rows are deleted after 395 days; no visitor identity is kept. The 600 is read from that policy when the text is built, so the
+  schema check fails if it changes. The cap is true today (`app/api/v1/catalogue_click.py`, [freejoy-affiliate.md](freejoy-affiliate.md)); it fails
+  open when the limiter is down, which the sentence does not claim to cover.
+
+**The query** (`PartnerClickStore`). Two statements, each with the merchant predicate in itself: the offers (`offers` joined to `click_events` on
+the offer and the half open UTC range, `WHERE offers.merchant_id = :merchant AND offers.status IN (...)`, grouped, ordered, `LIMIT 100`, the
+count over the whole listed set in a window function) and the per-day counts (`click_events` joined to `offers` on the merchant and the listed
+statuses, with `offer_id IN (...)` only narrowing to the offers already listed). A statement given another merchant's offer ids therefore
+returns nothing of theirs (a test proves it on the restricted role). `app/partner` cannot import the admin repository, so the tables are
+SQLAlchemy Core definitions (`offers`, `click_events`) that `test_partner_table_definitions.py` checks against the models (types, nullability and
+the allowed values of the two enum columns). `tests/api/partner/test_partner_clicks_e2e.py` seeds one data set and shows the partner query
+and the admin report give the same per offer per day counts and the same order for the offers a partner may see.
+
+**Limits and headers.** `PARTNER_READ_POLICY` (120 a minute per key) is applied once by the surface before routing: the route adds nothing, and
+a test asserts one hit under that policy per request. The surface sets `Cache-Control: no-store, private` on every response, this route's
+success and its 422 included. The exact partner header set is unchanged. **No audit row**: a read writes none (the partner role has no grant on
+`audit_logs`). One info line is logged per read: `partner clicks read: key_id=<id> from=<date> to=<date> offers=<n>`, never the key.
+
+**The database.** The role reads `offers (id, merchant_id, title, slug, status)` and `click_events (offer_id, occurred_at,
+user_agent_class)` and nothing else of either table, and cannot write them (`tests/core/test_partner_role_e2e.py`). The role's statement
+timeout is 10 s. Measured on a throwaway database with 600,000 click rows over 395 days, a merchant with 60 offers and a 92-day range took about
+32 ms for the offers statement (the planner scanned the range through `ix_click_events_occurred_at`, as with the admin report) and about 22 ms
+for the per-day statement (`ix_click_events_offer_id_occurred_at`, with `ix_offers_merchant_id` for the merchant). Both are bounded by the 92-day range and
+the 100-offer cap. **Re-run `commands/sql/partner_role.sql` as the owner before switching the surface on after this story**: the grants are new.
+
+## The public documentation page
+
+`/developers/partner-api` (frontend, `src/app/(public)/developers/partner-api/page.tsx`) is the retailer-facing documentation. The backend serves no
+docs or schema route; the page is built from the committed partner schema:
+
+- The schema is imported at build time from `nextjs-frontend/public/partner-openapi.json` (`src/lib/partner-api/schema.ts`). The browser never calls FastAPI and
+  nothing is fetched at run time. The same bytes are offered for download at `/partner-openapi.json`.
+- `commands.generate_partner_openapi_schema` writes **both** `docs/partner/openapi.json` and the frontend copy; `commands.check_partner_openapi_schema` (pre-commit,
+  `scripts/gate.sh`) fails when either is stale or they differ, and `partner-api-content.test.ts` compares the two files too. Never edit them by hand.
+- The endpoint list, parameters and status codes come from the schema. The prose and the examples are in `src/lib/partner-api/content.ts`, keyed by
+  operation id. **To document a new endpoint:** regenerate the schema (this updates both copies), then add one entry to `OPERATION_CONTENT`
+  (introduction, notes, a request, the body of a 200 answer). `partner-api-content.test.ts` fails when an operation has no entry, when an entry names an
+  operation the schema lacks, when an example answer does not fit the 200 schema, when an example holds anything that looks like a key, or when the
+  limits and fixed messages on the page differ from the backend sources; the page throws (so the build fails) for an operation with no entry. Add the
+  endpoint's status codes to `STATUS_ROWS` if it has a new one.
+- It follows the house pattern of `/partners`: the draft shell (`LegalPage`), `noindex`, not in the sitemap, linked from `/partners`. Examples use shell
+  variables for the address and the key and the placeholder `fj_production_<key id>_<secret>`, so none matches the key pattern.
+
 ## How confinement works
 
 The invariant ([ADR-013](../adr/0013-partner-api.md)): a caller holding a valid partner key and the public
@@ -272,7 +357,9 @@ partner URL can invoke only partner handlers, and can read or change only its ow
    by every internal route (which asks for `X-Internal-Key`), and the internal key is refused by every partner route; a request
    carrying both kinds is rejected. See *Authentication*.
 5. **A restricted database role** (FREEJ-57) reached through its own session provider. See *The restricted database role*.
-6. **Scoping to the key's merchant** (planned, FREEJ-58): `PartnerContext.merchant_id` is there; no route uses it yet.
+6. **Scoping to the key's merchant**: `PartnerContext.merchant_id` is the only source of the merchant. `GET /partner/v1/clicks` (FREEJ-59)
+   has no merchant or offer parameter and every statement of it carries the merchant predicate itself (see *Click counts*). FREEJ-58 does the same
+   for submissions.
 
 Layers 1 to 5 are proved by tests that run in the normal suite (layer 5 needs Postgres).
 
@@ -281,6 +368,8 @@ or cookies to partner responses. The main app has only the request-ID middleware
 you need to add middleware to `app/main.py`, that test will fail; decide there how `/partner/v1` is treated.
 
 ## Adding an endpoint (for FREEJ-58)
+
+(`GET /partner/v1/clicks` followed these steps; see *Click counts* for a finished example, including the documentation entry in step 6.)
 
 1. Add the route to `app/partner/routes.py` (or a new module in `app/partner/` whose router is included in
    `create_partner_api`). Paths are written relative to the mount (`/offers`, not `/partner/v1/offers`).
@@ -291,18 +380,21 @@ you need to add middleware to `app/main.py`, that test will fail; decide there h
 4. Regenerate the partner schema (below). The generator writes the full path, `/partner/v1/offers`.
 5. Run the proofs. They must stay green. `test_partner_credentials.py` takes its routes and declared methods from the real
    routes, so a new route is covered without an edit; a route that needs a body or a path parameter adds its own cases beside it.
+6. Document it on the public page: add the operation id to `OPERATION_CONTENT` in `nextjs-frontend/src/lib/partner-api/content.ts` (see *The public
+   documentation page*). `partner-api-content.test.ts` fails until you do.
 
 ## The partner schema
 
 `docs/partner/openapi.json` is the retailer-facing contract. It is a separate file from
 `nextjs-frontend/openapi.json` (which feeds the generated client and must never contain a `/partner` path). It
-lives under `docs/` because nothing in the frontend uses it and it is what gets shared with retailers. Every path in
-it starts with `/partner/v1/`. With no endpoints it has no paths.
+lives under `docs/` because it is what gets shared with retailers. Every path in it starts with `/partner/v1/`. The same bytes are
+also written to `nextjs-frontend/public/partner-openapi.json` (FREEJ-59): the public documentation page is built from that copy and offers it for
+download. Nothing in the frontend calls the partner API.
 
 ```bash
 cd fastapi_backend
-uv run python -m commands.generate_partner_openapi_schema   # writes ../docs/partner/openapi.json (LF)
-uv run python -m commands.check_partner_openapi_schema      # fails when the committed file is stale
+uv run python -m commands.generate_partner_openapi_schema   # writes ../docs/partner/openapi.json and the frontend copy (LF)
+uv run python -m commands.check_partner_openapi_schema      # fails when the committed file is stale or the copy differs
 ```
 
 The partner contract has its own title and version (`PARTNER_API_TITLE` and `PARTNER_API_VERSION` in
@@ -328,13 +420,16 @@ uv run pytest tests/core/test_vercel_routing.py tests/api/test_route_confinement
 | `tests/api/partner/test_partner_auth.py` | One 401 for every bad key; the query string is never read; auth before the body (a bad body with no key is 401); failures counted per key id, 429 past the limit, 503 when the limiter is down; nothing secret in the logs |
 | `tests/api/partner/test_partner_limits.py` | Read and write policies, keyed by key id, with their fail modes |
 | `tests/api/partner/test_partner_errors.py` | Every partner error body is a fixed message and echoes nothing |
-| `tests/api/partner/test_partner_table_definitions.py` | The Core table definitions match the ORM metadata |
+| `tests/api/partner/test_partner_table_definitions.py` | The Core table definitions match the ORM metadata (every table, column and type, the allowed values of enum columns, the nullability the code relies on) |
+| `tests/api/partner/test_partner_clicks.py` | The clicks contract without a database: exact fields, no internal id, the merchant is the key's and never the request's, two keys see their own counts, the 100-offer cap, one read-policy hit, `no-store`, every refused range is one fixed 422 with a code and nothing echoed, one log line |
+| `tests/api/partner/test_partner_clicks_e2e.py` (Postgres) | On the restricted role: the partner query and the admin report give the same per offer per day counts and order; a draft or archived offer is never named; one merchant never reads another's; a statement given another merchant's offer ids returns nothing of theirs; UTC day edges; the 100-offer cap; the retention flag |
 | `tests/api/partner/test_partner_keys_e2e.py`, `tests/api/test_admin_partner_keys_e2e.py` (Postgres) | Create shows the key once; only the hash is at rest; revoke takes effect on the next request; `last_used_at` moves; a deactivated merchant's keys stop |
 | `tests/api/test_partner_key_rejected_elsewhere.py` | For every main-app route, a valid partner key and nothing else never gives a 2xx and never carries the partner surface header (the open routes are held to "the key changes nothing") |
-| `tests/core/test_partner_role_e2e.py` (Postgres) | The restricted role can do what the script says and nothing else |
+| `tests/core/test_partner_role_e2e.py` (Postgres) | The restricted role can do what the script says (the key lookup, the clicks query) and nothing else: no other column of `offers` or `click_events`, no write to either |
 | `tests/api/partner/test_partner_body_cap.py` | The 413 cannot be swallowed, converted or turned into a 500 by handlers, middleware or streaming responses |
 | `tests/api/partner/test_partner_isolation.py` | `app/partner` imports only `app.core` and `app.partner`, and names no internal credential, client-IP helper or owner session; the mounted sub-app has the routes the schema is generated from |
-| `tests/commands/test_partner_openapi_schema.py` | The partner schema is current and under the prefix; the internal schema has no partner path |
+| `tests/commands/test_partner_openapi_schema.py` | The partner schema is current and under the prefix; the internal schema has no partner path; the generator writes the frontend copy |
+| `nextjs-frontend/src/__tests__/unit/lib/partner-api-content.test.ts`, `unit/app/partner-api-page.test.tsx` | The public page lists every operation of the schema and names none it lacks; every operation has prose and an example that fits its 200 schema; no example looks like a key; the limits and messages on the page are the backend's; the two copies of the schema are identical; the page is accessible in structure |
 
 **Raw paths in tests.** An HTTP client (httpx) tidies `..` and `//` before it sends, so it cannot send the
 adversarial paths. `tests/api/partner/support.py` builds the ASGI scope by hand (`path` decoded, `raw_path` as on
@@ -364,7 +459,7 @@ Not done by this story. Recorded in [ADR-013](../adr/0013-partner-api.md).
    surface is off (every path is the same 404) or on (authentication comes before routing, so a "must" path answers 404 or 401, always with the
    surface header). If it fails, the backend answered a path under or around the prefix without the surface header:
    read its log before changing anything. It is also a manual step: `bash scripts/smoke-partner-surface.sh https://<domain>`.
-5. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` (see *The restricted database role*, on the direct URL, with the
+5. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` (or **re-run it**, if the role exists from before FREEJ-59: the clicks grants are new) (see *The restricted database role*, on the direct URL, with the
    password from the environment), set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`), and grant `partner_keys.read` and
    `partner_keys.write` to the admins who should manage keys. Startup refuses `PARTNER_API_ENABLED=true` without the URL.
 6. Leave `PARTNER_API_ENABLED` unset in production until FREEJ-58 and FREEJ-59 are in.
@@ -380,6 +475,6 @@ envelope) without the surface header. That the Next.js frontend never sets `X-Re
 
 ## Not built yet
 
-The table `partner_submissions` and every endpoint beyond `GET /partner/v1/me` (FREEJ-58 and FREEJ-59). Submissions will create
-drafts only. Scoping routes to `PartnerContext.merchant_id` starts with the first route that reads or writes merchant data.
+The table `partner_submissions` and every endpoint beyond `GET /partner/v1/me` and `GET /partner/v1/clicks` (FREEJ-58). Submissions will create
+drafts only. Every partner route scopes its queries to `PartnerContext.merchant_id` (clicks already does).
 The hostname (`partners.<domain>` or the path on the main domain) is an open question, set out in ADR-013.

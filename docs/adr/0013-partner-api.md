@@ -18,7 +18,8 @@ record manages: a retailer who holds a partner URL and a key must reach partner 
 
 FREEJ-56 built the **empty, switched-off surface** and the proofs that keep it confined. FREEJ-57 added **per-merchant keys,
 partner authentication, the rate limits and the restricted database role**, with one harmless endpoint, `GET /partner/v1/me`,
-that proves the path. No offer can be touched yet (FREEJ-58, FREEJ-59).
+that proves the path. FREEJ-59 added **click counts** (`GET /partner/v1/clicks`, read only, for the key's own merchant) and the public
+documentation page. No offer can be touched yet (FREEJ-58).
 
 ## Decision
 
@@ -50,7 +51,9 @@ that proves the path. No offer can be touched yet (FREEJ-58, FREEJ-59).
   `X-Internal-Key`, `X-Session-Token` or a `Cookie` is rejected, not resolved in favour of one. Unknown, revoked, malformed and wrong-environment
   keys all give the same 401.
 - **No docs, no schema route and no CORS on the sub-app.** The partner contract is a committed file
-  (`docs/partner/openapi.json`), not a served one. A retailer calls from a server, so no browser origin is allowed.
+  (`docs/partner/openapi.json`), not one the backend serves. The frontend builds a public documentation page (`/developers/partner-api`) from
+  an identical committed copy (`nextjs-frontend/public/partner-openapi.json`, also offered for download as a static file); a test and the
+  schema check keep the copies identical. A retailer calls from a server, so no browser origin is allowed.
 - **`Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `X-Freejoy-Surface: partner`** on
   every partner response, errors and 404s included. Never `Set-Cookie`.
 - **The shared error envelope, with fixed messages.** Errors use `{"success": false, "error": "<message>"}`
@@ -84,7 +87,7 @@ middleware, so a 500 would otherwise skip the headers.
 | `require_internal_key` on every main-app route (or an explicit allowlist) | A caller who reaches a main-app route by some other path, because a rewrite was widened or a hostname falls through, and has no internal key. |
 | A distinct credential, checked before routing and at the sub-app (FREEJ-57) | A partner key doing anything on an internal route, and a stolen internal key doing anything as a partner. |
 | The surface wrapper | Cookies, CORS, caching, docs and oversized bodies on the partner surface; a switched-off surface answering anything but 404. |
-| Scoping every partner query to the key's merchant (planned) | One merchant reading or changing another's data. This is the second half of the invariant. |
+| Scoping every partner query to the key's merchant (built for clicks in FREEJ-59, which has no merchant or offer parameter and a merchant predicate in every statement; submissions follow in FREEJ-58) | One merchant reading or changing another's data. This is the second half of the invariant. |
 | A restricted database role through a separate session provider and `PARTNER_DATABASE_URL` (FREEJ-57) | A bug in a partner handler reading or writing tables a partner never needs (users, sessions, billing). |
 
 ### The proofs that stay in the gate
@@ -166,7 +169,8 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
 4. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`).
    Startup refuses `PARTNER_API_ENABLED=true` without it, and refuses a URL whose user is the owner's. **The Vercel Firewall rate rule in
    step 2 is a condition of `PARTNER_API_ENABLED=true`**, not a nicety: nothing else bounds unauthenticated lookups.
-5. Do not set `PARTNER_API_ENABLED=true` in production until the scoping story (FREEJ-58) and the submissions story (FREEJ-59) are in and reviewed.
+5. Do not set `PARTNER_API_ENABLED=true` in production until the submissions story (FREEJ-58) is in and reviewed, and re-run
+   `commands/sql/partner_role.sql` after FREEJ-59 (its click grants are new).
 
 ### Amendments to earlier records
 
@@ -197,7 +201,8 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   selects the row, the comparison is constant time, and an unknown id costs the same comparison against a dummy.
 - **Restricted database role (built):** `freejoy_partner`, created from `fastapi_backend/commands/sql/partner_role.sql` by the owner, reached through
   `PartnerSessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam; required when the switch is on). `SELECT` and `UPDATE (last_used_at)` on
-  `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants`, as column grants; no access to `audit_logs`, nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
+  `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants`, `offers` and `click_events` (the last two
+  from FREEJ-59, read only), as column grants; no access to `audit_logs`, nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
 - **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (FREEJ-58).
 - **Submissions create drafts only.** A partner can never publish; the existing review and publish rules stay
   ours.
@@ -242,7 +247,8 @@ Move the partner API into its own service (or project) when any of these happens
 
 ## Consequences
 
-- The partner surface exists, authenticates before routing and serves one endpoint (`GET /partner/v1/me`); every proof is in the gate.
+- The partner surface exists, authenticates before routing and serves two read endpoints (`GET /partner/v1/me` and, from FREEJ-59,
+  `GET /partner/v1/clicks`); every proof is in the gate.
   Adding the next endpoint (FREEJ-58) changes one file set and must keep the proofs green.
 - Every backend change that adds a route now passes through the confinement walk: an open route needs an explicit
   allowlist entry with a reason.
