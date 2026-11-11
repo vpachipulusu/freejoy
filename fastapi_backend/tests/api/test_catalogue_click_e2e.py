@@ -431,18 +431,21 @@ async def test_a_flood_of_bot_requests_cannot_use_up_the_budget_genuine_clicks_n
         base_url="http://test",
         headers={"X-Internal-Key": KEY},
     ) as http:
-        for n in range(flood):
+        bots = [
             await http.post(
                 click_path(offer),
                 json={"user_agent_class": "BOT"},
                 headers={"X-Client-IP": f"10.{n // 250}.{n % 250}.1"},
             )
+            for n in range(flood)
+        ]
         genuine = await http.post(
             click_path(offer),
             json={"user_agent_class": "DESKTOP"},
             headers={"X-Client-IP": "10.9.9.9"},
         )
 
+    assert [r.status_code for r in bots] == [200] * flood
     assert genuine.status_code == 200
     classes = [row.user_agent_class for row in await click_rows(engine)]
     assert classes.count("BOT") == OUTBOUND_OFFER_BOT_POLICY.limit

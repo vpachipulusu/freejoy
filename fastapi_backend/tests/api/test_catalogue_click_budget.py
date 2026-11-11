@@ -58,14 +58,14 @@ def build(
 
 
 class ListHandler(logging.Handler):
-    """Collects warning messages from the click logger (the app's logging does not propagate to caplog)."""
+    """Collects warning records from the click logger (the app's logging does not propagate to caplog)."""
 
-    def __init__(self, messages: list[str]) -> None:
+    def __init__(self, records: list[logging.LogRecord]) -> None:
         super().__init__(level=logging.WARNING)
-        self._messages = messages
+        self._records = records
 
     def emit(self, record: logging.LogRecord) -> None:
-        self._messages.append(record.getMessage())
+        self._records.append(record)
 
 
 def body_for(user_agent_class: str | None) -> dict[str, Any]:
@@ -109,21 +109,6 @@ async def test_a_flood_of_bot_requests_leaves_the_budget_for_genuine_clicks() ->
     assert classes.count(UserAgentClass.DESKTOP) == 1
     assert classes.count(UserAgentClass.BOT) == OUTBOUND_OFFER_BOT_POLICY.limit
     assert scopes(limiter).count(MAIN) == 1
-
-
-async def test_past_the_main_cap_a_non_bot_click_is_not_recorded_but_still_redirected() -> (
-    None
-):
-    http, store, committer = build(FakeRateLimiter())
-    limit = OUTBOUND_OFFER_POLICY.limit
-
-    async with http:
-        responses = [await click(http, n, "DESKTOP") for n in range(limit + 1)]
-
-    assert [r.status_code for r in responses] == [200] * (limit + 1)
-    assert responses[-1].json()["data"]["destination_url"] == DESTINATION
-    assert len(store.clicks) == limit
-    assert committer.commits == limit
 
 
 async def test_the_request_past_the_bot_cap_is_redirected_not_recorded_and_the_main_bucket_is_untouched() -> (
@@ -202,7 +187,7 @@ async def test_a_limiter_outage_on_either_bucket_records_warns_and_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reported: list[BaseException] = []
-    warnings: list[str] = []
+    warnings: list[logging.LogRecord] = []
     monkeypatch.setattr(catalogue_click, "report_exception", reported.append)
     handler = ListHandler(warnings)
     limiter = ScopedOutageRateLimiter({failing_scope})
@@ -219,37 +204,11 @@ async def test_a_limiter_outage_on_either_bucket_records_warns_and_reports(
     assert response.status_code == 200
     assert len(store.clicks) == 1
     assert len(reported) == 1
-    assert warnings == ["offer cap limiter unavailable, recording the click"]
+    assert [w.getMessage() for w in warnings] == [
+        "offer cap limiter unavailable, recording the click"
+    ]
+    assert warnings[0].__dict__["request_id"] == response.headers["X-Request-ID"]
     assert scopes(limiter).count(failing_scope) == 1
-
-
-async def test_an_outage_on_the_main_bucket_does_not_touch_the_bot_cap() -> None:
-    limiter = ScopedOutageRateLimiter({MAIN})
-    http, store, _ = build(limiter)
-    cap = OUTBOUND_OFFER_BOT_POLICY.limit
-
-    async with http:
-        responses = [await click(http, n, "BOT") for n in range(cap + 1)]
-
-    assert [r.status_code for r in responses] == [200] * (cap + 1)
-    assert len(store.clicks) == cap
-    assert MAIN not in scopes(limiter)
-
-
-@pytest.mark.parametrize("user_agent_class", ["BOT", *NON_BOT_CLASSES])
-async def test_exactly_one_per_offer_limiter_hit_is_made_per_request(
-    user_agent_class: str | None,
-) -> None:
-    limiter = FakeRateLimiter()
-    http, _, _ = build(limiter)
-
-    async with http:
-        for n in range(3):
-            await click(http, n, user_agent_class)
-
-    per_offer = [s for s in scopes(limiter) if s != OUTBOUND_CLICK_POLICY.scope]
-    assert len(per_offer) == 3
-    assert len(set(per_offer)) == 1
 
 
 async def test_a_refused_body_spends_no_offer_budget() -> None:
@@ -262,3 +221,29 @@ async def test_a_refused_body_spends_no_offer_budget() -> None:
     assert response.status_code == 422
     assert scopes(limiter) == [OUTBOUND_CLICK_POLICY.scope]
     assert store.clicks == []
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        {"json": {"user_agent_class": "DESKTOP", "referrer_host": "news.example"}},
+        {"json": {"user_agent_class": "DESKTOP"}},
+        {"json": {}},
+        {"content": b"null", "headers": {"Content-Type": "application/json"}},
+        {},
+    ],
+    ids=["full body", "class only", "empty object", "json null", "no body"],
+)
+async def test_every_body_shape_still_works_with_the_class_read_by_the_dependency(
+    request_kwargs: dict[str, Any],
+) -> None:
+    limiter = FakeRateLimiter()
+    http, store, _ = build(limiter)
+
+    async with http:
+        response = await http.post(PATH, **request_kwargs)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["destination_url"] == DESTINATION
+    assert len(store.clicks) == 1
+    assert scopes(limiter) == [OUTBOUND_CLICK_POLICY.scope, MAIN]

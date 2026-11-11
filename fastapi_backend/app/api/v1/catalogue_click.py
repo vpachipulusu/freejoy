@@ -12,7 +12,6 @@ Every response is ``Cache-Control: no-store``. The destination is never logged.
 """
 
 import logging
-from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, Response
@@ -59,51 +58,6 @@ router = APIRouter(
 OfferIdPath = Annotated[str, Path(pattern=OFFER_ID_PATTERN)]
 
 
-RecordGate = Callable[[UserAgentClass | None], Awaitable[bool]]
-
-
-def offer_policy_for(user_agent_class: UserAgentClass | None) -> RateLimitPolicy:
-    """The per-offer budget a click spends: BOT has its own, everything else (and no class) the main one."""
-    if user_agent_class is UserAgentClass.BOT:
-        return OUTBOUND_OFFER_BOT_POLICY
-    return OUTBOUND_OFFER_POLICY
-
-
-def offer_recording_gate(
-    request: Request, limiter: RateLimiterDep, offer_id: OfferIdPath
-) -> RecordGate:
-    """Second limit, per offer id: a gate that says whether this offer may still gain a recorded click.
-
-    The device class is in the body, which a dependency does not see, so the route calls the gate once it has the
-    class. The gate spends exactly one hit, on the bucket the class selects (``offer_policy_for``), and a
-    ``BOT`` request never touches the main budget. Past the cap the visitor is still sent on (``record`` is
-    False): refusing would punish the visitor for a crowd, while capping only limits how many clicks one offer
-    can add per minute. A limiter outage records the click as usual, like the other public routes (the policy
-    fails open).
-    """
-
-    async def may_record(user_agent_class: UserAgentClass | None) -> bool:
-        policy = offer_policy_for(user_agent_class)
-        identifier = f"{policy.scope}:offer:{offer_id}"
-        try:
-            decision = await limiter.hit(identifier, policy)
-        except Exception as exc:
-            request_id = request.scope.get("state", {}).get("request_id")
-            logger.warning(
-                "offer cap limiter unavailable, recording the click",
-                exc_info=exc,
-                extra={"request_id": request_id},
-            )
-            report_exception(exc)
-            return True
-        return decision.allowed
-
-    return may_record
-
-
-RecordGateDep = Annotated[RecordGate, Depends(offer_recording_gate)]
-
-
 class ClickRequest(BaseModel):
     """What the Next.js route may tell the backend about the click. Nothing else is accepted."""
 
@@ -120,6 +74,51 @@ class ClickRequest(BaseModel):
         default=None,
         description="Coarse device class; the raw user agent is never sent",
     )
+
+
+ClickBody = Annotated[ClickRequest | None, Body()]
+
+
+def offer_policy_for(user_agent_class: UserAgentClass | None) -> RateLimitPolicy:
+    """The per-offer budget a click spends: BOT has its own, everything else (and no class) the main one."""
+    if user_agent_class == UserAgentClass.BOT:
+        return OUTBOUND_OFFER_BOT_POLICY
+    return OUTBOUND_OFFER_POLICY
+
+
+async def offer_has_room(
+    request: Request,
+    limiter: RateLimiterDep,
+    offer_id: OfferIdPath,
+    body: ClickBody = None,
+) -> bool:
+    """Second limit, per offer id: True while this offer may still gain a recorded click this minute.
+
+    The device class is in the body (the route and this dependency share the one body parameter, so both must
+    call it ``body``). A request classed ``BOT`` spends ``OUTBOUND_OFFER_BOT_POLICY`` and never the main
+    budget; every other class, and no class, spends ``OUTBOUND_OFFER_POLICY``. FastAPI runs the dependency once
+    per request, after the body is validated, so a request refused for its body spends no offer budget.
+    Past the cap the visitor is still sent on (``record`` is False): refusing would punish the visitor for a
+    crowd, while capping only limits how many clicks one offer can add per minute. A limiter outage records the
+    click as usual, like the other public routes (the policy fails open).
+    """
+    policy = offer_policy_for(body.user_agent_class if body else None)
+    identifier = f"{policy.scope}:offer:{offer_id}"
+    try:
+        decision = await limiter.hit(identifier, policy)
+    except Exception as exc:
+        request_id = request.scope.get("state", {}).get("request_id")
+        logger.warning(
+            "offer cap limiter unavailable, recording the click",
+            exc_info=exc,
+            extra={"request_id": request_id},
+        )
+        report_exception(exc)
+        return True
+    return decision.allowed
+
+
+RecordAllowed = Annotated[bool, Depends(offer_has_room)]
 
 
 class ClickData(BaseModel):
@@ -164,12 +163,11 @@ def _no_store(body: BaseModel, status_code: int = 200) -> Response:
 async def record_click(
     offer_id: OfferIdPath,
     service: ClickServiceDep,
-    may_record: RecordGateDep,
-    body: Annotated[ClickRequest | None, Body()] = None,
+    record: RecordAllowed,
+    body: ClickBody = None,
 ) -> Response:
     """Write one click event for a live offer and return its affiliate destination."""
     request = body or ClickRequest()
-    record = await may_record(request.user_agent_class)
     outcome = await service.record_click(
         offer_id, request.referrer_host, request.user_agent_class, record=record
     )
