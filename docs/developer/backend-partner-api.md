@@ -3,7 +3,7 @@
 The partner API is how retailers will submit offers to Freejoy. This page covers what exists after FREEJ-56 and
 FREEJ-57: the switched-off surface and its confinement tests, **per-merchant API keys, partner authentication,
 rate limits and the restricted database role**, with one harmless endpoint (`GET /partner/v1/me`) that proves the
-whole path. No offer can be touched yet (FREEJ-58 and FREEJ-59). The reasons are in
+whole path. FREEJ-58 added **offer submissions** (create, update, status, end), which only ever produce drafts, see *Offer submissions* below. The reasons are in
 [ADR-013](../adr/0013-partner-api.md).
 
 ## What exists
@@ -26,7 +26,7 @@ whole path. No offer can be touched yet (FREEJ-58 and FREEJ-59). The reasons are
 | Key lookups | `app/partner/keys.py` (SQLAlchemy Core definitions of the two tables the partner reads; no ORM models) |
 | Rate limits | `app/partner/limits.py` (the sub-app dependency), policies in `app/core/rate_limit.py` |
 | Restricted role | `commands/sql/partner_role.sql`; `PartnerSessionProvider` in `app/core/database.py`; `app/partner/deps.py` |
-| The endpoint | `GET /partner/v1/me` in `app/partner/routes.py` |
+| The endpoints | `GET /partner/v1/me` in `app/partner/routes.py`; the four offer operations in `app/partner/offer_routes.py` (FREEJ-58) |
 
 `app/partner/` imports only `app.core` and itself, never `app.api`, `app.services`, `app.repositories` or `app.models` ([ADR-004](../adr/0004-backend-layering.md)). That is why the key format, the rate-limit enforcement helpers and the rate limiter singleton live in `app/core` (`partner_keys.py`, `rate_limit_enforcement.py`, `rate_limiter_provider.py`; `app.api.rate_limit` and `app.api.deps` re-export them), and why `app/partner/keys.py` names its two tables with SQLAlchemy Core instead of importing the models (`tests/api/partner/test_partner_table_definitions.py` checks every table and column it names exists in the ORM metadata).
 
@@ -187,9 +187,9 @@ much is refused too. It is a secret in `Settings`, documented in `.env.example` 
   from the admin page, and it cannot touch the hash or the revoke time);
 - `SELECT (id, name, active)` on `merchants`.
 
-There is **no grant on `audit_logs`**: no partner code writes an audit row yet. The story that first does adds one, constrained (a row
-policy or trigger that fixes `user_id` and the action prefix), not the bare table. The role has no access to users, admins, organisations,
-memberships, subscribers, billing, TOTP or login tables, and no DDL **in `public`**.
+FREEJ-58 added the grants for offer submissions, listed column by column under *Offer submissions*; `website` was added to the `merchants`
+columns. `audit_logs` has only a constrained append (five columns, no read), policed by a trigger. The role has no access to users, admins,
+organisations, memberships, subscribers, billing, TOTP or login tables, and no DDL **in `public`**.
 
 What the script does, in one transaction: creates the role if absent (every special attribute off, `NOINHERIT`, a `CONNECTION LIMIT`, all
 stated on `CREATE ROLE`, so it works for an owner that is not a superuser); for a role that already exists it alters no attribute and
@@ -272,7 +272,7 @@ partner URL can invoke only partner handlers, and can read or change only its ow
    by every internal route (which asks for `X-Internal-Key`), and the internal key is refused by every partner route; a request
    carrying both kinds is rejected. See *Authentication*.
 5. **A restricted database role** (FREEJ-57) reached through its own session provider. See *The restricted database role*.
-6. **Scoping to the key's merchant** (planned, FREEJ-58): `PartnerContext.merchant_id` is there; no route uses it yet.
+6. **Scoping to the key's merchant** (FREEJ-58): every store method takes `merchant_id` and puts it in its `WHERE`; a ref of another merchant is a 404 like an unknown one. See *Tenancy*.
 
 Layers 1 to 5 are proved by tests that run in the normal suite (layer 5 needs Postgres).
 
@@ -378,8 +378,157 @@ cannot leave the prefix, and for the others fails only on a backend answer (`X-R
 envelope) without the surface header. That the Next.js frontend never sets `X-Request-ID` is checked in this repository
 (`src/proxy.ts`, `next.config.ts`); that Vercel does not add one is not verified.
 
+## Offer submissions (FREEJ-58)
+
+Nothing a retailer sends is ever published by the API. A submission becomes a **draft** offer that an editor reviews, verifies
+and publishes (or archives) in the admin, exactly like an imported one. Four operations, all under the key's merchant:
+
+| Operation | What it does |
+| --- | --- |
+| `PUT /partner/v1/offers/{ref}` | Create or update a submission, idempotent. `ref` is the retailer's own id, `^[A-Za-z0-9._-]{1,64}$`. 201 when created, 200 otherwise |
+| `GET /partner/v1/offers` | Your submissions, newest first, paged (`limit` 1 to 100, default 20; `offset`), with `total_count` |
+| `GET /partner/v1/offers/{ref}` | One submission |
+| `POST /partner/v1/offers/{ref}/end` | The sample ran out. Takes effect at once |
+
+Code: `app/partner/offer_routes.py` (routes), `schemas.py` (strict request models), `content.py` (cleaning and validation, pure),
+`submission_service.py` (the rules), `submission_store.py` (Core queries, every method takes `merchant_id`), `statuses.py`,
+`errors.py`, `caps.py`, `tables.py` (Core definitions). The pure rules both sides need moved to `app/core`
+(`offer_content.py`, `offer_fingerprint.py`, `offer_vocabulary.py`); `app/services/offer_rules.py` and
+`offer_fingerprint.py` re-export them, so no admin caller changed.
+
+### The body of `PUT`
+
+`extra="forbid"`: an unknown or misspelled field is a 422, never ignored. Every text is capped at the length it is stored at.
+
+| Field | Rule |
+| --- | --- |
+| `title` 120, `summary` 200 | required text |
+| `description` | optional list, at most 5 paragraphs of 600 |
+| `offer_type` | `FREE_SAMPLE` or `FREE_TRIAL` only (a retailer cannot submit a voucher, cashback or competition) |
+| `category` | the slug of an **enabled** category (`unknown_category` otherwise) |
+| `url` | https, on exactly the merchant's stored website host or its `www.` form |
+| `postage_kind` | required: `FREE`, `COST` or `CHECK_TERMS`; `postage_amount_minor` (0 to 100000) and `postage_currency` (3 capitals) exactly when `COST` |
+| `requires_card` | required, a real boolean |
+| `subscription_terms` | required key, 600; `null` where there is nothing to cancel; required non-null for `FREE_TRIAL` |
+| `eligibility` 400, `availability` 300 | required text |
+| `steps` | optional, at most 6 of `{title 80, detail 300}` |
+| `start_at`, `end_at` | required keys, ISO 8601 strings with a zone, or `null` (no start, no end date); `end_at` must be after `start_at` and in the future |
+
+Plain text only: markup is removed, entities decoded once, control and invisible characters dropped, whitespace collapsed
+(`app/core/plain_text.py`). A text with nothing left (`<script></script>`) is refused (`empty_text`); a paragraph of `description`
+that is only markup is dropped. The commercial basis, the status, featuring, verification, images and the slug are not fields:
+the editor owns them. The image is the shared placeholder (tint `cream`, the merchant's name as its label).
+
+### What `PUT` answers (`outcome`)
+
+| `outcome` | Meaning |
+| --- | --- |
+| `created` | A new draft. Needs room under the caps (below) |
+| `unchanged` | The sanitised content hashes to what you last sent (also when you send back what the offer already shows after a waiting update). Nothing is written, no audit row |
+| `refreshed` | The draft is **untouched** (nobody has edited it; the rule is `app.core.offer_fingerprint.is_untouched_draft`, the one the Awin importer uses, see [backend-awin-import.md](backend-awin-import.md#the-review-queue-and-the-importers-hashes)), so it took the new content |
+| `pending_update` | An editor has edited the draft, or it is live, ended or expired: the offer and the published page are **not** changed. The sanitised content is stored in `partner_submissions.pending_payload` and the "source changed" marker is set, so the offer shows in the review queue with the proposal beside the current content |
+
+A refreshed or queued update is audited `partner.offers.update`; a create `partner.offers.submit`. An **archived** offer (an editor's
+decision) refuses updates with 409 `offer_closed`; use a new ref. Dismissing a waiting update does not re-queue the same content (the
+hash is kept), so a sync job that resends unchanged data does not nag an editor; changed content is queued again.
+
+### Statuses (derived, never stored: `app/partner/statuses.py`)
+
+| `status` | When |
+| --- | --- |
+| `pending_review` | the offer is a DRAFT (waiting for an editor, or unpublished back to one) and not past its end date |
+| `live` | PUBLISHED and not past its end date; `public_url` is given |
+| `ended` | past its end date, or EXPIRED, or archived after it was live |
+| `declined` | an editor archived it and it was never published |
+
+"Ever published" is `partner_submissions.first_published_at`, set by a database trigger the first time the offer becomes PUBLISHED
+(an archived draft with a verification date still reads as declined). `update_pending` says an update waits for an editor.
+
+### End
+
+Sets `end_at` to the database clock, under the offer lock, only when the offer has no end date in the past already; it never touches
+`status` (the public catalogue and `/go/` already treat a past `end_at` as ended, and the health job flips the status later). A start date
+still in the future is cleared so the window stays valid for the editor's form. The second call changes nothing and writes no audit row
+(`changed: false`). Works on a draft, a live and an ended offer; on an archived one it is a no-op that shows its status. Audited
+`partner.offers.end`.
+
+### Errors
+
+Bodies are `{"success": false, "error": "<fixed text>"}`, plus `"code"` for a rule refusal. Nothing the caller sent is echoed.
+
+| Status and `error` | `code` | Meaning |
+| --- | --- | --- |
+| 422 `Invalid request` | none | the body is not the documented shape (unknown field, wrong type, too long, missing required key, bad `ref`) |
+| 422 `Invalid request` | `invalid_url`, `link_host_not_allowed`, `unknown_category`, `invalid_postage`, `invalid_window`, `empty_text`, `subscription_terms_required` | a value the shared rules refuse |
+| 404 `Not Found` | none | no such `ref` **for you**: another merchant's ref is the same answer (one query, same body and headers) |
+| 409 `Conflict` | `offer_closed` | an editor archived the offer |
+| 429 `Too many requests` | `open_submission_cap`, `daily_submission_cap` | see below. The per-key request rate limit is the same 429 without a code |
+| 503 `Service temporarily unavailable` | none | the database could not take the write in time (lock or statement timeout, deadlock): send it again |
+
+### Caps
+
+`MAX_OPEN_SUBMISSIONS = 50` submissions whose offer is still a DRAFT, and `MAX_NEW_SUBMISSIONS_PER_DAY = 20` new submissions per UTC
+day, per merchant (`app/partner/caps.py`). Counted in the database in the same transaction as the insert, under a per-merchant
+advisory lock (`pg_advisory_xact_lock`), so concurrent requests cannot both pass. Only a **new** ref is refused; an update never is.
+Both are 429 with a code (not 409: they clear with time or review, and a retailer's client already backs off on 429).
+
+### Tenancy, concurrency, audit
+
+- Refs belong to the merchant that sent them: `(merchant_id, ref)` is unique, so two merchants may use the same ref and never see each
+  other's. A `PUT` on a ref another merchant uses therefore creates **your own** submission and touches theirs not at all; a `GET` or `end`
+  on it is a 404. No route takes an offer id; the store has no method that reads or writes by id alone
+  (`tests/api/partner/test_partner_submission_store.py`; the Postgres proof is `test_partner_tenancy_e2e.py`).
+- Lock order is the admin service's: the offer row, then its `offer_imports` row, then the submission row. A create takes the
+  per-merchant advisory lock first. The unique `(merchant_id, ref)` is the arbiter if two first `PUT`s race: the loser rolls back its
+  attempt (a savepoint) and continues as an update.
+- Every write has an audit row, action `partner.offers.submit|update|end`, resource `offers`, `user_id` null, metadata only ids, the ref,
+  the outcome and a content hash (never copy), the key id as the actor. **Mechanism:** a constrained `INSERT` on `audit_logs` for the
+  role (five columns, no `user_id`, no `SELECT`) and the trigger `freejoy_audit_insert_guard` (migration 0008), which lets a writer that
+  may not name a user append only `partner.<area>.<verb>` rows. It was chosen over a separate `partner_audit_logs` table because the
+  admin audit view then shows partner activity with no change, and because the role can neither read, change nor delete the trail.
+
+### Data (migration `0008`)
+
+`partner_submissions`: `merchant_id` (FK, cascade), `ref`, `offer_id` (FK, unique, cascade), `content_hash`, `pending_payload` /
+`pending_hash` / `pending_at` (all set or all null; the payload is the sanitised content and is capped at 24 KiB by a CHECK),
+`submitted_at`, `key_id` (plain text), `first_published_at`; unique `(merchant_id, ref)`. Each submission also has an `offer_imports` row with
+provider `partner` (external id = the submission id), which is what lists it in the review queue (`needs_review()` is unchanged) and
+holds the importer-style hashes, and one `direct` affiliate link.
+
+Four triggers, because the role cannot write some columns and the database supplies or polices them: `offers` insert (a writer with no
+`INSERT` on `commercial_basis` gets `EDITORIAL`; the column is NOT NULL with no default, so every other writer must still state it),
+`affiliate_links` insert (the same for `provider`, which becomes `direct`), the audit guard above, and `first_published_at`. The
+`EDITORIAL` value is a **placeholder**: a partner submission never sets the basis, the editor sets it at review, and a draft whose only
+active link is `direct` cannot be published without the editor confirming the basis in the publish request (existing rule,
+`tests/api/partner/test_partner_submissions_e2e.py::test_a_direct_only_draft_still_needs_the_editors_confirmation_of_the_basis_to_publish`).
+
+### Grants added by FREEJ-58 (column by column; `commands/sql/partner_role.sql`)
+
+| Table | `SELECT` | `INSERT` | `UPDATE` |
+| --- | --- | --- | --- |
+| `merchants` | `website` added to `id, name, active` | none, ever | none, ever |
+| `offers` | the content columns, `status`, `featured`, `last_verified_at`, `freshness`, `publisher_notes` (the fingerprint reads them) | `id, title, slug, summary, description, category_id, merchant_id, offer_type, image_tint, image_label, image_alt, postage_kind, postage_amount_minor, postage_currency, requires_card, subscription_terms, eligibility, availability, steps, start_at, end_at` | `title, summary, description, category_id, offer_type, postage_kind, postage_amount_minor, postage_currency, requires_card, subscription_terms, eligibility, availability, steps, start_at, end_at, updated_at` |
+| `affiliate_links` | all six columns | `id, offer_id, destination_url` | `destination_url, updated_at` |
+| `offer_imports` | the nine columns | the nine columns | the hashes, `applied_at`, `source_changed_at`, `updated_at` (never `provider`, `external_id`, `offer_id`) |
+| `categories` | `id, slug, enabled` | none | none |
+| `partner_submissions` | all but `updated_at` | `id, merchant_id, ref, offer_id, content_hash, key_id` | `content_hash, pending_*, submitted_at, key_id, updated_at` (never `merchant_id`, `ref`, `offer_id`, `first_published_at`) |
+| `audit_logs` | none | `id, action, resource, resource_id, metadata` | none |
+
+Never granted: `offers.status`, `last_verified_at`, `featured`, `commercial_basis`, `freshness`, `publisher_notes`, `slug` (update) and
+`merchant_id` (update); `affiliate_links.provider`, `active`, `tracking_id`; any `DELETE`. `INSERT` of a column the role has no privilege
+on is refused by Postgres, and `status` has the server default `DRAFT`, so a role insert is always a draft.
+`tests/core/test_partner_role_submissions_e2e.py` proves it on Postgres: an insert naming `status = 'PUBLISHED'` is refused, so are updates
+of `status`, `featured` and `last_verified_at`, an admin-action or user-named audit row, and any read, update or delete of the trail. The script
+refuses to grant anything if the three guard triggers are missing or disabled (run `alembic upgrade head` first), and the owner re-runs it
+after this story.
+
+### The editor's side
+
+The review queue lists a submission with a **Submitted by retailer** marker (list and offer page, with the merchant and the ref). When an
+update waits on a non-draft or edited offer the offer page shows the proposal beside the current content and two buttons
+([admin-offers.md](admin-offers.md#retailer-submissions-and-the-pending-update-view)).
+
 ## Not built yet
 
-The table `partner_submissions` and every endpoint beyond `GET /partner/v1/me` (FREEJ-58 and FREEJ-59). Submissions will create
-drafts only. Scoping routes to `PartnerContext.merchant_id` starts with the first route that reads or writes merchant data.
+The click endpoint (FREEJ-59). Image upload, callbacks on status change, bulk feeds and retailer subdomains for links are out of scope.
 The hostname (`partners.<domain>` or the path on the main domain) is an open question, set out in ADR-013.

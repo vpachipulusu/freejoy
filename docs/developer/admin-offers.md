@@ -12,7 +12,7 @@ admin's own permission on every call and writes the audit log.
 | --- | --- | --- |
 | `/admin/offers` | Stats strip, status chips (and the review queue), search, category filter, offers table with a row menu | `offers.read` (row actions: `offers.publish`) |
 | `/admin/offers/new` | Offer form; creates a **draft** | `offers.read` to open, `offers.write` to save |
-| `/admin/offers/[id]` | Offer form, status actions, provenance of an imported offer, affiliate links (read only), card preview | `offers.read`; `offers.write` to save; `offers.publish` for the status actions and for dismissing a source change |
+| `/admin/offers/[id]` | Offer form, status actions, provenance of an imported offer or the retailer panel of a partner submission, affiliate links (read only), card preview | `offers.read`; `offers.write` to save and to apply a retailer update; `offers.publish` for the status actions, for dismissing a source change or a retailer update, and for applying one to a live offer |
 | `/admin/categories`, `/new`, `/[id]` | Table, add form, edit form, enable and disable | `offers.read`; `categories.write` for changes |
 | `/admin/merchants`, `/new`, `/[id]` | Table, add form, edit form, activate and deactivate | `offers.read`; `merchants.write` for changes |
 
@@ -52,6 +52,31 @@ of them.
   Unpublish, Expire, Archive. The allowed set (`offer-status.ts`) mirrors the backend status table and is only a hint;
   a stale menu gets a 409 from the API and a toast. **Archive asks for confirmation** because there is no way back
   in the admin.
+
+## Retailer submissions and the pending-update view
+
+An offer a retailer sent through the partner API ([backend-partner-api.md](backend-partner-api.md#offer-submissions-freej-58)) is a draft with
+an `offer_imports` row of provider `partner`, so it is in the review queue with no query change. The list badge says **Submitted by
+retailer** with the ref (`partner_ref` on the list read), or **Retailer update waiting** when the marker is set. The offer page replaces the
+Provenance panel with the retailer panel: merchant, ref, when it was last sent, and a reminder that the commercial basis is a placeholder.
+
+When the retailer sent an update for an offer an editor has already touched (an edited draft, a live, ended or expired offer) the page also
+shows the proposal beside the current content: each changed field is a group with two labelled regions, Current and Proposed, stacked below
+640px; fields that did not change are only named. Two actions, both bound to the review token the page loaded **and** the hash of the proposal it
+showed (409 `offer_changed` if either moved):
+
+- **Apply retailer update** (`POST /v1/admin/offers/{id}/apply-partner-update`, `offers.write`; also `offers.publish` when the offer is live).
+  `AdminPartnerUpdateService` writes the proposal through the normal edit path (`_stage_update`: same validation, publish checks and audit row
+  as a hand edit; a proposal never carries the commercial basis, so `_guard_basis_change` has nothing to refuse) and the retailer's one `direct`
+  link through the normal link edit (host rule included), then clears the proposal and the marker, in one transaction. An offer that has already
+  ended keeps its end date unless the proposal gives a new one in the future. The offer stays "edited by a person", so a later retailer update
+  waits again. Audit rows: `admin.offers.update`, `admin.offer_links.update`, `admin.offers.partner_update_applied`.
+- **Dismiss retailer update** (`POST .../dismiss-partner-update`, `offers.publish`, after a confirmation) clears the proposal and the marker and
+  changes nothing else (`admin.offers.partner_update_dismissed`). The generic *dismiss source change* refuses a partner offer (409), so a
+  proposal is never half-cleared.
+
+After either, focus moves to a stable "dealt with" paragraph. The partner sees `declined` when an editor archives a submission that was never
+published.
 
 ## Commercial basis
 

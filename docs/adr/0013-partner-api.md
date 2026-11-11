@@ -18,7 +18,7 @@ record manages: a retailer who holds a partner URL and a key must reach partner 
 
 FREEJ-56 built the **empty, switched-off surface** and the proofs that keep it confined. FREEJ-57 added **per-merchant keys,
 partner authentication, the rate limits and the restricted database role**, with one harmless endpoint, `GET /partner/v1/me`,
-that proves the path. No offer can be touched yet (FREEJ-58, FREEJ-59).
+that proves the path. FREEJ-58 added offer submissions that only produce drafts; FREEJ-59 adds clicks.
 
 ## Decision
 
@@ -198,9 +198,22 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
 - **Restricted database role (built):** `freejoy_partner`, created from `fastapi_backend/commands/sql/partner_role.sql` by the owner, reached through
   `PartnerSessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam; required when the switch is on). `SELECT` and `UPDATE (last_used_at)` on
   `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants`, as column grants; no access to `audit_logs`, nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
-- **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (FREEJ-58).
-- **Submissions create drafts only.** A partner can never publish; the existing review and publish rules stay
-  ours.
+- **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (built, migration `0008`, FREEJ-58).
+- **Submissions create drafts only** (built, FREEJ-58). A partner can never publish; the existing review and publish rules stay
+  ours. How it is enforced, in layers: the API only ever inserts a draft; the role has no `INSERT` or `UPDATE` on `offers.status`,
+  `last_verified_at`, `featured` or `commercial_basis` (the column default supplies `DRAFT`); the role may write `affiliate_links` only as
+  a `direct` link (a trigger supplies the provider) whose host the service checks against the merchant's stored website, which the role can
+  never write; an update of anything but an untouched draft is stored as a pending proposal for an editor, applied only through the admin's
+  normal edit path with the review token. The pure rules both sides need moved to `app/core` and are re-exported by their old modules, so
+  `app/partner` still imports only `app.core` and itself.
+- **Audit for the partner role** (FREEJ-58). `audit_logs` is not granted bare. The role gets an `INSERT` of five columns (not `user_id`,
+  not `organization_id`, no read, no update, no delete) and the trigger `freejoy_audit_insert_guard` lets a writer that may not name a user
+  append only `partner.<area>.<verb>` rows, so it cannot forge an `admin.` row. Chosen over a separate `partner_audit_logs` table because
+  the admin audit view then shows partner activity unchanged. Actions: `partner.offers.submit`, `partner.offers.update`,
+  `partner.offers.end`; the key id is the actor.
+- **`commercial_basis`** is NOT NULL with no default, and the role may not write it. A trigger gives an insert by a writer that may not set
+  it the placeholder `EDITORIAL`; the editor sets the real value at review, and a `direct`-only offer still needs the editor's explicit
+  confirmation of the basis to publish. If the owner prefers a different placeholder, it is one line of migration 0008.
 
 ## Alternatives considered
 
