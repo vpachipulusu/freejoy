@@ -5,12 +5,13 @@ from datetime import timedelta
 import pytest
 
 from app.models.platform.click_event import UserAgentClass
-from app.models.platform.offer import OfferStatus
+from app.models.platform.offer import CommercialBasis, OfferStatus
 from app.repositories.catalogue import OfferRecord
 from app.repositories.outbound_clicks import LinkRecord
 from app.services.catalogue import CatalogueService, ExpiredOffer
 from app.services.outbound_clicks import (
     ClickRedirect,
+    DisclosureNeeded,
     OutboundClickService,
     clean_referrer_host,
 )
@@ -275,3 +276,102 @@ async def test_record_false_still_refuses_what_is_not_followable() -> None:
         await ended.record_click("offer_1", None, None, record=False), ExpiredOffer
     )
     assert store.clicks == [] and committer.commits == 0
+
+
+# --- the disclosure guard (FREEJ-60) -----------------------------------------------
+
+
+async def test_an_undisclosed_click_on_a_commission_link_writes_nothing_and_returns_no_destination() -> (
+    None
+):
+    service, store, committer = build(make_offer(), [make_link()])
+
+    outcome = await service.record_click(
+        "offer_1", "news.example", UserAgentClass.MOBILE, commission_disclosed=False
+    )
+
+    assert outcome == DisclosureNeeded("free-shampoo")
+    assert store.clicks == []
+    assert committer.commits == 0
+
+
+async def test_the_guard_applies_even_when_the_offer_cap_is_spent() -> None:
+    service, store, _ = build(make_offer(), [make_link()])
+
+    outcome = await service.record_click(
+        "offer_1", None, None, record=False, commission_disclosed=False
+    )
+
+    assert outcome == DisclosureNeeded("free-shampoo")
+    assert store.clicks == []
+
+
+async def test_an_undisclosed_click_on_a_non_commission_link_redirects_and_counts_once() -> (
+    None
+):
+    link = make_link(
+        provider="direct", destination_url="https://www.acme.example/free-sample"
+    )
+    service, store, committer = build(make_offer(), [link])
+
+    outcome = await service.record_click(
+        "offer_1", None, None, commission_disclosed=False
+    )
+
+    assert outcome == ClickRedirect("https://www.acme.example/free-sample")
+    assert len(store.clicks) == 1
+    assert committer.commits == 1
+
+
+async def test_an_undisclosed_click_on_a_direct_link_of_an_affiliate_offer_is_refused() -> (
+    None
+):
+    link = make_link(
+        provider="direct", destination_url="https://www.acme.example/free-sample"
+    )
+    offer = make_offer(commercial_basis=CommercialBasis.AFFILIATE)
+    service, store, _ = build(offer, [link])
+
+    outcome = await service.record_click(
+        "offer_1", None, None, commission_disclosed=False
+    )
+
+    assert outcome == DisclosureNeeded("free-shampoo")
+    assert store.clicks == []
+
+
+@pytest.mark.parametrize("passed", ["absent", True])
+async def test_a_disclosed_or_absent_flag_leaves_the_click_unchanged(
+    passed: object,
+) -> None:
+    service, store, committer = build(make_offer(), [make_link()])
+    extra: dict[str, bool] = (
+        {} if passed == "absent" else {"commission_disclosed": True}
+    )
+
+    outcome = await service.record_click("offer_1", None, None, **extra)
+
+    assert outcome == ClickRedirect(AWIN)
+    assert len(store.clicks) == 1
+    assert committer.commits == 1
+
+
+async def test_the_guard_runs_after_the_ordinary_refusals() -> None:
+    expired = make_offer(end_at=NOW - timedelta(days=1))
+    service, store, _ = build(expired, [make_link()])
+    missing, _, _ = build(None, [make_link()])
+    no_link, _, _ = build(make_offer(), [])
+
+    assert isinstance(
+        await service.record_click("offer_1", None, None, commission_disclosed=False),
+        ExpiredOffer,
+    )
+    assert (
+        await missing.record_click("offer_1", None, None, commission_disclosed=False)
+        is None
+    )
+    assert (
+        await no_link.record_click("offer_1", None, None, commission_disclosed=False)
+        is None
+    )
+    assert store.clicks == []

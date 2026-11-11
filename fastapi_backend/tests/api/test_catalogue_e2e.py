@@ -424,15 +424,23 @@ LINK_SCENARIOS = {
 }
 
 
+@pytest.mark.parametrize("basis", ["EDITORIAL", "SPONSORED", "AFFILIATE"])
 @pytest.mark.parametrize("scenario", list(LINK_SCENARIOS))
 async def test_detail_flag_describes_the_link_the_click_follows(
-    client: AsyncClient, engine: AsyncEngine, shop: dict[str, str], scenario: str
+    client: AsyncClient,
+    engine: AsyncEngine,
+    shop: dict[str, str],
+    scenario: str,
+    basis: str,
 ) -> None:
-    links, expected = LINK_SCENARIOS[scenario]
+    links, network_followed = LINK_SCENARIOS[scenario]
+    expected = network_followed or basis == "AFFILIATE"
     merchant = await add_merchant(
         engine, "acme-site", website="https://www.acme.example"
     )
-    offer_id = await add_offer(engine, shop["category"], merchant, "linked")
+    offer_id = await add_offer(
+        engine, shop["category"], merchant, "linked", commercial_basis=basis
+    )
     for provider, url in links:
         await insert(
             engine,
@@ -445,12 +453,21 @@ async def test_detail_flag_describes_the_link_the_click_follows(
 
     assert detail.status_code == 200
     assert detail.json()["data"]["earns_commission"] is expected
+    guarded = await client.post(
+        f"/v1/catalogue/offers/{offer_id}/click", json={"commission_disclosed": False}
+    )
     if links and click.status_code == 200:
         followed = click.json()["data"]["destination_url"]
         provider = next(p for p, url in links if url == followed)
-        assert (provider != "direct") is expected
+        assert (provider != "direct" or basis == "AFFILIATE") is expected
+        # An undisclosed click is refused exactly when the page flag says "earns".
+        assert guarded.status_code == (409 if expected else 200)
+        if expected:
+            assert guarded.json()["data"] == {"slug": "linked"}
+            assert followed not in guarded.text
     else:
-        assert expected is False
+        assert click.status_code == guarded.status_code == 404
+        assert expected is (basis == "AFFILIATE")
 
 
 async def test_an_inactive_network_link_does_not_make_the_offer_earn(

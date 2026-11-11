@@ -6,7 +6,7 @@ from app.core.followed_link import (
     REFUSED_HOST,
     REFUSED_NOT_HTTPS,
     first_usable_link,
-    followed_link_earns_commission,
+    offer_earns_commission,
     provider_earns_commission,
     usable_destination,
 )
@@ -114,8 +114,38 @@ def test_usable_destination_is_none_for_a_refused_link_without_a_callback() -> N
 def test_the_flag_follows_the_link_that_would_be_followed(
     links: list[LinkRecord], earns: bool
 ) -> None:
-    assert followed_link_earns_commission(links, allow_sample=True) is earns
+    assert (
+        offer_earns_commission(links, allow_sample=True, basis_is_affiliate=False)
+        is earns
+    )
 
 
 def test_a_sample_link_that_is_not_allowed_is_skipped_before_the_flag_is_read() -> None:
-    assert followed_link_earns_commission([sample(), network()], allow_sample=False)
+    assert offer_earns_commission(
+        [sample(), network()], allow_sample=False, basis_is_affiliate=False
+    )
+
+
+@pytest.mark.parametrize(
+    "links",
+    [[direct()], [sample()], [broken()], [network()], []],
+    ids=["direct", "sample", "unusable", "network", "no links"],
+)
+def test_an_affiliate_basis_earns_whatever_the_followed_link_is(
+    links: list[LinkRecord],
+) -> None:
+    assert offer_earns_commission(links, allow_sample=True, basis_is_affiliate=True)
+
+
+@pytest.mark.parametrize(
+    ("links", "earns"),
+    [([direct()], False), ([sample()], False), ([network()], True), ([], False)],
+    ids=["direct", "sample", "network", "no links"],
+)
+def test_a_basis_that_is_not_affiliate_leaves_it_to_the_followed_link(
+    links: list[LinkRecord], earns: bool
+) -> None:
+    assert (
+        offer_earns_commission(links, allow_sample=True, basis_is_affiliate=False)
+        is earns
+    )

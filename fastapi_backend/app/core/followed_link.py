@@ -1,14 +1,19 @@
 """Which affiliate link ``/go/<offer id>`` follows, and whether that link earns commission.
 
-One rule, two callers. The outbound click service uses it to pick the destination of a click; the
-public catalogue uses it to say whether the offer page may show the "Ad" label and the commission
-sentence. Because both read the same function with the same inputs, the page can never describe a
-different link from the one a visitor is sent to.
+One rule, two callers. The outbound click service uses it to pick the destination of a click and to
+refuse a click whose page did not disclose a commission; the public catalogue uses it to say whether
+the offer page may show the "Ad" label and the commission sentence. Because both call the same
+functions, then for the same stored links at the same moment the page describes the very link a
+visitor is sent to. (The page can be a little older than the click; the click guard covers that.)
 
 The rule: take the active links in the order given (the repository orders them oldest first), skip
 any whose stored destination is not a clean https URL (``validate_https_url``, re-checked because
 rows can be written outside the admin API) or whose host the link's provider may not use
 (``destination_allowed``), and follow the first that is left. None left means nothing is followed.
+
+An offer earns commission when its confirmed commercial basis is AFFILIATE (a ``direct`` link to a
+merchant-domain programme can pay commission too) or when the link that is followed is on an affiliate
+network. The basis arrives as a plain boolean so that ``core`` does not import models.
 
 Pure: no I/O and no logging. A caller that wants to know why a link was skipped passes ``on_refused``.
 """
@@ -88,12 +93,15 @@ def provider_earns_commission(provider: str) -> bool:
     return provider not in (DIRECT_PROVIDER, SAMPLE_PROVIDER)
 
 
-def followed_link_earns_commission(
-    links: Iterable[FollowableLink], *, allow_sample: bool
+def offer_earns_commission(
+    links: Iterable[FollowableLink], *, allow_sample: bool, basis_is_affiliate: bool
 ) -> bool:
-    """Whether the link ``/go/`` would follow for these links is on a network that pays commission.
+    """Whether the offer earns Freejoy a commission: the one rule for the page flag and the click guard.
 
-    False when no link is usable.
+    True when the confirmed basis is AFFILIATE, or the link ``/go/`` would follow is on an affiliate
+    network. Otherwise false, including when no link is usable.
     """
+    if basis_is_affiliate:
+        return True
     found = first_usable_link(links, allow_sample=allow_sample)
     return found is not None and provider_earns_commission(found[0].provider)

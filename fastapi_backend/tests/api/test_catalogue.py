@@ -276,6 +276,29 @@ async def test_detail_says_whether_the_followed_link_earns_commission() -> None:
     assert bare["data"]["earns_commission"] is False
 
 
+@pytest.mark.parametrize(
+    ("basis", "earns"),
+    [
+        (CommercialBasis.AFFILIATE, True),
+        (CommercialBasis.EDITORIAL, False),
+        (CommercialBasis.SPONSORED, False),
+    ],
+)
+async def test_the_confirmed_basis_decides_a_direct_only_offer(
+    basis: CommercialBasis, earns: bool
+) -> None:
+    offer = make_offer(commercial_basis=basis)
+    http, _ = build(
+        FakeCatalogueRepository(by_slug=offer), links=[make_link(provider="direct")]
+    )
+
+    async with http:
+        body = (await http.get("/v1/catalogue/offers/free-shampoo")).json()
+
+    assert body["data"]["earns_commission"] is earns
+    assert "commercial_basis" not in str(body)
+
+
 async def test_the_flag_is_the_only_trace_of_the_link_in_the_detail_body() -> None:
     link = make_link(id="link_secret_77")
     http, _ = build(FakeCatalogueRepository(by_slug=make_offer()), links=[link])

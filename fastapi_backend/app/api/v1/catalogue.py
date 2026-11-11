@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel
 
 from app.api.auth import require_internal_key
-from app.api.deps import SessionDep
+from app.api.deps import SessionDep, allow_sample_provider
 from app.api.http_cache import etag_for, matches
 from app.api.rate_limit import RATE_LIMIT_RESPONSES, limit_by_client_ip
 from app.api.v1.catalogue_schemas import (
@@ -30,7 +30,6 @@ from app.api.v1.catalogue_schemas import (
     offer_detail_data,
     offer_list_response,
 )
-from app.core.config import settings
 from app.core.errors import CodedHTTPException, ErrorResponse
 from app.core.rate_limit import PUBLIC_CATALOGUE_POLICY
 from app.models.platform.offer import OfferType
@@ -70,7 +69,7 @@ def get_catalogue_service(session: SessionDep) -> CatalogueService:
 def get_offer_commission_service(session: SessionDep) -> OfferCommissionService:
     return OfferCommissionService(
         OutboundClickRepository(session),
-        allow_sample_provider=settings.relaxed_environment,
+        allow_sample_provider=allow_sample_provider(),
     )
 
 
@@ -169,7 +168,7 @@ async def read_offer(
         raise CodedHTTPException(404, "Offer not found", OFFER_NOT_FOUND)
     if isinstance(offer, ExpiredOffer):
         return cached_response(expired_response(offer), if_none_match, 410)
-    earns_commission = await commission.earns_commission(offer.id)
+    earns_commission = await commission.earns_commission(offer)
     body = OfferResponse(data=offer_detail_data(offer, earns_commission))
     return cached_response(body, if_none_match)
 
