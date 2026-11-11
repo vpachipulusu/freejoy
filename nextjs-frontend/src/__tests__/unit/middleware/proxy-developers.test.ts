@@ -22,3 +22,19 @@ describe.each(['/developers/partner-api', '/partner-openapi.json'])('proxy %s', 
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });
+
+/** The page says `noindex` in its own metadata; the static file cannot, so the proxy says it in a header. */
+describe('proxy and search engines', () => {
+  beforeEach(() => resetRateLimitStore());
+
+  it('marks the downloadable API description noindex', async () => {
+    const response = await call('/partner-openapi.json');
+
+    expect(response.headers.get('x-robots-tag')).toBe('noindex');
+  });
+
+  it('leaves the pages alone: they carry their own robots metadata', async () => {
+    expect((await call('/developers/partner-api')).headers.get('x-robots-tag')).toBeNull();
+    expect((await call('/partners')).headers.get('x-robots-tag')).toBeNull();
+  });
+});

@@ -153,6 +153,10 @@ export async function proxy(request: NextRequest) {
   // Add security headers
   const response = NextResponse.next();
   applySecurityHeaders(response);
+  // The partner API description is a static file, not a page: keep it out of search engines like the page that links it.
+  if (pathname === '/partner-openapi.json') {
+    response.headers.set('X-Robots-Tag', 'noindex');
+  }
   // Alerts confirm and unsubscribe links carry a token in the query string: never send it as a Referer.
   if (pathname === '/alerts/confirm' || pathname.startsWith('/alerts/unsubscribe')) {
     response.headers.set('Referrer-Policy', 'no-referrer');

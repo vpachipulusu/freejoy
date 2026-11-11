@@ -6,9 +6,10 @@ vi.mock('@/app/globals.css', () => ({}));
 import PartnerApiPage, { metadata } from '@/app/(public)/developers/partner-api/page';
 import PartnersPage from '@/app/(public)/partners/page';
 import sitemap from '@/app/sitemap';
+import { operationAnchor } from '@/components/developers/operation-anchor';
 import { DRAFT_BANNER_TEXT } from '@/components/legal/legal-page';
 import { KEY_LOOKING } from '@/lib/admin-catalogue/partner-key-schema';
-import { OPERATION_CONTENT } from '@/lib/partner-api/content';
+import { OPERATION_CONTENT, PARTNER_BASE_EXAMPLE } from '@/lib/partner-api/content';
 import { listOperations, PARTNER_OPENAPI } from '@/lib/partner-api/schema';
 
 const COMPLIANCE_CLAIMS =
@@ -25,7 +26,10 @@ const SECTION_HEADINGS = [
 ];
 
 function pageText(container: HTMLElement): string {
-  return (container.textContent ?? '').replace(DRAFT_BANNER_TEXT, '');
+  /** The page text without the shared draft shell (its banner and its "Not yet reviewed" line). */
+  return (container.textContent ?? '')
+    .replace(DRAFT_BANNER_TEXT, '')
+    .replace('Last reviewed: Not yet reviewed', '');
 }
 
 /** The text nodes of the page, one space between them, so a path ends where its element ends. */
@@ -37,6 +41,8 @@ function spacedText(container: HTMLElement): string {
   }
   return parts.join(' ');
 }
+
+const names = () => listOperations().map((operation) => `${operation.method} ${operation.path}`);
 
 describe('partner API page (FREEJ-59)', () => {
   it('has exactly one h1 and the section headings as h2, in order', () => {
@@ -67,10 +73,23 @@ describe('partner API page (FREEJ-59)', () => {
     render(<PartnerApiPage />);
 
     const h3 = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
-    expect(h3).toEqual(
-      listOperations().map((operation) => `${operation.method} ${operation.path}`)
-    );
-    expect(h3).toEqual(expect.arrayContaining(['GET /partner/v1/me', 'GET /partner/v1/clicks']));
+    expect(h3).toEqual(names());
+  });
+
+  it('lists every operation in a contents list whose links reach its heading', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const endpoints = screen.getByRole('heading', { level: 2, name: 'Endpoints' });
+    const list = endpoints.nextElementSibling?.nextElementSibling as HTMLElement;
+    const links = within(list).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual(names());
+    for (const operation of listOperations()) {
+      const target = container.querySelector(`#${operationAnchor(operation.operationId)}`);
+      expect(target?.tagName).toBe('H3');
+      expect(links.map((l) => l.getAttribute('href'))).toContain(
+        `#${operationAnchor(operation.operationId)}`
+      );
+    }
   });
 
   it('names no partner path that the schema does not have', () => {
@@ -84,34 +103,52 @@ describe('partner API page (FREEJ-59)', () => {
     }
   });
 
-  it('shows a request and an answer for every operation, each in a <pre><code> region', () => {
+  it('shows, for every operation, an example request and answer in a named <pre><code> region', () => {
     const { container } = render(<PartnerApiPage />);
 
-    const blocks = [...container.querySelectorAll('pre')];
-    expect(blocks).toHaveLength(listOperations().length * 2);
-    for (const block of blocks) {
-      expect(block.querySelector(':scope > code')).not.toBeNull();
-      expect(block).toHaveAttribute('role', 'region');
-      expect(block.getAttribute('aria-label')).toMatch(/^Example (request|answer) for GET /);
-      expect(block).toHaveAttribute('tabindex', '0');
-      expect(block.className).toContain('overflow-x-auto');
+    for (const operation of listOperations()) {
+      const name = `${operation.method} ${operation.path}`;
+      for (const kind of ['request', 'answer']) {
+        const region = screen.getByRole('region', { name: `Example ${kind} for ${name}` });
+        expect(region.tagName).toBe('PRE');
+        expect(region.querySelector(':scope > code')).not.toBeNull();
+        expect(region).toHaveAttribute('tabindex', '0');
+        expect(region.className).toContain('overflow-x-auto');
+      }
     }
-    for (const content of Object.values(OPERATION_CONTENT)) {
-      expect(container.textContent).toContain(content.request.split('\n')[0]);
+    expect(container.querySelectorAll('pre')).toHaveLength(
+      listOperations().length * 2 + listOperations().filter((operation) => operation.body).length
+    );
+  });
+
+  it('renders each request example as real lines, with no literal backslash and n', () => {
+    render(<PartnerApiPage />);
+
+    for (const operation of listOperations()) {
+      const block = screen.getByRole('region', {
+        name: `Example request for ${operation.method} ${operation.path}`,
+      });
+      const lines = (block.textContent ?? '').split('\n');
+
+      expect(lines.length).toBeGreaterThan(1);
+      expect(block.textContent).not.toContain('\\n');
+      expect(lines[0]).toMatch(/^curl .* \\$/);
+      expect(block.textContent).toBe(OPERATION_CONTENT[operation.operationId].request);
     }
   });
 
-  it('puts every table in a focusable scroll region, with a caption and column header cells', () => {
+  it('puts every table in a named, focusable scroll region with column and row header cells', () => {
     const { container } = render(<PartnerApiPage />);
 
     const tables = [...container.querySelectorAll('table')];
     expect(tables.length).toBeGreaterThanOrEqual(5);
     for (const table of tables) {
-      const region = table.parentElement as HTMLElement;
-      expect(region).toHaveAttribute('role', 'region');
+      const caption = table.querySelector('caption')?.textContent ?? '';
+      const region = screen.getByRole('region', { name: caption });
+      expect(region).toBe(table.parentElement);
       expect(region).toHaveAttribute('tabindex', '0');
       expect(region.className).toContain('overflow-x-auto');
-      expect(region.getAttribute('aria-label')).toBe(table.querySelector('caption')?.textContent);
+      expect(screen.getAllByRole('table', { name: caption })).toContain(table);
       expect(table.querySelectorAll('thead th[scope="col"]').length).toBeGreaterThanOrEqual(2);
       for (const row of table.querySelectorAll('tbody tr')) {
         expect(row.querySelector('th[scope="row"]')).not.toBeNull();
@@ -135,28 +172,85 @@ describe('partner API page (FREEJ-59)', () => {
     ).toEqual(['query', 'Yes', 'string (date)', 'First UTC day, YYYY-MM-DD.']);
   });
 
-  it('says the API is not open to every retailer, how to ask, and promises no date', () => {
+  it('says an endpoint with no parameters takes none', () => {
+    render(<PartnerApiPage />);
+
+    const me = screen.getByRole('heading', { name: 'GET /partner/v1/me' }).closest('section');
+    expect(me).toHaveTextContent('This endpoint takes no parameters and no request body.');
+    expect(me?.textContent).not.toContain('Parameters of');
+  });
+
+  it('gives each endpoint the statuses that are true of it', () => {
+    render(<PartnerApiPage />);
+
+    const me = screen.getByRole('table', { name: 'Answers of GET /partner/v1/me' });
+    const clicks = screen.getByRole('table', { name: 'Answers of GET /partner/v1/clicks' });
+    expect(me).not.toHaveTextContent(/range|invalid_range/);
+    expect(clicks).toHaveTextContent('invalid_range');
+    expect(clicks).toHaveTextContent('The date range message');
+  });
+
+  it('defines the address in the examples as the site origin followed by /partner/v1', () => {
     const { container } = render(<PartnerApiPage />);
 
     const text = pageText(container);
-    expect(text).toMatch(/not open to every retailer yet/);
-    expect(screen.getByRole('link', { name: 'contact page' })).toHaveAttribute('href', '/contact');
+    expect(text).toMatch(
+      /\$FREEJOY_PARTNER_URL is the address of the Freejoy website followed by \/partner\/v1/
+    );
+    expect(text).toContain(PARTNER_BASE_EXAMPLE);
+    expect(text).toContain('GET /partner/v1/me is called as $FREEJOY_PARTNER_URL/me');
+    for (const operation of listOperations()) {
+      const relative = operation.path.slice('/partner/v1'.length);
+      expect(OPERATION_CONTENT[operation.operationId].request).toContain(
+        `$FREEJOY_PARTNER_URL${relative}`
+      );
+    }
+  });
+
+  it('says the API is not open to every retailer, promises no date and asks for no "yet"', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const text = pageText(container);
+    expect(text).toMatch(/not open to every retailer\./);
     expect(text).toMatch(/cannot say when a request will be answered/);
     expect(text).not.toMatch(
-      /\b(soon|coming|will be (open|available)|by (january|spring|q[1-4]))\b/i
+      /\b(yet|soon|coming|will be (open|available)|by (january|spring|q[1-4]))\b/i
     );
   });
 
-  it('says nothing is published without an editor, and that it only reads today', () => {
+  it('talks about the contact page in the future tense, as /partners does, and promises nothing urgent', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const text = pageText(container);
+    expect(text).toMatch(
+      /contact page will show how to reach Freejoy once a contact route is published\. When it does, use it to ask for a key/
+    );
+    expect(screen.getByRole('link', { name: 'contact page' })).toHaveAttribute('href', '/contact');
+    expect(text).not.toMatch(/tell us|we will revoke|we will/i);
+    expect(text).toMatch(/ask the person at Freejoy who gave you the key/);
+  });
+
+  it('says nothing is published without an editor, and that today it can only read', () => {
     const { container } = render(<PartnerApiPage />);
 
     const text = pageText(container);
     expect(text).toMatch(/Nothing is published through this API/);
     expect(text).toMatch(/editors check and write every listing before it goes live/);
+    expect(text).toMatch(/Today it can only read: it cannot change anything/);
     expect(screen.getByRole('link', { name: 'page for retailers' })).toHaveAttribute(
       'href',
       '/partners'
     );
+  });
+
+  it('says every error has one of the listed messages except a refused date range', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const text = pageText(container);
+    expect(text).toMatch(
+      /except a refused date range, which has its own message and the code invalid_range/
+    );
+    expect(text).not.toMatch(/An error always has one of these messages/);
   });
 
   it('says what a click is and is not, with the words of the API itself', () => {
@@ -164,17 +258,48 @@ describe('partner API page (FREEJ-59)', () => {
 
     const heading = screen.getByRole('heading', { name: 'What a click means' });
     expect(heading.nextElementSibling).toHaveTextContent(/not a sale, a sign-up or a claim/);
-    expect(pageText(container)).toMatch(/clicks twice counts twice/);
-    expect(pageText(container)).toMatch(/limited to 600 clicks for one offer in a minute/);
-    expect(pageText(container)).toMatch(/deleted after 395 days/);
+    const text = pageText(container);
+    expect(text).toMatch(/clicks twice counts twice/);
+    expect(text).toMatch(/Recording is rate limited for each offer/);
+    expect(text).toMatch(/some clicks are not recorded and the count can be low/);
+    expect(text).toMatch(/deleted after 395 days/);
+    expect(text).not.toMatch(/600|still sent on/);
   });
 
-  it('offers the committed document for download from the static files', () => {
+  it('expands its abbreviations and relates UTC to UK time', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const text = pageText(container);
+    expect(text).toMatch(/\(application programming interface\)/);
+    expect(text).toMatch(/UTC, which is Coordinated Universal Time: the same as UK time in winter/);
+    expect(text).toMatch(/one hour behind it in summer/);
+    expect(text).toMatch(/256 KiB \(262,144 bytes\)/);
+    expect(text).toMatch(/JSON, a common text format/);
+    expect(text).toMatch(/OpenAPI document \(a standard way to describe an API\)/);
+  });
+
+  it('shows field and parameter names as code, and no backtick reaches the page', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    const codes = [...container.querySelectorAll('code')].map((code) => code.textContent);
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        'starts_before_retention',
+        'earliest_complete_date',
+        'offers_truncated',
+        'invalid_range',
+      ])
+    );
+    expect(container.textContent).not.toContain('`');
+  });
+
+  it('offers the committed document for download from the static files, naming the format', () => {
     render(<PartnerApiPage />);
 
-    const link = screen.getByRole('link', { name: /Download the OpenAPI document/ });
+    const link = screen.getByRole('link', { name: 'Download the OpenAPI document (JSON)' });
     expect(link).toHaveAttribute('href', '/partner-openapi.json');
     expect(link).toHaveAttribute('download', 'freejoy-partner-openapi.json');
+    expect(screen.getByText(/version 1\.0\.0\./)).toBeInTheDocument();
   });
 
   it('has no key, no real-looking address and no live API page', () => {
@@ -198,6 +323,17 @@ describe('partner API page (FREEJ-59)', () => {
     expect(screen.getByText(/last reviewed: not yet reviewed/i)).toBeInTheDocument();
   });
 
+  it('gives a long path and a long name room to wrap inside the page, not widen it', () => {
+    const { container } = render(<PartnerApiPage />);
+
+    for (const heading of container.querySelectorAll('h3')) {
+      expect(heading.className).toContain('[overflow-wrap:anywhere]');
+    }
+    for (const code of container.querySelectorAll('p code, li code')) {
+      expect(code.className).toContain('[overflow-wrap:anywhere]');
+    }
+  });
+
   it('stops the build when an operation of the schema has no prose', async () => {
     vi.resetModules();
     vi.doMock('@/lib/partner-api/schema', async (importOriginal) => {
@@ -213,6 +349,25 @@ describe('partner API page (FREEJ-59)', () => {
     const { default: Page } = await import('@/app/(public)/developers/partner-api/page');
 
     expect(() => render(<Page />)).toThrow(/"partner-brand-new" with no entry/);
+    vi.doUnmock('@/lib/partner-api/schema');
+  });
+
+  it('stops the build when an operation answers with a status nothing describes', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/partner-api/schema', async (importOriginal) => {
+      const original = await importOriginal<typeof import('@/lib/partner-api/schema')>();
+      return {
+        ...original,
+        listOperations: () =>
+          original.listOperations().map((operation) => ({
+            ...operation,
+            responses: [...operation.responses, { status: '409' }],
+          })),
+      };
+    });
+    const { default: Page } = await import('@/app/(public)/developers/partner-api/page');
+
+    expect(() => render(<Page />)).toThrow(/Status 409 of partner-me has no row/);
     vi.doUnmock('@/lib/partner-api/schema');
   });
 });
@@ -243,13 +398,18 @@ describe('partner API page metadata and search engines', () => {
 });
 
 describe('the page for retailers links to the API documentation', () => {
-  it('has the link, and still has no digits and no new heading', () => {
+  it('links to it, says what is counted, and keeps the closing sentence last', () => {
     const { container } = render(<PartnersPage />);
 
     expect(screen.getByRole('link', { name: 'partner API documentation' })).toHaveAttribute(
       'href',
       '/developers/partner-api'
     );
-    expect(container.textContent).toMatch(/not open to every retailer yet/);
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/click through from a listing to your site/);
+    expect(text).toMatch(/This is not open to every retailer\./);
+    expect(text.replace('Not yet reviewed', '')).not.toMatch(/\byet\b/);
+    const paragraphs = [...container.querySelectorAll('p')].map((p) => p.textContent ?? '');
+    expect(paragraphs[paragraphs.length - 1]).toMatch(/There is no listing form on this page/);
   });
 });

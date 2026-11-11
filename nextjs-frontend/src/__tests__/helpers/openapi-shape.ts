@@ -1,21 +1,31 @@
 /**
  * A small structural check of an example body against an OpenAPI schema node: every property the example has is
- * in the schema, every required property is present, and each value has the declared basic type. It follows
- * `$ref` into `components.schemas`. It is not a full JSON Schema validator (no new dependency), which is enough to
- * catch an example that drifts from the document: a renamed, removed or added field.
+ * in the schema, every required property is present, and each value has the declared type, constant, enum member,
+ * `anyOf` branch and (for dates) format. It follows `$ref` into `components.schemas`. It is not a full JSON Schema
+ * validator (no new dependency), which is enough to catch an example that drifts from the document: a renamed,
+ * removed or added field, a wrong type, a value outside an enum or a different constant.
  */
 
 export interface ShapeNode {
   type?: string;
+  format?: string;
   $ref?: string;
   properties?: Record<string, ShapeNode>;
   required?: string[];
   items?: ShapeNode;
+  anyOf?: ShapeNode[];
+  enum?: unknown[];
+  const?: unknown;
 }
 
 export interface ShapeDocument {
   components?: { schemas?: Record<string, ShapeNode> };
 }
+
+const FORMATS: Record<string, RegExp> = {
+  date: /^\d{4}-\d{2}-\d{2}$/,
+  'date-time': /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+};
 
 function resolve(node: ShapeNode, document: ShapeDocument): ShapeNode {
   if (!node.$ref) return node;
@@ -39,6 +49,25 @@ function typeMatches(expected: string | undefined, value: unknown): boolean {
   return expected === actual;
 }
 
+function scalarProblems(value: unknown, schema: ShapeNode, path: string): string[] {
+  if (!typeMatches(schema.type, value)) {
+    return [`${path} is ${typeOf(value)}, the schema says ${schema.type}`];
+  }
+  if ('const' in schema && value !== schema.const) {
+    return [
+      `${path} is ${JSON.stringify(value)}, the schema says it is always ${JSON.stringify(schema.const)}`,
+    ];
+  }
+  if (schema.enum && !schema.enum.includes(value)) {
+    return [`${path} is ${JSON.stringify(value)}, not one of ${JSON.stringify(schema.enum)}`];
+  }
+  const format = schema.format ? FORMATS[schema.format] : undefined;
+  if (format && typeof value === 'string' && !format.test(value)) {
+    return [`${path} is not written as a ${schema.format}`];
+  }
+  return [];
+}
+
 /** The problems found, as readable strings; an empty list means the example fits the schema. */
 export function shapeProblems(
   value: unknown,
@@ -47,9 +76,14 @@ export function shapeProblems(
   path = '$'
 ): string[] {
   const schema = resolve(node, document);
-  if (!typeMatches(schema.type, value)) {
-    return [`${path} is ${typeOf(value)}, the schema says ${schema.type}`];
+  if (schema.anyOf) {
+    const attempts = schema.anyOf.map((branch) => shapeProblems(value, branch, document, path));
+    return attempts.some((problems) => problems.length === 0)
+      ? []
+      : [`${path} fits none of the ${attempts.length} alternatives the schema allows`];
   }
+  const scalar = scalarProblems(value, schema, path);
+  if (scalar.length > 0) return scalar;
   if (Array.isArray(value)) {
     return schema.items
       ? value.flatMap((item, index) =>

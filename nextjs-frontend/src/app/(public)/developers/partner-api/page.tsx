@@ -1,13 +1,16 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalPage } from '@/components/legal/legal-page';
+import { operationAnchor } from '@/components/developers/operation-anchor';
 import { OperationSection } from '@/components/developers/operation-section';
+import { INLINE_CODE, RichText } from '@/components/developers/rich-text';
 import { ScrollTable } from '@/components/developers/scroll-table';
 import {
   ERROR_CODE_ROWS,
   KEY_PLACEHOLDER,
   LIMIT_ROWS,
   OPERATION_CONTENT,
+  PARTNER_BASE_EXAMPLE,
   STATUS_ROWS,
   type OperationContent,
 } from '@/lib/partner-api/content';
@@ -48,23 +51,25 @@ function contentFor(operationId: string): OperationContent {
   return content;
 }
 
-const CODE = 'font-mono text-sm';
-const ROW_HEADER = 'px-3 py-2 text-start align-top font-mono font-bold';
+const CODE = INLINE_CODE;
+const ROW_HEADER = 'px-3 py-2 text-start align-top font-mono font-bold [overflow-wrap:anywhere]';
 
 export default function PartnerApiPage() {
   const operations = listOperations();
+  const version = PARTNER_OPENAPI.info.version;
   return (
     <LegalPage
       title="Freejoy partner API"
-      summary="How a retailer that Freejoy has agreed to work with reads its own click counts. It only reads today."
+      summary="How a retailer that Freejoy has agreed to work with reads its own click counts. Today it can only read: it cannot change anything."
       lastReviewed="Not yet reviewed"
     >
       <h2>Before you start</h2>
       <p>
-        The partner API is not open to every retailer yet. Freejoy gives a key to a retailer by
-        hand, after agreeing to work together. To ask for one, tell us who you are and who will use
-        the key through the <Link href="/contact">contact page</Link>, which will show how to reach
-        Freejoy once a contact route is published. We cannot say when a request will be answered.
+        The partner API (application programming interface) is not open to every retailer. Freejoy
+        gives a key to a retailer by hand, after agreeing to work together. The{' '}
+        <Link href="/contact">contact page</Link> will show how to reach Freejoy once a contact
+        route is published. When it does, use it to ask for a key, and say who you are and who will
+        use the key. We cannot say when a request will be answered.
       </p>
       <p>
         Nothing is published through this API. Freejoy&apos;s editors check and write every listing
@@ -76,17 +81,27 @@ export default function PartnerApiPage() {
       <p>
         Call the API from your own server, never from a web page or an app on someone&apos;s phone:
         it sends no cross-origin headers, so a browser cannot read its answers, and a key in a page
-        or an app is no longer secret. We give you the address with your key. Every path starts with{' '}
-        <code className={CODE}>/partner/v1</code>, and the examples below write the address as{' '}
-        <code className={CODE}>$FREEJOY_PARTNER_URL</code> and the key as{' '}
-        <code className={CODE}>$FREEJOY_PARTNER_KEY</code>.
+        or an app is no longer secret.
       </p>
       <p>
-        Answers are JSON. A success is{' '}
+        In the examples, <code className={CODE}>$FREEJOY_PARTNER_URL</code> is the address of the
+        Freejoy website followed by <code className={CODE}>/partner/v1</code>. For example, if the
+        website were <code className={CODE}>https://www.freejoy.example</code> it would be{' '}
+        <code className={CODE}>{PARTNER_BASE_EXAMPLE}</code>. So{' '}
+        <code className={CODE}>GET /partner/v1/me</code> is called as{' '}
+        <code className={CODE}>$FREEJOY_PARTNER_URL/me</code>. We give you the real address with
+        your key. <code className={CODE}>$FREEJOY_PARTNER_KEY</code> is your key.
+      </p>
+      <p>
+        Answers are JSON, a common text format for data. A success is{' '}
         <code className={CODE}>{'{"success": true, "data": ...}'}</code> and an error is{' '}
         <code className={CODE}>{'{"success": false, "error": "..."}'}</code>. Every answer is marked{' '}
-        <code className={CODE}>Cache-Control: no-store, private</code>, and none sets a cookie. All
-        dates are UTC.
+        <code className={CODE}>Cache-Control: no-store, private</code>, and none sets a cookie.
+      </p>
+      <p>
+        All dates are UTC, which is Coordinated Universal Time: the same as UK time in winter and
+        one hour behind it in summer. A UTC day can therefore start at 1am British Summer Time, and
+        differ from a day in your own reports.
       </p>
 
       <h2>Authentication</h2>
@@ -101,17 +116,27 @@ export default function PartnerApiPage() {
         <li>A key belongs to one merchant and can read only that merchant&apos;s data.</li>
         <li>
           Freejoy shows you the key once, when it is made, and keeps only a one-way hash. If you
-          lose it, ask for a new one and we will revoke the old one.
+          lose it, ask the person at Freejoy who gave you the key for a new one. The old one is then
+          revoked.
         </li>
         <li>A key works only in the environment it was made for.</li>
         <li>
-          Keep the key out of web pages, apps, URLs and repositories. If it may have leaked, tell us
-          at once so we can revoke it.
+          Keep the key out of web pages, apps, URLs and repositories. If it may have leaked, tell
+          the person at Freejoy who gave you the key straight away, so that it can be revoked.
         </li>
       </ul>
 
       <h2>Endpoints</h2>
-      <p>The endpoints below are listed from the API description, so this page and it agree.</p>
+      <p>The list below is built from the API description, so the two always match.</p>
+      <ul>
+        {operations.map((operation) => (
+          <li key={operation.operationId}>
+            <a href={`#${operationAnchor(operation.operationId)}`} className="font-mono">
+              {operation.method} {operation.path}
+            </a>
+          </li>
+        ))}
+      </ul>
       {operations.map((operation) => (
         <OperationSection
           key={operation.operationId}
@@ -121,7 +146,11 @@ export default function PartnerApiPage() {
       ))}
 
       <h2>Answers and errors</h2>
-      <p>An error always has one of these messages, and it never repeats anything you sent.</p>
+      <p>
+        An error has one of these messages, except a refused date range, which has its own message
+        and the code <code className={CODE}>invalid_range</code> (below). No error repeats anything
+        you sent. What a status means for one endpoint can be more specific: see its own table.
+      </p>
       <ScrollTable
         caption="Statuses and messages"
         headings={['Status', 'Message', 'What it means']}
@@ -132,7 +161,9 @@ export default function PartnerApiPage() {
               {row.status}
             </th>
             <td>{row.message || 'None'}</td>
-            <td>{row.meaning}</td>
+            <td>
+              <RichText text={row.meaning} />
+            </td>
           </tr>
         ))}
       </ScrollTable>
@@ -147,7 +178,9 @@ export default function PartnerApiPage() {
               {row.code}
             </th>
             <td>{row.status}</td>
-            <td>{row.meaning}</td>
+            <td>
+              <RichText text={row.meaning} />
+            </td>
           </tr>
         ))}
       </ScrollTable>
@@ -159,7 +192,9 @@ export default function PartnerApiPage() {
             <th scope="row" className="px-3 py-2 text-start align-top font-bold">
               {row.name}
             </th>
-            <td>{row.value}</td>
+            <td>
+              <RichText text={row.value} />
+            </td>
           </tr>
         ))}
       </ScrollTable>
@@ -173,8 +208,8 @@ export default function PartnerApiPage() {
 
       <h2>Download the API description</h2>
       <p>
-        The full description is an OpenAPI document, version {PARTNER_OPENAPI.info.version}. There
-        is no live interactive page for it.{' '}
+        The full description is an OpenAPI document (a standard way to describe an API)
+        {version ? `, version ${version}` : ''}. There is no live interactive page for it.{' '}
         <a href={PARTNER_OPENAPI_PUBLIC_PATH} download="freejoy-partner-openapi.json">
           Download the OpenAPI document (JSON)
         </a>

@@ -68,12 +68,13 @@ export default function PartnersPage() {
         route is published. When it does, use it to ask for a listing or to tell us an offer has
         ended. Say what the offer is and where its terms are on your own site.
       </p>
-      <p>There is no listing form on this page, and it does not ask you for any details.</p>
       <p>
-        If your technical team wants to read your click counts, the{' '}
-        <Link href="/developers/partner-api">partner API documentation</Link> explains how. The
-        partner API is not open to every retailer yet.
+        Freejoy counts how many times people click through from a listing to your site. If your
+        technical team wants to read those counts for your own listings, the{' '}
+        <Link href="/developers/partner-api">partner API documentation</Link> explains how. This is
+        not open to every retailer.
       </p>
+      <p>There is no listing form on this page, and it does not ask you for any details.</p>
     </LegalPage>
   );
 }
