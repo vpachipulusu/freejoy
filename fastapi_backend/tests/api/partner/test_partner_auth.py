@@ -113,12 +113,13 @@ async def test_unknown_revoked_malformed_and_missing_keys_get_the_same_401(
         assert response.json() == UNAUTHORIZED, name
         assert response.header("www-authenticate") == "Bearer", name
     bodies = {r.body for r in answers.values()}
-    header_sets = {tuple(sorted(r.headers)) for r in answers.values()}
+    header_sets = {
+        tuple(sorted((k, v) for k, v in r.headers if k != "x-request-id"))
+        for r in answers.values()
+    }
     assert len(bodies) == 1
-    # Only the request id (a different value each time) and nothing that depends on the cause may differ.
-    names = {frozenset(k for k, _ in r.headers) for r in answers.values()}
-    assert len(names) == 1
-    assert header_sets  # computed to make the comparison above explicit
+    # Only the request id (a different value each time) may differ: no header value depends on the cause.
+    assert len(header_sets) == 1
 
 
 async def test_an_inactive_merchants_key_gets_the_same_401(world: PartnerWorld) -> None:
@@ -156,6 +157,9 @@ async def test_a_key_in_another_header_or_a_cookie_is_never_read(
         response = await get_me([(header, world.key.value)])
 
         assert response.status == 401
+    cookie = await get_me([("cookie", f"partner_key={world.key.value}")])
+    assert cookie.status == 401
+    assert world.store.finds == []  # none of them was even looked up
 
 
 # ------------------------------------------------------------------- mixed credentials are rejected
@@ -263,11 +267,25 @@ async def test_failures_are_counted_per_presented_key_id_and_never_by_address(
     assert "203.0.113.9" not in identifier
 
 
-async def test_malformed_keys_share_one_bucket(world: PartnerWorld) -> None:
-    await get_me([])
-    await get_me(bearer("junk"))
+def _wrong_secret(world: PartnerWorld) -> list[tuple[str, str]]:
+    value = world.key.value
+    return bearer(value[:-1] + ("0" if value[-1] != "0" else "1"))
 
-    assert [i for i, _ in world.limiter.hits] == ["partner_auth_failure:malformed"] * 2
+
+async def test_keyless_and_malformed_requests_are_never_counted_or_limited(
+    world: PartnerWorld,
+) -> None:
+    answers = []
+    for _ in range(PARTNER_AUTH_FAILURE_POLICY.limit + 5):
+        answers.append(await get_me([]))
+        answers.append(await get_me(bearer("junk")))
+        answers.append(await get_me([*world.headers(), ("cookie", "a=1")]))
+
+    assert {a.status for a in answers} == {401}
+    assert len({a.body for a in answers}) == 1
+    assert len({tuple(sorted(a.header_names())) for a in answers}) == 1
+    assert world.limiter.hits == []
+    assert world.store.finds == []
 
 
 async def test_past_the_limit_a_failure_gets_429_with_retry_after(
@@ -275,7 +293,7 @@ async def test_past_the_limit_a_failure_gets_429_with_retry_after(
 ) -> None:
     last = None
     for _ in range(PARTNER_AUTH_FAILURE_POLICY.limit + 1):
-        last = await get_me(bearer("junk"))
+        last = await get_me(_wrong_secret(world))
 
     assert last is not None
     assert last.status == 429
@@ -302,7 +320,7 @@ async def test_a_limiter_outage_fails_closed_for_a_failed_authentication(
 
     monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", RaisingRateLimiter())
 
-    response = await get_me(bearer("junk"))
+    response = await get_me(_wrong_secret(world))
 
     assert response.status == 503
     assert response.json() == {

@@ -16,7 +16,7 @@ class PartnerApiKey(IdMixin, CreatedAtMixin, Base):
     Ownership is per merchant, never per organisation. ``id`` IS the key id written into the key
     (``fj_<env>_<id>_<secret>``), so a lookup by id is a primary-key read. Only ``key_hash`` (the SHA-256
     of the whole key, see ``app.core.partner_keys``) is stored: the key itself is shown once at creation
-    and is not recoverable. A revoked key keeps its row (``revoked_at``), so the history stays.
+    and is not recoverable. A revoked key keeps its row (``revoked_at``). Deleting the merchant deletes its keys with it (``ON DELETE CASCADE``: a deleted merchant's keys must stop); what survives is the audit trail, whose create and revoke rows hold the key id, merchant id and label (``audit_logs`` has no foreign keys).
     ``created_by`` is the admin's user id as plain text with no foreign key, like the audit trail: the
     row outlives the admin. ``last_used_at`` is moved by the partner role, which may update only that
     column (``commands/sql/partner_role.sql``).

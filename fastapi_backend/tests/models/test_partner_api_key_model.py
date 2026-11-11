@@ -1,4 +1,4 @@
-"""The shape of ``partner_api_keys`` (model only; the constraints run in the key repository e2e test)."""
+"""The shape of ``partner_api_keys`` (model only; the constraints run in tests/models/test_partner_api_key_constraints_e2e.py)."""
 
 from sqlalchemy import CheckConstraint, Table, UniqueConstraint
 

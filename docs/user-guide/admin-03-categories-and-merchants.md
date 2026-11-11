@@ -115,7 +115,9 @@ Phone:
 
 At the bottom of a merchant's edit page, **Partner API keys** lists the keys that let that merchant's systems call the
 partner API: a label, when it was created, when it was last used and whether it is active or revoked. You need
-`merchants.read` to see the list and `merchants.write` to create or revoke a key. A merchant needs a website and must be
+`partner_keys.read` to see the list and `partner_keys.write` to create or revoke a key (these are separate from the
+`merchants.write` permission that edits merchants; ask an owner to grant them). Without `partner_keys.read` the page says so and
+shows no "Create key" button. A merchant needs a website and must be
 active before it can be given a key.
 
 - **Create key** asks for a label (for example "Production feed") and then shows the key **once**, in a read-only field
@@ -123,7 +125,8 @@ active before it can be given a key.
   lost, revoke it and create another. It is never shown in a notification and is not recorded in the audit log (only the
   label and the key's id are).
 - **Revoke** asks you to confirm, naming the key by its label. A revoked key stops working on its next request and cannot be
-  restored. A key also stops working when its merchant is deactivated.
+  restored. A key also stops working while its merchant is deactivated, **and works again if the merchant is reactivated** (unless it
+  was revoked): revoke it if it must not come back.
 
 ## Things to know
 

@@ -150,10 +150,20 @@ FORBIDDEN_NAMES = frozenset(
         "build_engine",
         "engine",
         "internal_authenticated",
+        "client",
     }
 )
 FORBIDDEN_STRINGS = frozenset(
-    {"x-client-ip", "x-forwarded-for", "x-real-ip", "forwarded"}
+    {
+        "x-client-ip",
+        "x-forwarded-for",
+        "x-real-ip",
+        "forwarded",
+        "x-vercel-forwarded-for",
+        "cf-connecting-ip",
+        "true-client-ip",
+        "client",
+    }
 )
 
 
@@ -198,6 +208,11 @@ def test_partner_code_never_uses_internal_credentials_client_addresses_or_the_ow
         ("headers['X-Client-IP']", ["X-Client-IP"]),
         ("h = 'X-Forwarded-For'", ["X-Forwarded-For"]),
         ("provider = get_session_provider()", ["get_session_provider"]),
+        ("h = 'CF-Connecting-IP'", ["CF-Connecting-IP"]),
+        ("h = 'True-Client-IP'", ["True-Client-IP"]),
+        ("h = 'X-Vercel-Forwarded-For'", ["X-Vercel-Forwarded-For"]),
+        ("request.client.host", ["client"]),
+        ("scope['client']", ["client"]),
         ("maker = async_session_maker()", ["async_session_maker"]),
         ('"""require_internal_key is mentioned only in a docstring"""', []),
     ],

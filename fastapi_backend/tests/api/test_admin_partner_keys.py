@@ -77,9 +77,10 @@ class Harness:
 @pytest.fixture
 def harness() -> Iterator[Harness]:
     built = Harness()
-    built.grants["editor"] = ["merchants.read", "merchants.write"]
-    built.grants["reader"] = ["merchants.read"]
-    built.grants["writer"] = ["merchants.write"]
+    built.grants["editor"] = ["partner_keys.read", "partner_keys.write"]
+    built.grants["reader"] = ["partner_keys.read"]
+    built.grants["writer"] = ["partner_keys.write"]
+    built.grants["catalogue"] = ["offers.read", "merchants.write"]
     yield built
     APP.dependency_overrides.clear()
 
@@ -149,7 +150,7 @@ async def test_the_environment_that_cannot_name_a_key_is_a_503() -> None:
                 harness.keys, harness.merchants, harness.session, harness.auditor, None
             )
         )
-        harness.grants["editor"] = ["merchants.write"]
+        harness.grants["editor"] = ["partner_keys.write"]
         async with harness.client() as client:
             response = await client.post(BASE, json={"label": "Feed"})
     finally:
@@ -159,7 +160,7 @@ async def test_the_environment_that_cannot_name_a_key_is_a_503() -> None:
     assert response.json()["code"] == "keys_unavailable"
 
 
-async def test_reading_needs_merchants_read_and_changing_needs_merchants_write(
+async def test_reading_needs_partner_keys_read_and_changing_needs_partner_keys_write(
     harness: Harness,
 ) -> None:
     async with harness.client("reader") as client:
@@ -198,3 +199,18 @@ async def test_a_key_looking_label_is_refused_with_its_code(harness: Harness) ->
         response = await client.post(BASE, json={"label": "fj_test_abcdefghijklmnop"})
 
     assert (response.status_code, response.json()["code"]) == (422, "invalid_label")
+
+
+async def test_a_merchants_writer_without_the_partner_key_permissions_can_neither_list_nor_issue(
+    harness: Harness,
+) -> None:
+    async with harness.client("catalogue") as client:
+        listed = await client.get(BASE)
+        created = await client.post(BASE, json={"label": "x"})
+        revoked = await client.post(f"{BASE}/k/revoke")
+
+    assert (listed.status_code, created.status_code, revoked.status_code) == (
+        403,
+        403,
+        403,
+    )

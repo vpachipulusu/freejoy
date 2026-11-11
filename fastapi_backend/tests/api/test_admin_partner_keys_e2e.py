@@ -19,7 +19,11 @@ WEBSITE = "https://shop.example.com"
 
 @pytest.fixture
 async def admin(engine: AsyncEngine) -> dict[str, str]:
-    await seed_admin(engine, "keyadmin", ["merchants.read", "merchants.write"])
+    await seed_admin(
+        engine,
+        "keyadmin",
+        ["merchants.write", "partner_keys.read", "partner_keys.write"],
+    )
     return as_user("keyadmin")
 
 
@@ -161,12 +165,13 @@ async def test_a_key_cannot_be_revoked_through_another_merchant(
     assert response.status_code == 404
 
 
-async def test_reading_needs_merchants_read_and_changing_needs_merchants_write(
+async def test_reading_needs_partner_keys_read_and_changing_needs_partner_keys_write(
     client: AsyncClient, engine: AsyncEngine, admin: dict[str, str]
 ) -> None:
     merchant_id = await merchant_with_website(client, admin)
-    await seed_admin(engine, "reader", ["merchants.read"])
-    await seed_admin(engine, "writer", ["merchants.write"])
+    await seed_admin(engine, "reader", ["partner_keys.read"])
+    await seed_admin(engine, "writer", ["partner_keys.write"])
+    await seed_admin(engine, "catalogue", ["merchants.write"])
     url = f"{MERCHANTS}/{merchant_id}/partner-keys"
 
     reader_list = await client.get(url, headers=as_user("reader"))
@@ -176,6 +181,12 @@ async def test_reading_needs_merchants_read_and_changing_needs_merchants_write(
     writer_list = await client.get(url, headers=as_user("writer"))
     nobody = await client.get(url)
 
+    catalogue_create = await client.post(
+        url, json={"label": "x"}, headers=as_user("catalogue")
+    )
+    catalogue_list = await client.get(url, headers=as_user("catalogue"))
+
+    assert catalogue_create.status_code == catalogue_list.status_code == 403
     assert reader_list.status_code == 200
     assert reader_create.status_code == 403
     assert writer_list.status_code == 403

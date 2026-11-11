@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 from app.core.env_file import settings_env_file
 from app.core.totp import TotpCodec, TotpUnavailable
@@ -168,9 +169,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "PARTNER_DATABASE_URL must be set when PARTNER_API_ENABLED is true"
             )
-        if url.get_secret_value() == self.DATABASE_URL:
+        # Compare the role, not the text: the owner URL with another driver prefix, a query string, a different
+        # host spelling or the default port dropped is still the owner. The URLs are never put in the message.
+        try:
+            partner_user = make_url(url.get_secret_value()).username
+            owner_user = make_url(self.DATABASE_URL).username
+        except Exception:  # noqa: BLE001 - make_url errors can quote the URL
             raise ValueError(
-                "PARTNER_DATABASE_URL must be the restricted partner role, not DATABASE_URL"
+                "PARTNER_DATABASE_URL is not a valid database URL"
+            ) from None
+        if not partner_user or partner_user == owner_user:
+            raise ValueError(
+                "PARTNER_DATABASE_URL must use the restricted partner role, not the role of DATABASE_URL"
             )
         return self
 

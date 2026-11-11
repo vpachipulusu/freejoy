@@ -64,7 +64,7 @@ class FakeKeyStore:
         environment: str = ENVIRONMENT,
     ) -> GeneratedKey:
         key = generate_key(environment, key_id)
-        self.rows[key_id] = StoredKey(key_id, merchant_id, key.digest, usable)
+        self.rows[key_id] = StoredKey(key_id, merchant_id, key.digest, usable, True)
         self.profiles[key_id] = KeyProfile(merchant_name, label)
         return key
 
@@ -81,6 +81,7 @@ class FakeKeyStore:
         if self.fail_touch:
             raise ConnectionError("database down")
         self.touched.append(key_id)
+        self.rows[key_id] = replace(self.rows[key_id], touch_due=False)
 
     async def profile(self, key_id: str) -> KeyProfile | None:
         return self.profiles.get(key_id)
@@ -93,6 +94,7 @@ class FakeAdminKeyStore:
     def __init__(self) -> None:
         self.rows: dict[str, PartnerKeyRecord] = {}
         self.hashes: dict[str, str] = {}
+        self.locked_reads: list[str] = []
 
     async def list_for_merchant(self, merchant_id: str) -> list[PartnerKeyRecord]:
         return [r for r in self.rows.values() if r.merchant_id == merchant_id]
@@ -100,6 +102,8 @@ class FakeAdminKeyStore:
     async def get(
         self, merchant_id: str, key_id: str, *, lock: bool = False
     ) -> PartnerKeyRecord | None:
+        if lock:
+            self.locked_reads.append(key_id)
         found = self.rows.get(key_id)
         return found if found and found.merchant_id == merchant_id else None
 

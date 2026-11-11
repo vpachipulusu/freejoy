@@ -52,7 +52,11 @@ async def partner_world(
 
 @pytest.fixture
 async def admin(engine: AsyncEngine) -> dict[str, str]:
-    await seed_admin(engine, "keyadmin", ["merchants.read", "merchants.write"])
+    await seed_admin(
+        engine,
+        "keyadmin",
+        ["merchants.write", "partner_keys.read", "partner_keys.write"],
+    )
     return as_user("keyadmin")
 
 
@@ -194,3 +198,27 @@ async def test_one_merchants_key_is_never_another_merchants(
 
     assert first["data"] == {"merchant_name": "Shop", "key_label": "Production feed"}  # type: ignore[index]
     assert second["data"] == {"merchant_name": "Other", "key_label": "Theirs"}  # type: ignore[index]
+
+
+async def test_a_partner_surface_wired_to_the_owner_url_answers_503_even_with_a_valid_key(
+    client: AsyncClient,
+    admin: dict[str, str],
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, _, key = await issue_key(client, admin)
+    monkeypatch.setattr(settings, "PARTNER_API_ENABLED", True)
+    monkeypatch.setattr(
+        deps,
+        "get_partner_session_provider",
+        lambda: PartnerSessionProvider(database_url),
+    )
+    caplog.set_level("ERROR")
+
+    status, body = await call_me(key)
+
+    assert status == 503
+    assert body == {"success": False, "error": "Service temporarily unavailable"}
+    assert database_url not in caplog.text
+    assert key not in caplog.text

@@ -24,8 +24,9 @@ editor cannot give themselves or anyone else `offers.publish`.
 | `offers.write` | Create and edit offers, create and edit affiliate links |
 | `offers.publish` | Publish, unpublish, expire, archive and verify an offer (they change what the public sees or the "Last checked" claim) |
 | `categories.write` | Create, edit, enable and disable categories |
-| `merchants.read` | List a merchant's partner API keys (FREEJ-57); a dedicated partner-key permission was considered and not added |
-| `merchants.write` | Create, edit, activate and deactivate merchants; issue and revoke their partner API keys |
+| `merchants.write` | Create, edit, activate and deactivate merchants |
+| `partner_keys.read` | List a merchant's partner API keys (FREEJ-57) |
+| `partner_keys.write` | Issue and revoke a merchant's partner API keys. Dedicated, so `merchants.write` does not silently start issuing credentials |
 | `subscribers.read` | Registered only. No subscriber endpoint exists yet; the later subscriber story uses it |
 
 A request without the permission is 403 with the generic `Forbidden` body, before the body is validated and before

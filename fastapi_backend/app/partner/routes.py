@@ -37,7 +37,9 @@ class MeResponse(BaseModel):
 async def read_me(context: PartnerContextDep, store: KeyStoreDep) -> MeResponse:
     """The merchant the key was issued to and the key's label. It changes nothing; it proves the whole path."""
     profile = await store.profile(context.key_id)
-    if profile is None:  # revoked and deleted between the authentication and here
+    if (
+        profile is None
+    ):  # the key (or its merchant) was deleted between the authentication and here
         raise HTTPException(401, KEY_GONE_MESSAGE, {"WWW-Authenticate": "Bearer"})
     return MeResponse(
         data=MeData(merchant_name=profile.merchant_name, key_label=profile.key_label)

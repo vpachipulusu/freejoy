@@ -10,7 +10,7 @@ from app.core.partner_keys import running_environment
 from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
-from app.partner.limits import PARTNER_LIMIT_RESPONSES, limit_partner_requests
+from app.partner.limits import PARTNER_LIMIT_RESPONSES
 from app.partner.mount import PartnerMount
 from app.partner.routes import router
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
@@ -21,7 +21,7 @@ PARTNER_API_VERSION = "1.0.0"
 
 
 # Answers every partner route can give besides its own. 401 is decided before routing (the surface) and again by
-# ``require_partner_key``; 429 and 503 come from the rate limits.
+# ``require_partner_key``; 429 and 503 come from the rate limits and the database, also before routing.
 PARTNER_RESPONSES: dict[int | str, dict[str, Any]] = {
     **ERROR_RESPONSES,
     401: {
@@ -29,13 +29,18 @@ PARTNER_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": "Missing, unknown, revoked or malformed key",
     },
     **PARTNER_LIMIT_RESPONSES,
+    503: {
+        "model": ErrorResponse,
+        "description": "Service temporarily unavailable (the database or a limiter)",
+    },
 }
 
 
 def create_partner_api() -> FastAPI:
     """The sub-app itself: no docs, no schema route, no slash redirects, the shared error envelope.
 
-    Authentication and the rate limit are attached here, to the app, so no route can be added without them.
+    Authentication is attached here, to the app, so no route can be added without it. The per-key rate limit is
+    applied by the surface right after authentication (``app.partner.limits``), so it needs no dependency.
     """
     api = FastAPI(
         title=PARTNER_API_TITLE,
@@ -45,7 +50,7 @@ def create_partner_api() -> FastAPI:
         openapi_url=None,
         redirect_slashes=False,
         responses=PARTNER_RESPONSES,
-        dependencies=[Depends(require_partner_key), Depends(limit_partner_requests)],
+        dependencies=[Depends(require_partner_key)],
     )
     register_error_handlers(api)
     api.include_router(router)

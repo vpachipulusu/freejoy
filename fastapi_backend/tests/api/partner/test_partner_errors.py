@@ -127,15 +127,16 @@ async def test_every_partner_error_has_a_fixed_message_and_echoes_nothing(
     # 500: a handler that fails with request data in its message
     responses[500] = await call_raw(surface, "GET", "/boom", headers=keyed)
     # 429 and 503 from the failure limit and the limiter
+    wrong = [("authorization", f"Bearer {key[:-1]}{'0' if key[-1] != '0' else '1'}")]
     for _ in range(PARTNER_AUTH_FAILURE_POLICY.limit + 1):
         last = await call_raw(
-            surface, "GET", "/x", headers=[("x-probe", secret_header)]
+            surface, "GET", "/x", headers=[*wrong, ("x-probe", secret_header)]
         )
     responses[429] = last
     from app.core import rate_limiter_provider
 
     monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", RaisingRateLimiter())
-    responses[503] = await call_raw(surface, "GET", "/x")
+    responses[503] = await call_raw(surface, "GET", "/x", headers=wrong)
 
     for status, response in responses.items():
         assert response.status == status, status

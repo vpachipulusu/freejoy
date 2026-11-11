@@ -13,6 +13,8 @@ from sqlalchemy import func, select, update
 from app.models.platform.partner_api_key import PartnerApiKey
 from app.repositories.base import BaseRepository
 
+MAX_LISTED_KEYS = 200
+
 
 @dataclass(frozen=True)
 class PartnerKeyRecord:
@@ -41,12 +43,22 @@ def _record(row: PartnerApiKey) -> PartnerKeyRecord:
 
 class AdminPartnerKeyRepository(BaseRepository):
     async def list_for_merchant(self, merchant_id: str) -> list[PartnerKeyRecord]:
-        rows = await self._session.scalars(
-            select(PartnerApiKey)
+        """Newest first, at most ``MAX_LISTED_KEYS``; the hash is never loaded."""
+        rows = await self._session.execute(
+            select(
+                PartnerApiKey.id,
+                PartnerApiKey.merchant_id,
+                PartnerApiKey.label,
+                PartnerApiKey.created_by,
+                PartnerApiKey.created_at,
+                PartnerApiKey.revoked_at,
+                PartnerApiKey.last_used_at,
+            )
             .where(PartnerApiKey.merchant_id == merchant_id)
             .order_by(PartnerApiKey.created_at.desc(), PartnerApiKey.id)
+            .limit(MAX_LISTED_KEYS)
         )
-        return [_record(row) for row in rows]
+        return [PartnerKeyRecord(*row) for row in rows]
 
     async def get(
         self, merchant_id: str, key_id: str, *, lock: bool = False

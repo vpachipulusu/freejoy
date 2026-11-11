@@ -97,16 +97,20 @@ per request would sit on the hot path of every call). A revoked key keeps its ro
 
 | Route | Permission | Notes |
 | --- | --- | --- |
-| `GET /v1/admin/merchants/{id}/partner-keys` | `merchants.read` | Never the key or its hash |
-| `POST /v1/admin/merchants/{id}/partner-keys` | `merchants.write` | Body `{label}` (1 to 80 characters, one line, not key-looking). 201 with the key once. 409 `merchant_no_website` / `merchant_inactive`; 503 `keys_unavailable` where the environment cannot be written into a key |
-| `POST /v1/admin/merchants/{id}/partner-keys/{key_id}/revoke` | `merchants.write` | A second revoke is a no-op that writes no audit row. A key of another merchant is a 404 |
+| `GET /v1/admin/merchants/{id}/partner-keys` | `partner_keys.read` | Newest first, at most 200; never the key or its hash |
+| `POST /v1/admin/merchants/{id}/partner-keys` | `partner_keys.write` | Body `{label}` (1 to 80 characters, one line, not key-looking). 201 with the key once. 409 `merchant_no_website` / `merchant_inactive`; 503 `keys_unavailable` where the environment cannot be written into a key |
+| `POST /v1/admin/merchants/{id}/partner-keys/{key_id}/revoke` | `partner_keys.write` | A second revoke is a no-op that writes no audit row. A key of another merchant is a 404 |
 
 Create and revoke are audited through `record_admin_action` (`admin.partner_keys.create`, `admin.partner_keys.revoke`,
 resource `partner_api_keys`, resource id = the key id). The audit redaction (`app/services/audit.py`) knows the key prefix, so
 a key pasted into any free-text field is `[REDACTED]`, and a field named like `key_hash` is redacted by name. The
-permissions: `merchants.read` is a new entry in the closed registry (`app/core/permissions.py`); a dedicated
-`partner_keys.*` permission was considered and not added (issuing a key is a merchant-level act; a super admin holds both
-through `*`, anyone else needs `merchants.read` added to their grant).
+permissions: `partner_keys.read` and `partner_keys.write` are dedicated entries in the closed registry
+(`app/core/permissions.py`): `merchants.write` must not silently start issuing credentials. A super admin holds them through `*`; anyone
+else needs them added to their grant (the owner step lists this). An admin without `partner_keys.read` sees a plain note on the merchant
+page and no "Create key" button.
+
+A key stops working when its merchant is deactivated, **and starts working again if the merchant is reactivated** (an unrevoked key is
+still valid): revoke the key if it must not come back.
 
 **Admin UI**: on the merchant page, a keys list (label, created, last used, status), "Create key" (a dialog: label, then the
 key once in a read-only field with a copy button and a polite status announcement; never in a toast, a log or the URL; it is
@@ -118,20 +122,31 @@ cleared when the dialog closes) and "Revoke" (a confirmation that names the key 
 on, before routing and before the body. The rules:
 
 1. Only `Authorization: Bearer <key>` is read: one header, scheme in any case. Never a query parameter, a cookie or another header.
-2. A key presented together with `X-Internal-Key`, `X-Session-Token` or a `Cookie` header is rejected, before any lookup.
-   Partner code never calls `require_internal_key`, `get_session_identity` or the forwarded-client-IP helpers
-   (`tests/api/partner/test_partner_isolation.py` fails on those names in any partner module).
-3. No header, a malformed key, a key for another environment, an unknown id, a wrong secret, a revoked key, an inactive
-   merchant and a mixed-credential request all give the same 401: same body, same headers. The cause is logged with the key
-   id only (never the key, the header or the hash).
+2. A request with no header, an unparseable value, or a key together with `X-Internal-Key`, `X-Session-Token` or a `Cookie`
+   header costs nothing: it gets the plain 401 at once, before any lookup, and is **never counted or rate limited**. A valid key
+   sent with a `Cookie` header (a client with a cookie jar, a preview deployment reached with a protection-bypass cookie) therefore
+   gets the uniform 401: tell a retailer who sees that to send no cookies. Partner code never calls `require_internal_key`,
+   `get_session_identity` or the forwarded-client-IP helpers (`test_partner_isolation.py` fails on those names).
+3. Any well-formed key, **whatever `<env>` it names**, takes one path: look the id up, compare the SHA-256 in constant time (against a
+   dummy for an unknown id), then decide. An unknown id, a wrong secret, a key for another environment, a revoked key and an
+   inactive merchant all give the same 401 (same body, same headers) and are counted in the presented key id's failure bucket; past the
+   limit the answer is the same 429 for all of them. The environment is judged after the comparison, so it selects neither a faster
+   path nor a different bucket. The cause is logged with the key id only (never the key, the header or the hash).
 4. A valid key gives a frozen `PartnerContext(key_id, merchant_id)`, stored in the scope. `require_partner_key` is the dependency
    attached to the sub-app itself (`create_partner_api`): it hands routes that context and answers 401 if there is none. A route
    takes `PartnerContextDep` and scopes every query to `context.merchant_id`.
-5. A database failure during authentication is a 503 (never a 500 or a 401); a failed `last_used_at` update does not refuse a
-   valid key.
+5. A database failure during authentication is a 503 (never a 500 or a 401); any unexpected error is logged **with its traceback**
+   and sent to the exception reporter (never the key, hash or header: none is ever passed down), and answers the same fixed 503. A
+   failed `last_used_at` update does not refuse a valid key. The partner connection must be the restricted role: the first session
+   checks the live connection (`PartnerSessionProvider`) and refuses a role that is superuser, can create roles or databases, bypasses
+   row security or can read `users`.
+6. No limiter call runs while a database session is open: the decision is made inside the session, the session is closed, then the
+   limiter is called.
 
 The sub-app's lifespan and startup hooks never run under a mount, so nothing relies on them: the partner session provider is
-built the first time it is asked for (`app/partner/deps.py`).
+built the first time it is asked for (`app/partner/deps.py`). **Known cost:** a partner request opens two connections (one for
+authentication, one for the route's session; each connect is a handshake under NullPool). The `last_used_at` write and its commit
+happen only when the lookup says the value is more than a minute old. Sharing one session per request is a follow-up for FREEJ-58.
 
 ## Rate limits
 
@@ -142,41 +157,103 @@ helpers (`app/core/rate_limit_enforcement.py`). None is keyed by client address:
 | --- | --- | --- | --- |
 | `PARTNER_READ_POLICY` (`GET`, `HEAD`, `OPTIONS`) | `rl:partner_read:key:<key id>` | 120 per minute | **fails open** (log, Sentry, let through) |
 | `PARTNER_WRITE_POLICY` (any other method) | `rl:partner_write:key:<key id>` | 30 per minute | **fails closed** (503) |
-| `PARTNER_AUTH_FAILURE_POLICY` (a failed authentication) | `rl:partner_auth_failure:key:<presented key id>`, or `rl:partner_auth_failure:malformed` for a key that does not parse | 30 per minute | **fails closed** (503) |
+| `PARTNER_AUTH_FAILURE_POLICY` (a failed authentication of a well-formed key) | `rl:partner_auth_failure:key:<presented key id>` | 30 per minute | **fails closed** (503) |
 
-The read and write limit is one dependency on the sub-app (`limit_partner_requests`) that picks the policy from the method, so a
-route cannot forget it. Failures are counted only on failure: a valid key is never held up by them. Limitation: a caller that
-rotates through new, well-formed key ids gets a bucket each, and the shared bucket for malformed keys is shared by everyone who sends one.
-The 256-bit secret is what stops guessing; these limits bound database lookups and noise. The Vercel Firewall rate rule on
-`/partner/v1/` (a launch precondition below) covers the rest.
+The read and write limit is applied **once, by the surface, right after a key authenticates and before routing**
+(`app/partner/limits.py`), so it also covers an authenticated request that matches no route (an unknown path or a wrong method costs a
+connection like any other) and a matched route is never counted twice. Only a 429 carries `X-RateLimit-*` and `Retry-After`; a success
+does not. Failures are counted only for well-formed keys that fail; a valid key is never counted and is never held up by failures.
+
+**What the failure limit does not do: it does not bound database work.** Every well-formed key costs one connection and one `SELECT`,
+counted or not. Counting before the lookup would let anyone who knows a key id (it is not secret) lock its owner out, so it does not. The
+limit only turns repeated failures for one key id into a 429. A caller that rotates through new, well-formed key ids gets a bucket each.
+Unauthenticated lookups are bounded only by **the Vercel Firewall rate rule on `/partner/v1/`** and by the role's **connection limit**
+(default 20; excess connections fail and answer 503 without touching the owner's connection budget). The firewall rule is therefore a
+**condition of `PARTNER_API_ENABLED=true`**, next to `PARTNER_DATABASE_URL` (launch preconditions below).
 
 ## The restricted database role
 
 Every partner route and the authentication use `PartnerSessionProvider` (`app/core/database.py`), bound to `PARTNER_DATABASE_URL`,
-never the owner `DATABASE_URL`. `PARTNER_DATABASE_URL` is required when `PARTNER_API_ENABLED` is true (startup fails with a
-clear message if it is missing, or equals `DATABASE_URL`) and is not needed while the switch is off. It is a secret in
-`Settings`, documented in `.env.example` (placeholder only).
+never the owner `DATABASE_URL`. `PARTNER_DATABASE_URL` is required when `PARTNER_API_ENABLED` is true and is not needed while the
+switch is off. Startup fails, with a message that never quotes the URL, if it is missing, unparseable, or names the **same user** as
+`DATABASE_URL` (the users are compared, not the strings: another driver prefix, query string, host spelling or dropped port is still the
+owner). The first session also checks the live connection (see *Authentication*), so a restricted-looking user that was given too
+much is refused too. It is a secret in `Settings`, documented in `.env.example` (placeholder only).
 
-`commands/sql/partner_role.sql` creates the role `freejoy_partner` (the role name is a psql parameter) and grants exactly:
-`SELECT` and `UPDATE (last_used_at)` on `partner_api_keys`, `SELECT` on `merchants`, `INSERT` (only) on `audit_logs`. It has no
-access to users, admins, organisations, memberships, subscribers, billing, TOTP or login tables, and no DDL. It is idempotent: the role is created only if
-absent and its table privileges are rebuilt from scratch each run. Later partner stories extend this file.
+`commands/sql/partner_role.sql` creates the role `freejoy_partner` and grants exactly, as **column** privileges:
 
-**How the owner creates it** (run as the database owner, after `alembic upgrade head`, and again after any story that adds a grant):
+- `SELECT (id, merchant_id, key_hash, label, revoked_at, last_used_at)` and `UPDATE (last_used_at)` on `partner_api_keys` (not
+  `created_by`; `UPDATE (last_used_at)` lets the role set that one column to any value on any key, so a stolen key's use could be hidden
+  from the admin page, and it cannot touch the hash or the revoke time);
+- `SELECT (id, name, active)` on `merchants`.
 
-```bash
-psql "$OWNER_DATABASE_URL" -v ON_ERROR_STOP=1 \
-     -v partner_role=freejoy_partner -v partner_password="$PARTNER_ROLE_PASSWORD" \
-     -f fastapi_backend/commands/sql/partner_role.sql
-```
+There is **no grant on `audit_logs`**: no partner code writes an audit row yet. The story that first does adds one, constrained (a row
+policy or trigger that fixes `user_id` and the action prefix), not the bare table. The role has no access to users, admins, organisations,
+memberships, subscribers, billing, TOTP or login tables, and no DDL **in `public`**.
 
-Then set `PARTNER_DATABASE_URL` in the backend's environment to the role's URL, ending `?sslmode=verify-full`. PostgreSQL 15
-or newer is assumed. This is an owner step: nothing in a deploy runs it.
+What the script does, in one transaction: creates the role if absent (every special attribute off, `NOINHERIT`, a `CONNECTION LIMIT`, all
+stated on `CREATE ROLE`, so it works for an owner that is not a superuser); for a role that already exists it alters no attribute and
+**raises** if the role holds a special attribute, is a member of any role, owns a relation, or is the role running the script; sets
+`statement_timeout` (10 s), `lock_timeout` (2 s) and `idle_in_transaction_session_timeout` (15 s) on the role (these stop accidents, not
+injected SQL: the role can reset them for its own session); revokes every privilege the role holds directly on tables, sequences,
+functions, the public schema and the database, grants the lines above, then **verifies from the catalog**, counting privileges that
+reach the role through `PUBLIC`, and raises (rolling everything back) if the role can do anything else in `public`. It never drops
+anything. What the role keeps through `PUBLIC`: reading the catalogs (table and column names, approximate row counts), temporary tables,
+advisory locks, `LISTEN`/`NOTIFY`, large objects, and `CONNECT` to other databases in the cluster.
 
-`tests/core/test_partner_role_e2e.py` (Postgres only) applies the script, connects as the role and checks it is refused on every other
-table, on `UPDATE offers`, on `DELETE`/`UPDATE`/`SELECT` of `audit_logs`, and on DDL, and that the key lookup works. Roles are cluster-wide
-and the test cluster is shared, so the test never touches a role called `freejoy_partner`: it uses `freejoy_partner_<database name>`
-(`tests/partner_role_support.py`), created by the script if absent, never dropped, with grants only inside its own database.
+### How the owner creates it (production)
+
+1. Use the **direct (unpooled)** owner URL, not the pooled one, and psql 15 or newer on PostgreSQL 15 or newer. The owner role needs
+   `CREATEROLE`; it does not need to be a superuser. **The only real proof that the script runs on the hosted database is the
+   owner's run there**: the tests ran it on a local superuser cluster and, under `SET ROLE`, as a non-superuser with `CREATEROLE`.
+2. Generate a long password (for example `openssl rand -base64 32`) and keep it in the environment, never on the command line:
+
+   ```bash
+   export PARTNER_ROLE_PASSWORD='<the password>'
+   psql "$OWNER_DIRECT_DATABASE_URL" -v ON_ERROR_STOP=1 -f fastapi_backend/commands/sql/partner_role.sql
+   ```
+
+   Optional: `-v partner_role=<name>` (default `freejoy_partner`) and `-v partner_connection_limit=<n>` (default 20).
+3. Verify, in psql as the owner:
+
+   ```sql
+   SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolconnlimit, rolconfig
+     FROM pg_roles WHERE rolname = 'freejoy_partner';
+   \dp partner_api_keys
+   \dp merchants
+   SELECT table_name, column_name, privilege_type FROM information_schema.column_privileges
+    WHERE grantee = 'freejoy_partner' ORDER BY 1, 2, 3;
+   ```
+
+   The script already verified this inside its transaction; this is for the owner's own eyes.
+4. Set `PARTNER_DATABASE_URL` in the backend's environment to the role's URL: **URL-encode the password** (`python -c "import
+   urllib.parse,sys;print(urllib.parse.quote(sys.argv[1], safe=''))" "$PARTNER_ROLE_PASSWORD"`), use the **pooled** host like the
+   application URL, and end it `?sslmode=verify-full` (see *TLS* below). Grant `partner_keys.read` and `partner_keys.write` to the admins
+   who should manage keys.
+5. **Re-run the script** after every story that adds a grant to it, and after any migration (or downgrade and upgrade) that drops and
+   recreates a granted table: grants go with the table.
+6. **Rollback** (with the surface off), in each database the script ran in:
+
+   ```sql
+   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM freejoy_partner;
+   REVOKE ALL ON SCHEMA public FROM freejoy_partner;
+   REVOKE ALL ON DATABASE <database> FROM freejoy_partner;
+   ```
+
+   then once, `DROP ROLE freejoy_partner;`.
+
+**TLS.** asyncpg treats the string `verify-full` like libpq: it trusts only `PGSSLROOTCERT` or `~/.postgresql/root.crt` and never the
+system CA store, so on a serverless function with neither it cannot connect. `app/core/db_url.py` therefore maps `verify-full` to a default
+SSL context (system CA store, certificate required, host name checked) unless `PGSSLROOTCERT` is set. `sslmode=require` encrypts but
+verifies nothing; do not use it as a way round a failing `verify-full`.
+
+`tests/core/test_partner_role_e2e.py` (Postgres only) applies the script and asks the catalog what the role holds (every relation, every
+column, every privilege type, and the privileges through `PUBLIC`); it dirties the role first and checks the grants are taken away, that
+a membership or a `PUBLIC` grant makes the script raise, that the role has no access to `audit_logs`, and that the key lookup works. Roles
+are cluster-wide and the test cluster is shared, so the test never touches a role called `freejoy_partner`: it uses
+`freejoy_partner_<database name>` (`tests/partner_role_support.py`), applied once per module, created by the script if absent, never
+dropped, with grants only inside its own database. `tests/commands/test_partner_role_script.py` checks the script text without a
+database, and ties its column grants to the Core table definitions so a new Core column without a grant fails a test, not production.
 
 ## How confinement works
 
@@ -212,8 +289,8 @@ you need to add middleware to `app/main.py`, that test will fail; decide there h
 3. If the route needs a table, add it to `app/partner/keys.py` (or a sibling) with SQLAlchemy Core, add the grant to
    `commands/sql/partner_role.sql`, extend `tests/core/test_partner_role_e2e.py`, and tell the owner to re-run the script.
 4. Regenerate the partner schema (below). The generator writes the full path, `/partner/v1/offers`.
-5. Run the proofs. They must stay green; `test_partner_credentials.py` generates its cases from the real routes, so a new
-   route is covered automatically.
+5. Run the proofs. They must stay green. `test_partner_credentials.py` takes its routes and declared methods from the real
+   routes, so a new route is covered without an edit; a route that needs a body or a path parameter adds its own cases beside it.
 
 ## The partner schema
 
@@ -280,16 +357,21 @@ Not done by this story. Recorded in [ADR-013](../adr/0013-partner-api.md).
 2. Turn on Deployment Protection for preview deployments.
 3. Add a Vercel Firewall rate rule on `/partner/v1/`. The rewrite sends every such request to the backend function, which
    answers the 404 itself, so unauthenticated traffic costs function time and shares concurrency with the internal API
-   even while the surface is off.
+   even while the surface is off. **This rule is a condition of switching the surface on** (next to `PARTNER_DATABASE_URL`): once on, every
+   well-formed key costs a database connection and a `SELECT` that no in-backend limit bounds (the failure limit only changes the
+   answer to 429), and only this rule and the role's connection limit stand between that and the shared database.
 4. Check the first production run of the `partner-surface` smoke job. It needs no secret and passes whether the
    surface is off (every path is the same 404) or on (authentication comes before routing, so a "must" path answers 404 or 401, always with the
    surface header). If it fails, the backend answered a path under or around the prefix without the surface header:
    read its log before changing anything. It is also a manual step: `bash scripts/smoke-partner-surface.sh https://<domain>`.
-5. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` (see *The restricted database role*) and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`). Startup refuses `PARTNER_API_ENABLED=true` without it.
+5. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` (see *The restricted database role*, on the direct URL, with the
+   password from the environment), set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`), and grant `partner_keys.read` and
+   `partner_keys.write` to the admins who should manage keys. Startup refuses `PARTNER_API_ENABLED=true` without the URL.
 6. Leave `PARTNER_API_ENABLED` unset in production until FREEJ-58 and FREEJ-59 are in.
 
 The smoke is a workflow job rather than a manual step because it can run without secrets and cannot break while the
-surface is off or on (it sends no key). It speaks https only, validates the base URL, follows redirects once (on the root, to find the
+surface is off or on: a request with no key never reaches the database and is never rate limited, so every probe answers the same 404 or
+401. It speaks https only, validates the base URL, follows redirects once (on the root, to find the
 effective origin) and never on a probe. Whether the real Vercel edge treats the `..`, `%2e%2e`, `%0A` and `//` paths the
 way the script assumes has not been seen yet; it insists on the surface header and `Cache-Control` only for paths that
 cannot leave the prefix, and for the others fails only on a backend answer (`X-Request-ID` present, or a JSON error

@@ -19,6 +19,9 @@ from sqlalchemy.engine import URL, make_url
 SCRIPT = Path(__file__).resolve().parents[1] / "commands" / "sql" / "partner_role.sql"
 BEGIN_MARKER = "-- parameters (begin)"
 END_MARKER = "-- parameters (end)"
+TX_BEGIN_MARKER = "-- transaction end (begin)"
+TX_END_MARKER = "-- transaction end (end)"
+DEFAULT_CONNECTION_LIMIT = 20
 MAX_ROLE_LENGTH = 63
 
 
@@ -37,15 +40,20 @@ def role_password_for(role: str) -> str:
     return f"pw-{hashlib.sha256(role.encode()).hexdigest()[:24]}"
 
 
+def _without_block(text: str, begin: str, end: str) -> str:
+    start = text.index(begin)
+    stop = text.index(end) + len(end)
+    return text[:start] + text[stop:]
+
+
 def script_body() -> str:
-    """The script without its psql parameter block."""
+    """The script without its psql-only blocks (the parameters and the closing COMMIT)."""
     text = SCRIPT.read_text(encoding="utf-8")
-    start = text.index(BEGIN_MARKER)
-    end = text.index(END_MARKER) + len(END_MARKER)
-    return text[:start] + text[end:]
+    text = _without_block(text, BEGIN_MARKER, END_MARKER)
+    return _without_block(text, TX_BEGIN_MARKER, TX_END_MARKER)
 
 
-def _asyncpg_dsn(
+def asyncpg_dsn(
     url: URL, user: str | None = None, password: str | None = None
 ) -> dict[str, object]:
     return {
@@ -58,18 +66,26 @@ def _asyncpg_dsn(
     }
 
 
-async def apply_partner_role(owner_url: str, role: str, password: str) -> None:
-    """Run the committed script as the database owner for ``role``."""
+async def apply_partner_role(
+    owner_url: str,
+    role: str,
+    password: str,
+    connection_limit: int = DEFAULT_CONNECTION_LIMIT,
+) -> None:
+    """Run the committed script as the database owner for ``role``, in one transaction like the real run."""
     url = make_url(owner_url)
-    connection = await asyncpg.connect(**_asyncpg_dsn(url))
+    connection = await asyncpg.connect(**asyncpg_dsn(url))
     try:
-        await connection.execute(
-            "SELECT set_config('freejoy.partner_role', $1, false), "
-            "set_config('freejoy.partner_password', $2, false)",
-            role,
-            password,
-        )
-        await connection.execute(script_body())
+        async with connection.transaction():
+            await connection.execute(
+                "SELECT set_config('freejoy.partner_role', $1, true), "
+                "set_config('freejoy.partner_password', $2, true), "
+                "set_config('freejoy.partner_connection_limit', $3, true)",
+                role,
+                password,
+                str(connection_limit),
+            )
+            await connection.execute(script_body())
     finally:
         await connection.close()
 

@@ -1,7 +1,7 @@
 """Admin partner keys API (ADR-013): list, issue and revoke a merchant's partner API keys.
 
 Behind the internal key and an admin permission, like ``admin_merchants``: listing needs
-``merchants.read``, issuing and revoking need ``merchants.write``. The key is returned once, by the
+``partner_keys.read``, issuing and revoking need ``partner_keys.write`` (dedicated permissions: ``merchants.write`` must not silently start issuing credentials). The key is returned once, by the
 create call, and is never stored, logged or audited; every response is ``no-store``.
 """
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from app.api.admin import AuditorDep, require_admin
 from app.api.deps import SessionDep
 from app.api.v1.admin_catalogue_common import (
+    CatalogueErrorResponse,
     ResourceId,
     admin_router,
     catalogue_http_error,
@@ -36,8 +37,8 @@ router = admin_router(
     "/v1/admin/merchants/{merchant_id}/partner-keys", "admin-partner-keys"
 )
 
-ReadAdmin = Annotated[AdminContext, Depends(require_admin("merchants.read"))]
-WriteAdmin = Annotated[AdminContext, Depends(require_admin("merchants.write"))]
+ReadAdmin = Annotated[AdminContext, Depends(require_admin("partner_keys.read"))]
+WriteAdmin = Annotated[AdminContext, Depends(require_admin("partner_keys.write"))]
 
 Label = Annotated[str, line(80)]
 
@@ -122,7 +123,12 @@ async def admin_list_partner_keys(
     return PartnerKeysResponse(data=[_out(record) for record in records])
 
 
-@router.post("", response_model=IssuedPartnerKeyResponse, status_code=201)
+@router.post(
+    "",
+    response_model=IssuedPartnerKeyResponse,
+    status_code=201,
+    responses={503: {"model": CatalogueErrorResponse}},
+)
 async def admin_create_partner_key(
     merchant_id: ResourceId,
     body: CreatePartnerKeyRequest,

@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any, Protocol
 
+from app.core.partner_keys import KEY_LOOKING_SOURCE
 from app.core.permissions import AdminContext
 
 REDACTED = "[REDACTED]"
@@ -74,7 +75,7 @@ _SENSITIVE_EXACT = frozenset(
 # Free-text values that look like credentials, wherever they appear. ``fj_<env>_<id>`` is the prefix of a
 # partner API key (app.core.partner_keys): a key pasted into free text, whole or cut short, is redacted.
 _SECRET_VALUE = re.compile(
-    r"(bearer\s+\S|fj_[a-z0-9]{1,16}_[a-z0-9]{8,}|eyJ[A-Za-z0-9_-]{8,}|otpauth://|\b(sk|rk|pk)_(live|test)_|whsec_|postgres(ql)?(\+\w+)?://"
+    rf"(bearer\s+\S|{KEY_LOOKING_SOURCE}|eyJ[A-Za-z0-9_-]{{8,}}|otpauth://|\b(sk|rk|pk)_(live|test)_|whsec_|postgres(ql)?(\+\w+)?://"
     r"|(token|secret|password|passwd|api[_-]?key)\s*[=:])",
     re.IGNORECASE,
 )

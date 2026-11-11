@@ -80,7 +80,20 @@ def test_the_internal_schema_file_does_not_mention_the_partner_surface() -> None
     text = INTERNAL_SCHEMA.read_text(encoding="utf-8")
     paths = json.loads(text)["paths"]
 
-    assert "/partner/v1" not in text
+    assert "/partner/v1" not in text.lower()
+    components = {
+        name
+        for name in json.loads(text)["components"]["schemas"]
+        if "partner" in name.lower()
+    }
+    assert components == {
+        "CreatePartnerKeyRequest",
+        "IssuedPartnerKey",
+        "IssuedPartnerKeyResponse",
+        "PartnerKeyOut",
+        "PartnerKeyResponse",
+        "PartnerKeysResponse",
+    }
     assert "x-freejoy-surface" not in text.lower()
     assert "Freejoy Partner API" not in text
     partner_paths = [p for p in paths if "partner" in p.lower()]

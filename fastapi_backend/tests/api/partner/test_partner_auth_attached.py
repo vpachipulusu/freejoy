@@ -1,4 +1,5 @@
-"""Partner authentication is attached to the sub-app, not to individual routes (ADR-013).
+"""Partner authentication is attached to the sub-app, not to individual routes (ADR-013). The per-key rate limit is not a
+dependency at all: the surface applies it right after authentication (``test_partner_limits.py``).
 
 A route added to the partner sub-app cannot forget it: the dependency is on the app, every route has it in
 its dependency tree, and no partner route reaches the internal credentials (``require_internal_key``,
@@ -22,7 +23,6 @@ from app.api.rate_limit import client_ip, client_key, forwarded_client_ip
 from app.main import app
 from app.partner.app import create_partner_api
 from app.partner.auth import require_partner_key
-from app.partner.limits import limit_partner_requests
 from app.partner.mount import PartnerMount
 
 FORBIDDEN_CALLS = (
@@ -55,7 +55,7 @@ def attachment_problems(api: FastAPI) -> list[str]:
     """Every way ``api`` fails to carry partner authentication and a rate limit on the app itself."""
     problems: list[str] = []
     attached = app_level_calls(api)
-    for required in (require_partner_key, limit_partner_requests):
+    for required in (require_partner_key,):
         if required not in attached:
             problems.append(f"{required.__name__} is not a dependency of the sub-app")
     for context in iter_route_contexts(api.routes):
@@ -97,7 +97,6 @@ def test_the_proof_fails_on_a_sub_app_without_the_dependency() -> None:
     problems = attachment_problems(bare)
 
     assert "require_partner_key is not a dependency of the sub-app" in problems
-    assert "limit_partner_requests is not a dependency of the sub-app" in problems
     assert "/open has no require_partner_key in its tree" in problems
 
 

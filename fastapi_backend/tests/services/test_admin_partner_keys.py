@@ -24,8 +24,11 @@ ENVIRONMENT = "test"
 class FakeMerchants:
     def __init__(self, *items: Any) -> None:
         self.items = {item.id: item for item in items}
+        self.locked: list[str] = []
 
     async def get(self, merchant_id: str, *, lock: bool = False) -> Any:
+        if lock:
+            self.locked.append(merchant_id)
         return self.items.get(merchant_id)
 
 
@@ -173,3 +176,13 @@ async def test_listing_returns_the_merchants_keys_only() -> None:
     listed = await setup.service.list_keys("mer1")
 
     assert [k.label for k in listed] == ["One"]
+
+
+async def test_creating_locks_the_merchant_and_revoking_locks_the_key() -> None:
+    setup = Setup()
+
+    issued = await setup.service.create_key(ACTOR, "mer1", "Feed")
+    await setup.service.revoke_key(ACTOR, "mer1", issued.record.id)
+
+    assert setup.merchants.locked == ["mer1"]
+    assert setup.keys.locked_reads == [issued.record.id]

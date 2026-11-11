@@ -47,8 +47,9 @@ many IPs.
   API 100 per minute, webhook 200 per minute (sliding window).
 - Partner API (FREEJ-57, [ADR-013](0013-partner-api.md)): keys `rl:partner_read:key:{key id}` (120 per minute, fails open),
   `rl:partner_write:key:{key id}` (30 per minute, fails closed) and, for failed authentications,
-  `rl:partner_auth_failure:key:{presented key id}` or `rl:partner_auth_failure:malformed` (30 per minute, fails closed; counted only on
-  failure, so a valid key is never held up). Never keyed by client address: partner code does not read forwarded client-IP headers. The
+  `rl:partner_auth_failure:key:{presented key id}` (30 per minute, fails closed; counted only when a well-formed key fails, so a valid key
+  is never held up, and never for a request with no header, an unparseable key or mixed credentials). The read and write limits are applied
+  by the surface after authentication, before routing. None of them bounds database work for unauthenticated callers (ADR-013). Never keyed by client address: partner code does not read forwarded client-IP headers. The
   enforcement helpers and the limiter singleton live in `app/core` (`rate_limit_enforcement.py`, `rate_limiter_provider.py`) so the partner
   package, which imports only `app.core`, uses them; `app.api.rate_limit` and `app.api.deps` re-export the names.
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.

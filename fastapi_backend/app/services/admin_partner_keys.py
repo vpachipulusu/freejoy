@@ -7,12 +7,11 @@ an inactive one, cannot be given a key. Revoking a key that is already revoked i
 audit row.
 """
 
-import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.core.ids import new_id
-from app.core.partner_keys import KEY_PREFIX, generate_key
+from app.core.partner_keys import KEY_LOOKING, generate_key
 from app.core.permissions import AdminContext
 from app.repositories.admin_merchants import MerchantRecord
 from app.repositories.admin_partner_keys import PartnerKeyRecord
@@ -27,9 +26,6 @@ __all__ = ["AdminPartnerKeyService", "IssuedKey"]
 
 RESOURCE = "partner_api_keys"
 # A label that carries a key (or the start of one) would keep the secret in plain text and show it in the UI.
-_KEY_LOOKING = re.compile(
-    rf"{KEY_PREFIX}_[a-z0-9]{{1,16}}_[a-z0-9]{{8,}}", re.IGNORECASE
-)
 
 
 class KeyStore(Protocol):
@@ -80,7 +76,7 @@ class AdminPartnerKeyService:
     ) -> IssuedKey:
         if self.environment is None:
             raise KeyNotAllowed("keys_unavailable")
-        if _KEY_LOOKING.search(label):
+        if KEY_LOOKING.search(label):
             raise InvalidInput("invalid_label")
         merchant = await self._merchant(merchant_id, lock=True)
         if not merchant.active:

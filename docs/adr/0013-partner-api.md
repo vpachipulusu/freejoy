@@ -138,7 +138,7 @@ at the boundary, and the triggers below.
 
 **Unauthenticated traffic reaches the backend function even while the surface is off.** The rewrite sends every
 `/partner/v1/...` request to the backend, which answers 404 itself. That costs function time and concurrency shared
-with the internal API, and nothing rate-limits it with the switch (the partner rate-limit policies, keyed by key id, came with FREEJ-57; a failed-authentication limit bounds lookups per key id, and the edge rule covers a caller that rotates ids). The first
+with the internal API, and nothing rate-limits it with the switch (the partner rate-limit policies, keyed by key id, came with FREEJ-57; the failed-authentication limit does NOT bound database work: it only turns repeated failures for one key id into a 429. Unauthenticated lookups are bounded only by the edge rule and the role's connection limit). The first
 mitigation is a Vercel Firewall rate rule on `/partner/v1/` (a launch precondition below).
 
 **The body is buffered by Vercel before the cap runs.** The surface does not buffer it, but the platform may hold the
@@ -164,14 +164,15 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
    `X-Freejoy-Surface` header. Read the first production run, because it is the first time these paths meet
    Vercel's edge (below).
 4. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`).
-   Startup refuses `PARTNER_API_ENABLED=true` without it.
+   Startup refuses `PARTNER_API_ENABLED=true` without it, and refuses a URL whose user is the owner's. **The Vercel Firewall rate rule in
+   step 2 is a condition of `PARTNER_API_ENABLED=true`**, not a nicety: nothing else bounds unauthenticated lookups.
 5. Do not set `PARTNER_API_ENABLED=true` in production until the scoping story (FREEJ-58) and the submissions story (FREEJ-59) are in and reviewed.
 
 ### Amendments to earlier records
 
 - **ADR-003.** Partners are the second machine caller that its "Alternatives considered" section anticipated
   ("revisit only if a second machine caller appears"). They do not use `X-Internal-Key` or the forwarded session:
-  the partner surface has its own credential, described under *Planned design*. Section 5 of ADR-003 said the
+  the partner surface has its own credential, described under *The mechanism* and *Keys and the restricted role*. Section 5 of ADR-003 said the
   backend URL is public. After ADR-011 it is not: only `/webhooks/stripe` and now `/partner/v1/...` are rewritten
   to it.
 - **ADR-004.** The layering gains `app/partner/`, a package that imports only `app.core` and itself (checked by a
@@ -179,7 +180,7 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   configured it, and ADR-004's text now says exactly what it bans.
 - **ADR-007.** Partner endpoints get their own rate-limit policies, keyed by key id, never by user, organisation or client address
   (partner code does not read forwarded client-IP headers): `PARTNER_READ_POLICY` (fails open), `PARTNER_WRITE_POLICY` (fails closed) and
-  `PARTNER_AUTH_FAILURE_POLICY` (failed authentications, per presented key id, one shared bucket for malformed keys; fails closed). The
+  `PARTNER_AUTH_FAILURE_POLICY` (failed authentications of a well-formed key, per presented key id; fails closed; a request with no header, an unparseable key or mixed credentials is never counted). The read and write limits are applied by the surface right after authentication, before routing, so they cover unmatched paths too. The
   enforcement helpers and the limiter singleton moved to `app/core` so the partner package can use them.
 - **ADR-008.** The partner contract is a separate, versioned document (`docs/partner/openapi.json`,
   prefix `/partner/v1`) and is not part of `nextjs-frontend/openapi.json` or the generated client. The envelope is
@@ -196,7 +197,7 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   selects the row, the comparison is constant time, and an unknown id costs the same comparison against a dummy.
 - **Restricted database role (built):** `freejoy_partner`, created from `fastapi_backend/commands/sql/partner_role.sql` by the owner, reached through
   `PartnerSessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam; required when the switch is on). `SELECT` and `UPDATE (last_used_at)` on
-  `partner_api_keys`, `SELECT` on `merchants`, `INSERT` only on `audit_logs`; nothing else, no DDL.
+  `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants`, as column grants; no access to `audit_logs`, nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
 - **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (FREEJ-58).
 - **Submissions create drafts only.** A partner can never publish; the existing review and publish rules stay
   ours.
@@ -241,8 +242,8 @@ Move the partner API into its own service (or project) when any of these happens
 
 ## Consequences
 
-- The partner surface exists, answers 404 to everything and is covered by tests before any endpoint is added.
-  Adding the first endpoint (FREEJ-58) changes one file set and must keep the proofs green.
+- The partner surface exists, authenticates before routing and serves one endpoint (`GET /partner/v1/me`); every proof is in the gate.
+  Adding the next endpoint (FREEJ-58) changes one file set and must keep the proofs green.
 - Every backend change that adds a route now passes through the confinement walk: an open route needs an explicit
   allowlist entry with a reason.
 - `scripts/gate.sh` and pre-commit gain a second schema check, for `docs/partner/openapi.json`.

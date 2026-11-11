@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
-from sqlalchemy import NullPool
+from sqlalchemy import NullPool, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -69,6 +69,18 @@ class PartnerDatabaseUnavailable(RuntimeError):
     """The partner surface has no restricted database role to connect as."""
 
 
+class PartnerRoleNotRestricted(RuntimeError):
+    """The partner connection is not the restricted role (it is privileged, or it can read ``users``)."""
+
+
+# True only for a role with no special attribute that cannot read the users table (what ``freejoy_partner`` is).
+RESTRICTED_ROLE_QUERY = text(
+    "SELECT NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb) "
+    "AND NOT has_table_privilege(current_user, 'users', 'SELECT') "
+    "FROM pg_roles WHERE rolname = current_user"
+)
+
+
 class PartnerSessionProvider:
     """Sessions for the partner surface, on the restricted database role (ADR-013, FREEJ-57).
 
@@ -80,11 +92,17 @@ class PartnerSessionProvider:
     The engine is built on first use, not at import and not in a lifespan hook: a mounted sub-app's
     lifespan never runs, and an engine built at import would need the URL on every deployment that
     leaves the surface off. Fixed to one URL; a missing one fails at the first ``session()``.
+
+    The first session also checks who the connection really is (``RESTRICTED_ROLE_QUERY``): a URL that
+    names the owner, or a role that was given too much, is refused with ``PartnerRoleNotRestricted``
+    (the surface answers 503) instead of serving as a privileged role. A pass is remembered; a failure is
+    checked again on the next session. The message never contains the URL.
     """
 
     def __init__(self, database_url: str | None) -> None:
         self._database_url = database_url
         self._maker: async_sessionmaker[AsyncSession] | None = None
+        self._verified = False
 
     def _session_maker(self) -> async_sessionmaker[AsyncSession]:
         if self._maker is None:
@@ -96,7 +114,17 @@ class PartnerSessionProvider:
             )
         return self._maker
 
+    async def _verify_role(self, session: AsyncSession) -> None:
+        restricted = (await session.execute(RESTRICTED_ROLE_QUERY)).scalar_one_or_none()
+        if restricted is not True:
+            raise PartnerRoleNotRestricted(
+                "the partner database connection is not the restricted partner role"
+            )
+        self._verified = True
+
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
         async with self._session_maker()() as session:
+            if not self._verified:
+                await self._verify_role(session)
             yield session

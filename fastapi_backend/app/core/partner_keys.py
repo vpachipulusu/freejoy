@@ -39,6 +39,12 @@ _KEY = re.compile(
     rf"_(?P<key_id>[a-z0-9]{{{KEY_ID_LENGTH}}})_(?P<secret>[0-9a-f]{{{SECRET_LENGTH}}})",
     re.ASCII,
 )
+# What a key (whole, or cut short) looks like in free text: used to keep keys out of labels and audit rows.
+# One definition: the audit redaction and the admin label check build on it, and a frontend test pins its copy.
+KEY_LOOKING_SOURCE = (
+    rf"{KEY_PREFIX}_[a-z0-9]{{1,{MAX_ENVIRONMENT_LENGTH}}}_[a-z0-9]{{8,}}"
+)
+KEY_LOOKING = re.compile(KEY_LOOKING_SOURCE, re.IGNORECASE)
 # Compared when the key id is unknown, so the work is the same as for a known one.
 DUMMY_DIGEST = hashlib.sha256(b"partner-key-dummy-digest").hexdigest()
 
@@ -57,10 +63,11 @@ class GeneratedKey:
 
 @dataclass(frozen=True)
 class ParsedKey:
-    """A well-formed key presented by a caller: the id to look up and the digest to compare."""
+    """A well-formed key presented by a caller: the id to look up, the digest to compare and the ``<env>`` it names."""
 
     key_id: str
     digest: str
+    environment: str
 
     def __repr__(self) -> str:
         return f"ParsedKey(key_id={self.key_id!r})"
@@ -88,17 +95,27 @@ def generate_key(environment: str, key_id: str) -> GeneratedKey:
     return GeneratedKey(key_id=key_id, value=value, digest=key_digest(value))
 
 
-def parse_key(raw: str, environment: str) -> ParsedKey | None:
-    """The key id and digest of a well-formed key for ``environment``; ``None`` for anything else.
+def parse_well_formed_key(raw: str) -> ParsedKey | None:
+    """The key id, digest and environment of a well-formed key, whatever environment it names; else ``None``.
 
-    ``fullmatch`` anchors both ends and, unlike ``$``, does not accept a trailing newline.
+    ``fullmatch`` anchors both ends and, unlike ``$``, does not accept a trailing newline. The environment is
+    returned, not judged: the authenticator looks the id up and compares like for any other key, so the
+    environment never selects a faster or differently limited path.
     """
     if len(raw) > MAX_KEY_LENGTH:
         return None
     match = _KEY.fullmatch(raw)
-    if match is None or match["env"] != environment:
+    if match is None:
         return None
-    return ParsedKey(key_id=match["key_id"], digest=key_digest(raw))
+    return ParsedKey(
+        key_id=match["key_id"], digest=key_digest(raw), environment=match["env"]
+    )
+
+
+def parse_key(raw: str, environment: str) -> ParsedKey | None:
+    """Like ``parse_well_formed_key`` but ``None`` for a key that names another environment."""
+    parsed = parse_well_formed_key(raw)
+    return parsed if parsed is not None and parsed.environment == environment else None
 
 
 def key_matches(presented_digest: str, stored_digest: str | None) -> bool:

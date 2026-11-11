@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from sqlalchemy import NullPool
@@ -107,25 +107,78 @@ def test_engine_and_target_reprs_never_contain_the_password() -> None:
     assert "s3cret-pw" not in repr(to_async_target(raw))
 
 
-async def test_partner_provider_builds_its_engine_on_first_use_from_its_own_url() -> (
-    None
-):
+def test_partner_provider_builds_its_engine_on_first_use_from_its_own_url() -> None:
     from app.core.database import PartnerSessionProvider
 
     url = "postgresql+asyncpg://freejoy_partner:placeholder@localhost:1/partner"
     provider = PartnerSessionProvider(url)
     assert provider._maker is None  # nothing is built at construction
 
-    async with provider.session() as session:
-        assert isinstance(session, AsyncSession)
-        assert session.bind is not engine
-        assert (
-            session.bind is not None and session.bind.url.username == "freejoy_partner"
-        )  # type: ignore[attr-defined]
-    maker = provider._maker
-    async with provider.session():
-        pass
-    assert provider._maker is maker  # built once
+    maker = provider._session_maker()
+
+    assert maker is provider._session_maker()  # built once
+    assert maker.kw["bind"] is not engine
+    assert maker.kw["bind"].url.username == "freejoy_partner"
+
+
+class _FakeRoleSession:
+    def __init__(self, restricted: object, log: list[str]) -> None:
+        self._restricted = restricted
+        self._log = log
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def execute(self, statement: object) -> Any:
+        self._log.append("verify")
+        value = self._restricted
+
+        class Result:
+            def scalar_one_or_none(self) -> object:
+                return value
+
+        return Result()
+
+
+def _provider_with(restricted: object, log: list[str]) -> Any:
+    from app.core.database import PartnerSessionProvider
+
+    provider = PartnerSessionProvider("postgresql+asyncpg://freejoy_partner:x@h/db")
+    provider._maker = lambda: _FakeRoleSession(restricted, log)  # type: ignore[assignment]
+    return provider
+
+
+async def test_partner_provider_checks_the_role_once_and_remembers_a_pass() -> None:
+    log: list[str] = []
+    provider = _provider_with(True, log)
+
+    for _ in range(3):
+        async with provider.session():
+            pass
+
+    assert log == ["verify"]
+
+
+@pytest.mark.parametrize("restricted", [False, None])
+async def test_partner_provider_refuses_a_connection_that_is_not_the_restricted_role(
+    restricted: object,
+) -> None:
+    from app.core.database import PartnerRoleNotRestricted
+
+    log: list[str] = []
+    provider = _provider_with(restricted, log)
+
+    for _ in range(2):  # a failure is checked again on the next request
+        with pytest.raises(PartnerRoleNotRestricted) as caught:
+            async with provider.session():
+                pass
+        assert "freejoy_partner" not in str(caught.value)
+        assert "postgresql" not in str(caught.value)
+
+    assert log == ["verify", "verify"]
 
 
 async def test_partner_provider_without_a_url_fails_when_a_session_is_asked_for() -> (

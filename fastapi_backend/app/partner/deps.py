@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import PartnerSessionProvider, SessionProvider
-from app.partner.keys import KeyStore, PartnerKeyStore
+from app.partner.keys import KeyLookup, PartnerKeyStore
 
 _provider: SessionProvider | None = None
 
@@ -29,7 +29,7 @@ def get_partner_session_provider() -> SessionProvider:
     return _provider
 
 
-def build_key_store(session: AsyncSession) -> KeyStore:
+def build_key_store(session: AsyncSession) -> KeyLookup:
     return PartnerKeyStore(session)
 
 
@@ -40,8 +40,8 @@ async def get_partner_session() -> AsyncIterator[AsyncSession]:
 
 def get_key_store(
     session: Annotated[AsyncSession, Depends(get_partner_session)],
-) -> KeyStore:
+) -> KeyLookup:
     return build_key_store(session)
 
 
-KeyStoreDep = Annotated[KeyStore, Depends(get_key_store)]
+KeyStoreDep = Annotated[KeyLookup, Depends(get_key_store)]

@@ -62,7 +62,7 @@
             }
           },
           "503": {
-            "description": "Rate limiter unavailable",
+            "description": "Service temporarily unavailable (the database or a limiter)",
             "content": {
               "application/json": {
                 "schema": {

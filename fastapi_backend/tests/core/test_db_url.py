@@ -1,3 +1,5 @@
+import ssl
+
 from app.core.db_url import (
     CONNECT_TIMEOUT_SECONDS,
     to_async_target,
@@ -41,7 +43,39 @@ def test_accepts_an_asyncpg_url_with_ssl_parameter():
     target = to_async_target("postgresql+asyncpg://u:p@h/app?ssl=verify-full")
 
     assert target.url.drivername == "postgresql+asyncpg"
-    assert target.connect_args == {**POOLER_SAFE_ARGS, "ssl": "verify-full"}
+    assert isinstance(target.connect_args["ssl"], ssl.SSLContext)
+
+
+def test_verify_full_builds_a_default_context_that_checks_the_host_and_the_certificate(
+    monkeypatch,
+):
+    monkeypatch.delenv("PGSSLROOTCERT", raising=False)
+
+    context = to_async_target(
+        "postgresql://u:p@h/app?sslmode=verify-full"
+    ).connect_args["ssl"]
+
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_verify_full_keeps_the_string_when_a_root_certificate_is_configured(
+    monkeypatch,
+):
+    monkeypatch.setenv("PGSSLROOTCERT", "/etc/ssl/root.crt")
+
+    target = to_async_target("postgresql://u:p@h/app?sslmode=verify-full")
+
+    assert target.connect_args["ssl"] == "verify-full"
+
+
+def test_the_other_modes_are_passed_through_unchanged(monkeypatch):
+    monkeypatch.delenv("PGSSLROOTCERT", raising=False)
+
+    for mode in ("require", "verify-ca", "prefer", "disable"):
+        target = to_async_target(f"postgresql://u:p@h/app?sslmode={mode}")
+        assert target.connect_args["ssl"] == mode
 
 
 def test_disables_both_statement_caches_for_pgbouncer():

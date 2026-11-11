@@ -330,11 +330,10 @@ PARTNER_READ_POLICY = RateLimitPolicy(
 PARTNER_WRITE_POLICY = RateLimitPolicy(
     "partner_write", limit=30, window_seconds=60, fail_closed=True
 )
-# Failed partner authentications, counted only on failure (a valid key is never held up by it): keyed by the
-# presented key id when the key is well formed, else one shared bucket (``partner_auth_failure:malformed``).
-# Fail closed: an outage must not lift the limit on guessing. It bounds database lookups and noise; the 256-bit
-# secret is what stops guessing. A caller that rotates through new key ids is stopped at the edge rate rule
-# (ADR-013 launch preconditions), not here.
+# Failed partner authentications of a well-formed key, counted only on failure (a valid key is never held up by it) and
+# keyed by the presented key id. Nothing keyless is counted. Fail closed: an outage must not lift the limit. It turns repeated
+# failures for one key id into a 429; it does NOT bound database work (every well-formed key costs a connection and a SELECT,
+# counted or not): that is bounded only by the edge rate rule and the role's connection limit (ADR-013).
 PARTNER_AUTH_FAILURE_POLICY = RateLimitPolicy(
     "partner_auth_failure", limit=30, window_seconds=60, fail_closed=True
 )

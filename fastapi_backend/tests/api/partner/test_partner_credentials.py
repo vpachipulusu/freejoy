@@ -136,11 +136,24 @@ async def test_the_state_recorder_would_see_the_flag_if_it_were_set(
     assert "internal_authenticated" in state_writes
 
 
+def declared_methods() -> dict[str, set[str]]:
+    mount = next(r for r in app.routes if isinstance(r, PartnerMount))
+    methods: dict[str, set[str]] = {}
+    for context in iter_route_contexts(mount.routes):
+        methods.setdefault(context.path or "", set()).update(context.methods or set())
+    return methods
+
+
 @pytest.mark.parametrize(("path", "method"), CASES)
-async def test_the_partner_key_alone_reaches_the_route(
+async def test_the_partner_key_alone_reaches_the_route_it_declares_and_gets_405_elsewhere(
     world: PartnerWorld, path: str, method: str
 ) -> None:
+    """Derived from the route's own declared methods, so a new route needs no edit here."""
+    declared = declared_methods()[path.removeprefix("/partner/v1")]
+
     response = await call_raw(app, method, path, headers=world.headers())
 
-    assert response.status in {200, 405}
-    assert response.status == (200 if method == "GET" else 405)
+    if method in declared:
+        assert response.status not in {401, 403, 404, 405}
+    else:
+        assert response.status == 405

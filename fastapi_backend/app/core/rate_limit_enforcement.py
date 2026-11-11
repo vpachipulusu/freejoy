@@ -1,6 +1,7 @@
 """Applying rate limit policies to a request (ADR-007), shared by the internal API and the partner surface.
 
-These are the helpers ``app.api.rate_limit`` always had, moved here unchanged so that ``app.partner`` (which may
+These are the helpers ``app.api.rate_limit`` always had, moved here (the three private ones became public, and
+``handle_outage`` takes the request id instead of the request) so that ``app.partner`` (which may
 import only ``app.core``) applies a policy the same way: first denial raises 429, a Redis outage follows the
 policy's fail mode (closed: 503, open: log, report and let through). ``app.api.rate_limit`` re-exports every name.
 """
