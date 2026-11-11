@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ subscribe: vi.fn() }));
@@ -248,7 +248,7 @@ describe('AlertsForm submitting', () => {
     await screen.findByRole('alert');
 
     expect(document.activeElement).toBe(form.submit());
-    expect(form.submit()).not.toHaveAttribute('aria-disabled');
+    await waitFor(() => expect(form.submit()).not.toHaveAttribute('aria-disabled'));
   });
 
   it('puts the failure alert below the button and outside the polite live region', async () => {

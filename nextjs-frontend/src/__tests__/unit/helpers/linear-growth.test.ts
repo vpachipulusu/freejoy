@@ -137,6 +137,6 @@ describe('on the real clock', () => {
   });
 
   it('fails real quadratic work', () => {
-    expect(() => expectLinear(quadraticWork, 8_000)).toThrow(/the input cost/);
+    expect(() => expectLinear(quadraticWork, 3_000)).toThrow(/the input cost/);
   });
 });

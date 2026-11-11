@@ -180,6 +180,8 @@ describe('SecurityPage data export', () => {
         expect.objectContaining({ title: 'Export failed', variant: 'destructive' })
       )
     );
-    expect(screen.getByRole('button', { name: 'Export my data' })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Export my data' })).toBeEnabled()
+    );
   });
 });

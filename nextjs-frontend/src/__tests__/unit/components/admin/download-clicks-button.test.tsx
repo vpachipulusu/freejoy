@@ -121,7 +121,7 @@ describe('DownloadClicksButton', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('You do not have permission to do that')
     );
     expect(mocks.saveCsvFile).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Download CSV' })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download CSV' })).toBeEnabled());
   });
 
   it('shows a fixed message when the action throws', async () => {

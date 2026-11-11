@@ -62,8 +62,7 @@ describe('PricingCard checkout', () => {
       'Create an organisation first to subscribe.'
     );
     expect(window.alert).not.toHaveBeenCalled();
-    const retry = screen.getByRole('button', { name: /upgrade to pro/i });
-    expect(retry).toBeEnabled();
+    const retry = await findIdleControl('button', /upgrade to pro/i);
     expect(retry).toHaveAttribute('aria-describedby', screen.getByRole('alert').id);
   });
 
@@ -84,7 +83,7 @@ describe('PricingCard checkout', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not start checkout/i);
     expect(window.alert).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /upgrade to pro/i })).toBeEnabled();
+    await findIdleControl('button', /upgrade to pro/i);
   });
 
   it('clears the previous error when the user tries again', async () => {

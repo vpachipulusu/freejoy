@@ -658,8 +658,10 @@ describe('a refusal', () => {
       title: 'Could not apply the retailer update',
       description: REFUSED.error,
     });
-    expect(applyButton()).not.toHaveAttribute('aria-disabled');
-    expect(dismissButton()).not.toHaveAttribute('aria-disabled');
+    // The alert and toast are shown while the transition is still closing: wait for the buttons to be free
+    // again instead of reading them once (FREEJ-64).
+    await waitFor(() => expect(applyButton()).not.toHaveAttribute('aria-disabled'));
+    await waitFor(() => expect(dismissButton()).not.toHaveAttribute('aria-disabled'));
 
     await user.click(applyButton());
     await waitFor(() => expect(mocks.applyPartnerUpdateAction).toHaveBeenCalledTimes(2));

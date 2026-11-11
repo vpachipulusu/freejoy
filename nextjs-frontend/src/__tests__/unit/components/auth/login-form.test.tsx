@@ -218,7 +218,7 @@ describe('LoginForm', () => {
     await fillAndSubmit(user);
 
     await screen.findByRole('alert');
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled());
   });
 
   it('gives the form back when the redirect stalls', async () => {
@@ -270,7 +270,7 @@ describe('LoginForm', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(mocks.push).not.toHaveBeenCalled();
     // The form is usable again for when the person comes back from the code step.
-    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: /^sign in$/i })).toBeEnabled());
   });
 
   it('does not open the two-factor step from the message text alone', async () => {
