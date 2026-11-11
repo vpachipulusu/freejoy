@@ -275,8 +275,9 @@ describe('AlertsForm submitting', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(ALERTS_FAILURE_MESSAGES.unavailable);
     expect(form.email()).toHaveValue('sam@example.com');
-    expect(form.email()).toBeEnabled();
+    await waitFor(() => expect(form.email()).toBeEnabled());
     expect(screen.getByLabelText('Food & drink')).toBeChecked();
+    await waitFor(() => expect(form.submit()).not.toHaveAttribute('aria-disabled'));
 
     await form.user.click(form.submit());
 

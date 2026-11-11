@@ -247,8 +247,8 @@ describe('scrubEvent: addresses with letters outside ASCII', () => {
   it('costs time in proportion to a long run of non-ASCII labels', () => {
     expectLinear((n) => {
       scrubEvent({
-        message: `x@${'ä.'.repeat(n)}`,
-        extra: { u: `/a?${'ä@'.repeat(n / 2)}` },
+        message: `x@${'Ã¤.'.repeat(n)}`,
+        extra: { u: `/a?${'Ã¤@'.repeat(n / 2)}` },
       });
     }, 100_000);
   });

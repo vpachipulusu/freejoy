@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({
@@ -49,7 +48,7 @@ const totpRequired = {
 };
 const totpInvalid = { success: false, error: TOTP_INVALID_ERROR, data: { totpInvalid: true } };
 
-type User = ReturnType<typeof userEvent.setup>;
+type User = TestUser;
 
 async function signInWithPassword(user: User) {
   await user.type(screen.getByLabelText(/email/i), 'a@b.com');

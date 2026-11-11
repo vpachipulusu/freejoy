@@ -1,8 +1,7 @@
 /** reset form states; the outcome never reveals whether an account exists. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -11,7 +10,7 @@ vi.mock('@/lib/firebase/auth-helpers', () => ({ resetPassword: mocks.resetPasswo
 
 import { PasswordResetForm } from '@/components/auth/password-reset-form';
 
-const submit = (user: ReturnType<typeof userEvent.setup>) =>
+const submit = (user: TestUser) =>
   user.click(screen.getByRole('button', { name: /send reset link|sending/i }));
 
 const failWith = (code: string) =>

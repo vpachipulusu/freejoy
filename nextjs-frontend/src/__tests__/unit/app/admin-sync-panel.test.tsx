@@ -3,8 +3,9 @@
  * action's curated message.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 const mocks = vi.hoisted(() => ({ sync: vi.fn() }));
 vi.mock('@/app/actions/admin/analytics-actions', () => ({
@@ -105,13 +106,11 @@ describe('SyncPanel', () => {
     await user.click(screen.getByRole('button', { name: /check against stripe/i }));
     await screen.findByText(/Read 5 Stripe subscriptions/);
     // The report is shown while the first transition is still closing, when the button still reads
-    // "Checking…": wait for it to be the idle button again before the second click (FREEJ-64).
-    const idle = await screen.findByRole('button', { name: /check against stripe/i });
-    await waitFor(() => expect(idle).toBeEnabled());
+    // "Checking...": wait for it to be the idle button again before the second click (FREEJ-64).
+    await user.click(await findIdleControl('button', /check against stripe/i));
 
-    await user.click(idle);
-
-    expect(await screen.findByRole('button', { name: /checking/i })).toBeDisabled();
+    // The pending label is set synchronously by the click, so it is read without waiting.
+    expect(screen.getByRole('button', { name: /checking/i })).toBeDisabled();
     finish({ success: false, error: 'Something went wrong.' });
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText(/Read 5 Stripe subscriptions/)).not.toBeInTheDocument();

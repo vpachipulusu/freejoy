@@ -5,8 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const API_KEY = `fj_test_${'k'.repeat(24)}_${'0'.repeat(64)}`;
 const KEY_ID = 'k'.repeat(24);
@@ -107,13 +106,13 @@ function setClipboard(value: unknown): void {
   Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
 }
 
-async function openCreate(user: ReturnType<typeof userEvent.setup>) {
+async function openCreate(user: TestUser) {
   render(<CreatePartnerKeyDialog merchantId="m1" merchantName="Acme" />);
   await user.click(screen.getByRole('button', { name: 'Create key' }));
   return screen.findByRole('dialog');
 }
 
-async function createKey(user: ReturnType<typeof userEvent.setup>, label = 'Feed') {
+async function createKey(user: TestUser, label = 'Feed') {
   await user.type(screen.getByLabelText(/Label/), label);
   await user.click(screen.getByRole('button', { name: 'Create key' }));
   return screen.findByLabelText('New partner API key');

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 
 /** a failed checkout shows an inline error (no window.alert) and re-enables the button. */
@@ -49,6 +49,7 @@ describe('PricingCard checkout', () => {
   });
 
   it('shows the action message inline, never window.alert, and re-enables the button', async () => {
+    const user = setupUser();
     mocks.createCheckoutSessionAction.mockResolvedValue({
       success: false,
       error: 'Create an organisation first to subscribe.',
@@ -56,7 +57,7 @@ describe('PricingCard checkout', () => {
     });
     const button = renderPro();
 
-    await userEvent.click(button);
+    await user.click(button);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Create an organisation first to subscribe.'
@@ -76,10 +77,11 @@ describe('PricingCard checkout', () => {
   });
 
   it('falls back to a generic inline message when the action throws', async () => {
+    const user = setupUser();
     mocks.createCheckoutSessionAction.mockRejectedValue(new Error('network'));
     const button = renderPro();
 
-    await userEvent.click(button);
+    await user.click(button);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not start checkout/i);
     expect(window.alert).not.toHaveBeenCalled();
@@ -87,14 +89,15 @@ describe('PricingCard checkout', () => {
   });
 
   it('clears the previous error when the user tries again', async () => {
+    const user = setupUser();
     mocks.createCheckoutSessionAction
       .mockResolvedValueOnce({ success: false, error: 'First failure.' })
       .mockReturnValueOnce(new Promise(() => undefined));
     const button = renderPro();
 
-    await userEvent.click(button);
+    await user.click(button);
     await screen.findByRole('alert');
-    await userEvent.click(await findIdleControl('button', /upgrade to pro/i));
+    await user.click(await findIdleControl('button', /upgrade to pro/i));
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: /processing/i })).toBeDisabled();
@@ -106,22 +109,24 @@ describe('PricingCard checkout', () => {
       mocks.createCheckoutSessionAction.mockReturnValue(new Promise(() => undefined));
       const button = renderPro(period);
 
-      await userEvent.click(button);
+      await setupUser().click(button);
 
       expect(mocks.createCheckoutSessionAction).toHaveBeenCalledWith('pro', period);
     }
   );
 
   it('uses a generic inline message when the action returns no error text', async () => {
+    const user = setupUser();
     mocks.createCheckoutSessionAction.mockResolvedValue({ success: false });
     const button = renderPro();
 
-    await userEvent.click(button);
+    await user.click(button);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not start checkout/i);
   });
 
   it('redirects to Stripe and stays busy while the browser navigates', async () => {
+    const user = setupUser();
     const location = { href: 'https://app.test/pricing' };
     vi.stubGlobal('location', location);
     mocks.createCheckoutSessionAction.mockResolvedValue({
@@ -130,7 +135,7 @@ describe('PricingCard checkout', () => {
     });
     const button = renderPro();
 
-    await userEvent.click(button);
+    await user.click(button);
 
     await waitFor(() => expect(location.href).toBe('https://checkout.stripe.com/c/pay/cs_test'));
     expect(screen.getByRole('button', { name: /processing/i })).toBeDisabled();
@@ -167,7 +172,7 @@ describe('PricingCard checkout', () => {
 
         const target = screen.getByRole('link');
         target.addEventListener('click', (event) => event.preventDefault());
-        await userEvent.click(target);
+        await setupUser().click(target);
 
         expect(mocks.createCheckoutSessionAction).not.toHaveBeenCalled();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -175,10 +180,11 @@ describe('PricingCard checkout', () => {
     );
 
     it.each(['pro', 'enterprise'])('pro card for a %s subscriber is disabled', async (userTier) => {
+      const user = setupUser();
       render(<PricingCard tier={PRO} currencySymbol="$" isAuthenticated userTier={userTier} />);
 
       const button = screen.getByRole('button');
-      await userEvent.click(button);
+      await user.click(button);
 
       expect(button).toBeDisabled();
       expect(mocks.createCheckoutSessionAction).not.toHaveBeenCalled();

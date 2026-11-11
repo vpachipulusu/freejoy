@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { Pagination, getRange } from '@/components/ui/pagination';
 
 /** pagination with 44px prev/next and "Showing x to y of z". */
@@ -52,18 +52,20 @@ describe('Pagination', () => {
   });
 
   it('calls onPageChange with neighbouring pages', async () => {
+    const user = setupUser();
     const onPageChange = setup(2);
-    await userEvent.click(screen.getByRole('button', { name: 'Next page' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.click(screen.getByRole('button', { name: 'Previous page' }));
     expect(onPageChange).toHaveBeenNthCalledWith(1, 3);
     expect(onPageChange).toHaveBeenNthCalledWith(2, 1);
   });
 
   it('keeps focus on a disabled button and ignores its clicks', async () => {
+    const user = setupUser();
     const onPageChange = vi.fn();
     render(<Pagination page={1} pageSize={25} total={312} onPageChange={onPageChange} />);
     const prev = screen.getByRole('button', { name: 'Previous page' });
-    await userEvent.click(prev);
+    await user.click(prev);
     expect(onPageChange).not.toHaveBeenCalled();
     expect(prev).not.toBeDisabled();
   });

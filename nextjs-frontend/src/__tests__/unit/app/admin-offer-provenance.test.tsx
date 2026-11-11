@@ -7,8 +7,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   dismissSourceChangeAction: vi.fn(),
@@ -108,7 +107,7 @@ const trigger = () => screen.queryByRole('button', { name: 'Dismiss source chang
 const confirmButton = (dialog: HTMLElement) =>
   within(dialog).getByRole('button', { name: 'Dismiss change' });
 
-async function confirmDismissal(user: ReturnType<typeof userEvent.setup>) {
+async function confirmDismissal(user: TestUser) {
   await user.click(trigger()!);
   await user.click(confirmButton(await screen.findByRole('dialog')));
 }

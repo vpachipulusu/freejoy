@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 
@@ -122,6 +122,7 @@ describe('RetryClicksButton', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('refreshes the data and keeps focus on the page, at the report heading', async () => {
+    const user = setupUser();
     render(
       <>
         <Region />
@@ -132,7 +133,7 @@ describe('RetryClicksButton', () => {
       </>
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(document.body).not.toHaveFocus();

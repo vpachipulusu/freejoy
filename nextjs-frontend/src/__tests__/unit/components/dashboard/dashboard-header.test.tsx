@@ -1,8 +1,7 @@
 /** FREEJ-41: the account menu shows an Admin link only for an account the backend profile marks as admin. */
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 vi.mock('@/app/actions/auth-actions', () => ({ logoutAction: vi.fn() }));
 
@@ -10,7 +9,7 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 
 const base = { email: 'ada@example.com', dbDisplayName: 'Ada', dbAvatarUrl: null };
 
-async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+async function openMenu(user: TestUser) {
   await user.click(screen.getByRole('button'));
   return screen.findAllByRole('menuitem');
 }

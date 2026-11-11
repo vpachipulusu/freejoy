@@ -175,11 +175,15 @@ describe('redactLogData', () => {
 });
 
 describe('hardening', () => {
-  it('costs time in proportion to oversized input without an @ sign', () => {
+  it('costs time in proportion to input without an @ sign, up to the length it keeps', () => {
+    // redactString keeps 10,000 characters and drops the rest, so a longer input costs no more and proves nothing:
+    // measure at and below that cap, and repeat the call so each sample is long enough to read off the clock.
     expectLinear((n) => {
-      redactString('a'.repeat(n));
-      redactLogData({ message: 'a'.repeat(n) });
-    }, 200_000);
+      for (let i = 0; i < 20; i++) {
+        redactString('a'.repeat(n));
+        redactLogData({ message: 'a'.repeat(n) });
+      }
+    }, 10_000);
   });
 
   it('truncates oversized strings', () => {

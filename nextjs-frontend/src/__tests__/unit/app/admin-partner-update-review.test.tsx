@@ -6,8 +6,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   applyPartnerUpdateAction: vi.fn(),
@@ -447,10 +446,10 @@ describe('applying to a live offer', () => {
   it.each([
     [
       'Cancel',
-      async (user: ReturnType<typeof userEvent.setup>) =>
+      async (user: TestUser) =>
         user.click(screen.getByRole('button', { name: 'Cancel' })),
     ],
-    ['Escape', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+    ['Escape', async (user: TestUser) => user.keyboard('{Escape}')],
   ])('%s closes it without writing and returns focus to Apply', async (_name, close) => {
     const user = setupUser();
     live();
@@ -674,6 +673,8 @@ describe('a refusal', () => {
     render(tree(offer(true)));
     await user.click(applyButton());
     await within(region()).findByRole('alert');
+    // The alert is shown while the transition is still closing (FREEJ-64): wait for the button to be free.
+    await waitFor(() => expect(applyButton()).not.toHaveAttribute('aria-disabled'));
 
     mocks.applyPartnerUpdateAction.mockReturnValueOnce(new Promise((done) => (release = done)));
     await user.click(applyButton());

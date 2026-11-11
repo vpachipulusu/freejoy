@@ -4,8 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   banUserAction: vi.fn(),
@@ -28,7 +27,7 @@ import { UserRowActions } from '@/app/(admin)/admin/users/user-row-actions';
 const ok = { success: true, data: { message: 'done' } };
 
 async function openMenu(
-  user: ReturnType<typeof userEvent.setup>,
+  user: TestUser,
   name: string | RegExp = /open menu/i
 ) {
   await user.click(screen.getByRole('button', { name }));
@@ -95,7 +94,7 @@ describe('UserRowActions menu', () => {
 });
 
 describe('suspending a user', () => {
-  async function openSuspend(user: ReturnType<typeof userEvent.setup>) {
+  async function openSuspend(user: TestUser) {
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     await openMenu(user, 'Open menu for Ada');
     await user.click(screen.getByRole('menuitem', { name: /suspend user/i }));
@@ -170,7 +169,7 @@ describe('suspending a user', () => {
 });
 
 describe('suspend dialog focus and in-flight behaviour', () => {
-  async function openSuspend(user: ReturnType<typeof userEvent.setup>) {
+  async function openSuspend(user: TestUser) {
     render(<UserRowActions userId="user-123" userLabel="Ada" />);
     const trigger = screen.getByRole('button', { name: 'Open menu for Ada' });
     await openMenu(user, 'Open menu for Ada');

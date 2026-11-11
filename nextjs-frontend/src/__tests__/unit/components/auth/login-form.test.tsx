@@ -1,8 +1,7 @@
 /** sign-in form states: alert panel, focus, loading and double submit. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
@@ -30,7 +29,7 @@ const fail = (code: string) => ({
   error: getFirebaseErrorMessage({ code }),
 });
 
-async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
+async function fillAndSubmit(user: TestUser) {
   await user.type(screen.getByLabelText(/email/i), 'a@b.com');
   await user.type(screen.getByLabelText(/^password$/i), 'secret123');
   await user.click(screen.getByRole('button', { name: /sign in/i }));

@@ -1,8 +1,7 @@
 /** FREEJ-41: the page a signed-out visitor was sent from (`?redirect=`) survives every way of signing in. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   signInWithEmail: vi.fn(),
@@ -51,7 +50,7 @@ const UNSAFE = [
   '',
 ];
 
-type User = ReturnType<typeof userEvent.setup>;
+type User = TestUser;
 
 async function submitPassword(user: User) {
   await user.type(screen.getByLabelText(/email/i), 'a@b.com');

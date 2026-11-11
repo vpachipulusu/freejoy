@@ -1,8 +1,7 @@
 /** sign-up form states. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -17,7 +16,7 @@ vi.mock('@/app/actions/auth-actions', () => ({ verifyTokenAction: mocks.verifyTo
 
 import { SignupForm } from '@/components/auth/signup-form';
 
-async function fill(user: ReturnType<typeof userEvent.setup>, name = 'Test User') {
+async function fill(user: TestUser, name = 'Test User') {
   if (name) await user.type(screen.getByLabelText(/full name/i), name);
   await user.type(screen.getByLabelText(/email/i), 'a@b.com');
   await user.type(screen.getByLabelText(/^password$/i), 'ValidPass1');

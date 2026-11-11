@@ -4,8 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
+import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   offerLifecycleAction: vi.fn(),
@@ -46,7 +45,7 @@ beforeEach(() => {
   mocks.setMerchantActiveAction.mockResolvedValue(ok);
 });
 
-async function openMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
+async function openMenu(user: TestUser, title: string) {
   await user.click(screen.getByRole('button', { name: `Open menu for ${title}` }));
   return screen.findByRole('menu');
 }
