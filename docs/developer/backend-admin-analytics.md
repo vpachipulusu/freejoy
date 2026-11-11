@@ -64,8 +64,7 @@ that no automated traffic remains).
 offer (`OUTBOUND_OFFER_BOT_POLICY`; the rest are redirected and not stored), in a bucket separate from the 600 a minute
 for every other class (`OUTBOUND_OFFER_POLICY`), so automated traffic cannot use up the budget genuine clicks need. The
 figure is therefore a **lower bound** on automated traffic, not a full count; the admin page says "minimum" and the
-`bot_rule` text says so. Rows stored before the change were not capped. The residual: a flood that sends a non-bot user
-agent still fills the 600 budget and those rows are counted as clicks (inflation, not suppression); it is not handled
+`bot_rule` text says so. Bot rows stored before the change shared the 600 budget with every other class. The residual: A flood that does not identify itself as automated still fills the main budget. The reported count is then not lower than the genuine count, but genuine clicks in a flooded minute are still not recorded and cannot be told apart from the flood afterwards. Because IPv6 addresses are grouped by /64, the ten addresses can be one host. FREEJ-62 only removes the bot-classed route to this. It is not handled
 here. See [freejoy-affiliate.md](freejoy-affiliate.md).
 
 **Days.** A day is a UTC calendar day: a click at 23:59:59 UTC belongs to that day, 00:00:00 to the next, whatever the

@@ -57,8 +57,9 @@ many IPs.
 - Outbound clicks (`POST /v1/catalogue/offers/{id}/click`, called only by the `/go/` route): `rl:outbound_click:ip:{client key}`
   (60 per minute, fails open) and, per offer, one of two buckets chosen by the device class the route sends (FREEJ-62):
   `rl:outbound_offer:offer:{offer id}` (600 per minute) for every class except `BOT` and for a missing class, and
-  `rl:outbound_offer_bot:offer:{offer id}` (60 per minute) for `BOT`. Both fail open and exactly one is hit per request, so
-  automated traffic cannot spend the budget that counted clicks need. Past either cap the visitor is still redirected and no click row
+  `rl:outbound_offer_bot:offer:{offer id}` (60 per minute) for `BOT`. Both fail open. At most one is hit per request, and exactly one for a request
+  that reaches the handler; a request refused with 401, 429 or 422 spends none. Automated traffic therefore cannot spend the budget
+  that counted clicks need. Past either cap the visitor is still redirected and no click row
   is written. Residual: a flood that claims a non-bot user agent still fills the main bucket (see
   [freejoy-affiliate.md](../developer/freejoy-affiliate.md)).
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.

@@ -168,7 +168,8 @@ merchant's website can change after a `direct` link was saved. A link that fails
 - The backend limits `POST .../click` twice:
   - `OUTBOUND_CLICK_POLICY`, 60 per minute per forwarded client IP. Over it the answer is `429` with `Retry-After`.
   - A per-offer budget, in one of two buckets chosen by `user_agent_class` (FREEJ-62; `app/core/rate_limit.py`, the
-    choice is made in `app/api/v1/catalogue_click.py` once the body is read). Exactly one is spent per request:
+    choice is made in `app/api/v1/catalogue_click.py`, in a dependency that reads the body). At most one is spent per
+    request, and exactly one for a request that reaches the handler; a request refused with 401, 429 or 422 spends none:
     - `OUTBOUND_OFFER_POLICY`, 600 per minute per offer id (key `outbound_offer:offer:{offer id}`), for every class
       except `BOT` and for a request with no class. Over it the visitor is **still redirected** (the click endpoint
       answers `200` with the destination) but **no click row is written**.
@@ -186,10 +187,7 @@ merchant's website can change after a `direct` link was saved. A link that fails
     (`src/lib/outbound/respond.ts`) computes the class from the visitor's `User-Agent` header with `classifyUserAgent`
     (`src/lib/outbound/validation.ts`) and sends it, with the internal key. The visitor controls that header, so
     the class is a label, not proof.
-  - **Residual (out of scope of FREEJ-62).** A flood that sends a non-bot user agent still spends the main budget of 600
-    and its rows are counted as clicks. That is inflation (an offer's count is capped at 600 a minute, and the
-    per-address limit of 60 a minute applies), not suppression: the bot bucket means a flood cannot push genuine clicks
-    out by claiming to be a bot, but a flood claiming to be a browser can still fill the main budget in a minute.
+  - **Residual (out of scope of FREEJ-62).** A flood that does not identify itself as automated still fills the main budget. The reported count is then not lower than the genuine count, but genuine clicks in a flooded minute are still not recorded and cannot be told apart from the flood afterwards. Because IPv6 addresses are grouped by /64, the ten addresses can be one host. FREEJ-62 only removes the bot-classed route to this.
 - The proxy keys IPv6 clients by their full address, while the backend groups them by /64. This pre-existing gap
   is not specific to `/go/`: one IPv6 subscriber can spread requests over many addresses to get more proxy
   buckets, though the backend limits above still apply.
@@ -209,9 +207,10 @@ directly. Send the CSV and say plainly:
 - Your own figures (orders, visits from our referrer) are the only measure of what the clicks became; we never claim
   sales from clicks or call them redemptions.
 - Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
-- Recording is limited to 600 clicks for one offer in a minute (the cap above), so a very busy minute is undercounted.
-  Internally only: the figure is not given to retailers. Bot clicks have their own, smaller cap, so the number of bot
-  clicks left out is a minimum, not a count of all automated traffic.
+- Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded.
+
+Internal only, never sent to retailers: the limit is the 600 a minute described above (`OUTBOUND_OFFER_POLICY`). Bot clicks
+have their own, smaller cap (`OUTBOUND_OFFER_BOT_POLICY`), so the excluded bot figure on the admin page is a minimum.
 
 A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with its own text in the answer (what a click is, bots left out, UTC days, the retention, and that recording is rate limited, without the figure) ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
 
