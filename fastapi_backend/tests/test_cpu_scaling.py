@@ -1,9 +1,14 @@
 """``tests.cpu_scaling``: the linear-time check must pass linear work and fail quadratic work."""
 
+import sys
+import time
+
 import pytest
 
 from tests.cpu_scaling import (
     MAX_GROWTH,
+    MAX_ROUNDS,
+    MIN_ROUNDS,
     SCALE_FACTOR,
     assert_linear,
     cpu_clock,
@@ -67,6 +72,64 @@ def test_a_few_slow_calls_do_not_fail_work_that_is_linear() -> None:
                 clock.now += 3 * UNIT * size
 
     assert_linear(slow_at_first, 4000, clock)
+
+
+def test_quadratic_work_whose_small_calls_are_slow_at_first_still_fails() -> None:
+    clock = FakeCpuClock()
+    small_calls = 0
+
+    def slow_small_at_first(size: int) -> None:
+        nonlocal small_calls
+        before = clock.now
+        clock.quadratic(size)
+        if size == 1000:
+            small_calls += 1
+            if small_calls <= 4:  # the warm-up and the start of the rounds: 2.1x
+                clock.now += 1.1 * (clock.now - before)
+
+    with pytest.raises(AssertionError, match="the input cost"):
+        assert_linear(slow_small_at_first, 4000, clock)
+
+
+def test_the_retry_budget_stops_more_rounds_but_the_ratio_so_far_still_fails() -> None:
+    clock = FakeCpuClock()
+    calls = 0
+    readings = iter([0.0])
+
+    def quadratic(size: int) -> None:
+        nonlocal calls
+        calls += 1
+        clock.quadratic(size)
+
+    def timer() -> float:
+        return next(readings, 1e9)  # the start, then far past the budget
+
+    with pytest.raises(AssertionError, match=r"16\.0x"):
+        assert_linear(quadratic, 4000, clock, timer)
+
+    assert (
+        calls == 2 + 3 * MIN_ROUNDS
+    )  # two warm-ups, then two small and one large per round
+
+
+def test_within_the_budget_quadratic_work_uses_every_round() -> None:
+    clock = FakeCpuClock()
+    calls = 0
+
+    def quadratic(size: int) -> None:
+        nonlocal calls
+        calls += 1
+        clock.quadratic(size)
+
+    with pytest.raises(AssertionError):
+        assert_linear(quadratic, 4000, clock, lambda: 0.0)
+
+    assert calls == 2 + 3 * MAX_ROUNDS
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the cycle counter is Windows-only")
+def test_windows_measures_with_the_cycle_counter_not_the_tick_clock() -> None:
+    assert cpu_clock() is not time.thread_time
 
 
 def test_the_cpu_clock_moves_when_the_thread_works() -> None:
