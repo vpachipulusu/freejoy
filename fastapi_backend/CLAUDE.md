@@ -21,8 +21,10 @@ uv run alembic upgrade head                      # only against a database you o
 ```
 
 - **Coverage floor.** `[tool.coverage.report] fail_under` in `pyproject.toml` fails `pytest --cov` below the
-  floor (90.0: about 1 point under the 91.5% measured without the database; 96.3% with it). It is a ratchet:
-  raise it when coverage rises, never lower it.
+  floor (91.0: about 1 point under the 92.3% measured without the database; 98.6% with it). It is a ratchet:
+  raise it when coverage rises, never lower it. `[tool.coverage.run] core = "sysmon"` selects the fast tracer that
+  does not lose application lines after an awaited database call (plain CTracer loses its place when
+  SQLAlchemy's asyncio layer switches greenlets); do not remove it (FREEJ-65, `docs/developer/testing.md`).
 - **OpenAPI and the client.** After any change to routes, schemas or `ERROR_RESPONSES`, regenerate the schema and
   the TypeScript client:
 

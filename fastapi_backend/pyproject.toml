@@ -67,13 +67,24 @@ extend-select = ["TID251"]
 
 # Coverage ratchet. `uv run pytest --cov` fails when line coverage of app/ and
 # commands/ is below fail_under. fail_under is set about 1 point under the
-# coverage measured without the Postgres-backed *_e2e tests (91.55%; with them
-# 96.27%): raise it as tests are added, never lower it.
+# coverage measured without the Postgres-backed *_e2e tests (92.29%; with them
+# 98.63%): raise it as tests are added, never lower it.
+#
+# core = "sysmon" (FREEJ-65): Python 3.12's `sys.monitoring`. The default tracer (CTracer) made the suite run
+# about 2.5 times slower than without coverage (full run: 640 to 745 s against 270 to 283 s; sysmon: 307 to 351 s),
+# and CTracer without `concurrency = greenlet` loses its place when SQLAlchemy's asyncio layer switches greenlets,
+# so application lines that run after an awaited database call go unrecorded: admin_subscriptions.py read 36%
+# under CTracer and 46% under sysmon on the same tests (the same 46% as CTracer with concurrency = ["greenlet",
+# "thread"], which is slower still). sysmon measures lines only. Needs coverage 7.9 or newer (uv.lock pins 7.16.2).
+# Do not add `concurrency`, `branch`, `dynamic_context` or `timid` to [tool.coverage.run]: each makes coverage fall
+# back to CTracer. A COVERAGE_CORE variable in the environment overrides this setting.
+# tests/test_coverage_config.py checks the tracer that is really running.
 [tool.coverage.run]
 source = ["app", "commands"]
+core = "sysmon"
 
 [tool.coverage.report]
-fail_under = 90.0
+fail_under = 91.0
 precision = 2
 
 [tool.hatch.build.targets.sdist]
