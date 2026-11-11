@@ -79,7 +79,10 @@ test.describe('Money path: browse, offer, tracked outbound click', () => {
     await expect(cta).toHaveCount(1);
     await expect(cta).toHaveAttribute('rel', OUTBOUND_REL);
     await expect(cta).toHaveAttribute('href', /^\/go\/[A-Za-z0-9_-]{1,64}$/);
-    await expect(page.getByText('Ad', { exact: true })).toBeVisible();
+    // The seeded links use the `sample` provider, which earns no commission (FREEJ-60), so neither the label nor
+    // the commission sentence is shown. An affiliate network link would show both; that is covered by unit tests,
+    // because a real network host cannot be seeded here.
+    await expect(page.getByText('Ad', { exact: true })).toHaveCount(0);
     await expect(page.locator('main a[href^="http"]')).toHaveCount(0);
     const offerId = (await cta.getAttribute('href'))?.replace('/go/', '') ?? '';
 

@@ -20,6 +20,8 @@ interface OfferCtaProps {
   offerType: OfferType;
   /** True when the listing is sponsored: the real-offer CTA says so in a sentence of its own. */
   sponsored?: boolean;
+  /** True when the followed link earns commission: gates the "Ad" label and commission sentence. Defaults to true. */
+  earnsCommission?: boolean;
   /** True for fixture offers (design preview); false for real catalogue offers. */
   demo: boolean;
   /** Set for a real offer: the CTA links to `/go/<offerId>`. Null or absent keeps the demo dialog. */
@@ -30,7 +32,7 @@ interface OfferCtaProps {
 
 /**
  * Primary call to action. A real offer (`offerId` set) links to the first-party `/go/<offerId>` redirect
- * with the "Ad" label and commission sentence. A demo offer has no destination, so its button opens a
+ * with the "Ad" label and commission sentence when the link earns commission. A demo offer has no destination, so its button opens a
  * "Demo offer" dialog instead: nothing here renders an external href. The ended state is rendered by the
  * (server) hero instead of this client component.
  */
@@ -38,6 +40,7 @@ export function OfferCta({
   offerType,
   demo,
   sponsored = false,
+  earnsCommission = true,
   offerId = null,
   conditions = null,
 }: OfferCtaProps) {
@@ -48,6 +51,7 @@ export function OfferCta({
         offerId={offerId}
         offerType={offerType}
         sponsored={sponsored}
+        earnsCommission={earnsCommission}
         conditions={conditions}
       />
     );
@@ -99,7 +103,8 @@ export function OfferCta({
         <Link href="/affiliate-disclosure" className="underline underline-offset-2">
           Affiliate disclosure
         </Link>
-        : real offers are marked &quot;Ad&quot; and say how Freejoy is paid.
+        : real offers whose link earns Freejoy a commission are marked &quot;Ad&quot; and say how
+        Freejoy is paid.
       </p>
     </div>
   );

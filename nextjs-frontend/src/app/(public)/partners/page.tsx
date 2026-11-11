@@ -49,9 +49,11 @@ export default function PartnersPage() {
       <h2>Paid and sponsored listings</h2>
       <p>
         A listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled
-        &ldquo;Sponsored&rdquo;. Links that earn Freejoy a commission through an affiliate network
-        carry an &ldquo;Ad&rdquo; label, and a sponsored listing with such a link shows both.
-        Payment does not change the checks. Every listing gets the same checks.
+        &ldquo;Sponsored&rdquo;. Only some links earn Freejoy a commission: those that go through an
+        affiliate network. They carry an &ldquo;Ad&rdquo; label, and a sponsored listing with such a
+        link shows both. A link that goes straight to a retailer&apos;s own website earns Freejoy
+        nothing and carries no &ldquo;Ad&rdquo; label. Payment does not change the checks. Every
+        listing gets the same checks.
       </p>
       <p>
         The <Link href="/affiliate-disclosure">affiliate disclosure</Link> explains how Freejoy

@@ -3,7 +3,7 @@
  * logging a dropped record. This is the facade boundary: nothing the API sends reaches a page or a URL
  * before it has passed here.
  */
-import type { ApiCategory, ApiEndedOffer, ApiOffer } from '@/lib/api/catalogue';
+import type { ApiCategory, ApiEndedOffer, ApiOffer, ApiOfferDetail } from '@/lib/api/catalogue';
 import { logger } from '@/lib/logger';
 import { CatalogueUnavailableError } from './errors';
 import { isValidSlug } from './slug';
@@ -124,6 +124,15 @@ function malformedOfferField(api: unknown): string | null {
   return null;
 }
 
+/**
+ * `earns_commission` as sent, or true when it is absent or not a boolean. Unlike `sponsored` it never drops the
+ * record: the flag only removes a disclosure, so an unreadable one keeps the disclosure and shows the offer.
+ */
+function toEarnsCommission(api: ApiOffer | ApiOfferDetail): boolean {
+  const flag = (api as { earns_commission?: unknown }).earns_commission;
+  return typeof flag === 'boolean' ? flag : true;
+}
+
 function toSteps(steps: ApiOffer['steps']): ClaimStep[] {
   return steps.map((step) => ({ title: step.title, detail: step.detail }));
 }
@@ -140,7 +149,7 @@ function invalidSlug(api: ApiOffer): { field: string; value: unknown } | null {
  * One API offer as an `Offer`, or null (logged) when it cannot be shown honestly: an unsafe slug, an
  * unreadable date, or no verification date (the page says "Last checked", so it never invents one).
  */
-export function mapOffer(api: ApiOffer): Offer | null {
+export function mapOffer(api: ApiOffer | ApiOfferDetail): Offer | null {
   const malformed = malformedOfferField(api);
   if (malformed) return drop('offer', malformed, null);
   const badSlug = invalidSlug(api);
@@ -166,6 +175,7 @@ export function mapOffer(api: ApiOffer): Offer | null {
     offerType: api.offer_type,
     status: 'published',
     sponsored: api.sponsored,
+    earnsCommission: toEarnsCommission(api),
     featured: api.featured,
     image: toImage(api.image),
     postage: toPostage(api.postage),

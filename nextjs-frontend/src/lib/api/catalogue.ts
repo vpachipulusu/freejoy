@@ -14,6 +14,7 @@ import {
   type ExpiredOfferData,
   type ListOffersData,
   type OfferData,
+  type OfferDetailData,
   type OfferListData,
 } from './generated';
 
@@ -35,6 +36,7 @@ export type {
   CategoryData as ApiCategory,
   ExpiredOfferData as ApiEndedOffer,
   OfferData as ApiOffer,
+  OfferDetailData as ApiOfferDetail,
 };
 
 export const CATALOGUE_CACHE_TAG = 'catalogue';
@@ -56,7 +58,7 @@ export interface OfferListParams {
 }
 
 export type OfferReadResult =
-  | { kind: 'found'; offer: OfferData }
+  | { kind: 'found'; offer: OfferDetailData }
   | { kind: 'gone'; ended: ExpiredOfferData | null }
   | { kind: 'not_found' };
 

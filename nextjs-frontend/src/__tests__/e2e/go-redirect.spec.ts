@@ -96,7 +96,10 @@ test.describe('/go/[offerId]', () => {
     const cta = page.locator(`a[href="/go/${LIVE}"]`);
     await expect(cta).toHaveCount(1);
     await expect(cta).toHaveAttribute('rel', 'sponsored nofollow noopener');
-    await expect(page.getByText('Ad', { exact: true })).toBeVisible();
+    // The seeded links use the `sample` provider, which earns no commission (FREEJ-60), so neither the label nor
+    // the commission sentence is shown. An affiliate network link would show both; that is covered by unit tests,
+    // because a real network host cannot be seeded here.
+    await expect(page.getByText('Ad', { exact: true })).toHaveCount(0);
     await expect(page.getByText(/coming soon|demo offer/i)).toHaveCount(0);
     await cta.click();
     await page.waitForURL(`${destination.origin}/**`);

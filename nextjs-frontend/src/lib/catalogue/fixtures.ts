@@ -166,6 +166,7 @@ const STEPS_BY_TYPE: Record<OfferType, readonly ClaimStep[]> = {
 type OptionalOfferKey =
   | 'status'
   | 'sponsored'
+  | 'earnsCommission'
   | 'featured'
   | 'postage'
   | 'requiresCard'
@@ -182,6 +183,8 @@ function defineOffer(input: OfferInput): Offer {
   return {
     status: 'published',
     sponsored: false,
+    // Fixture offers never render the outbound button; true is the disclosing default.
+    earnsCommission: true,
     featured: false,
     postage: { kind: 'free' },
     requiresCard: false,

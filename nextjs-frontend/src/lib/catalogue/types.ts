@@ -77,6 +77,13 @@ export interface Offer {
    * "Sponsored" label on the card and the page. The editor's three-way basis is never public; only this flag is.
    */
   sponsored: boolean;
+  /**
+   * True when the link `/go/<id>` follows is on an affiliate network that pays Freejoy commission. It gates the
+   * "Ad" label and the commission sentence beside the outbound button; "Sponsored" is separate. Only the offer
+   * page reads it. Defaults to true wherever the API did not say (list items never carry it; an older backend
+   * would not send it): showing the disclosure when unsure is the safe side.
+   */
+  earnsCommission: boolean;
   featured: boolean;
   image: OfferImage;
   postage: Postage;
