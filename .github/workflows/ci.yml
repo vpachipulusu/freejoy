@@ -68,6 +68,14 @@ jobs:
             frontend:
               - *shared
               - 'nextjs-frontend/**'
+              # The partner API documentation page states facts that live in these backend files, and its unit tests
+              # read them (partner-api-content.test.ts keeps this list honest).
+              - 'docs/partner/openapi.json'
+              - 'fastapi_backend/app/partner/**'
+              - 'fastapi_backend/app/core/rate_limit.py'
+              - 'fastapi_backend/app/core/rate_limit_enforcement.py'
+              - 'fastapi_backend/app/core/errors.py'
+              - 'fastapi_backend/app/core/click_retention.py'
             backend:
               - *shared
               - 'fastapi_backend/**'

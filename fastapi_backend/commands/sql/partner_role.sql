@@ -122,7 +122,8 @@ DECLARE
     'partner_submissions.pending_hash.UPDATE', 'partner_submissions.pending_at.UPDATE',
     'partner_submissions.submitted_at.UPDATE', 'partner_submissions.key_id.UPDATE',
     'partner_submissions.updated_at.UPDATE', 'audit_logs.id.INSERT', 'audit_logs.action.INSERT',
-    'audit_logs.resource.INSERT', 'audit_logs.resource_id.INSERT', 'audit_logs.metadata.INSERT'];
+    'audit_logs.resource.INSERT', 'audit_logs.resource_id.INSERT', 'audit_logs.metadata.INSERT',
+    'click_events.offer_id.SELECT', 'click_events.occurred_at.SELECT', 'click_events.user_agent_class.SELECT'];
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('freejoy.partner_role'));
 
@@ -271,6 +272,11 @@ BEGIN
   -- partner.<area>.<verb>, so the role cannot forge an admin. row.
   EXECUTE format(
     'GRANT INSERT (id, action, resource, resource_id, metadata) ON audit_logs TO %I', role_name);
+
+  -- Click counts (GET /partner/v1/clicks, FREEJ-59): the columns the query reads and no others. Not
+  -- click_events.referrer_host, affiliate_link_id or id. Read only. (The offers columns it reads are in the grant
+  -- above.)
+  EXECUTE format('GRANT SELECT (offer_id, occurred_at, user_agent_class) ON click_events TO %I', role_name);
 
   -- Verify from the catalog, counting what reaches the role through PUBLIC. Raise on anything not listed.
   IF has_parameter_privilege(role_name, 'session_replication_role', 'SET') THEN

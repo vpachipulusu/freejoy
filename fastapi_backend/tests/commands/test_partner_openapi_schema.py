@@ -1,7 +1,7 @@
 """The partner OpenAPI document and its freshness check (ADR-013).
 
-The partner contract is its own committed file, ``docs/partner/openapi.json``. Today it has one path,
-``/partner/v1/me``; the generator is also exercised on a throwaway sub-app with one more route, to prove
+The partner contract is its own committed file, ``docs/partner/openapi.json``. Every path is under
+``/partner/v1/``; the generator is also exercised on a throwaway sub-app with one more route, to prove
 the check stays meaningful as endpoints are added.
 """
 
@@ -20,10 +20,6 @@ from commands import generate_partner_openapi_schema as generator
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PARTNER_SCHEMA = REPO_ROOT / "docs" / "partner" / "openapi.json"
 INTERNAL_SCHEMA = REPO_ROOT / "nextjs-frontend" / "openapi.json"
-
-
-# The routes of the partner API itself, relative to the mount (FREEJ-57 added ``/me``, FREEJ-58 the offer routes).
-REAL_PATHS = {"/me", "/offers", "/offers/{ref}", "/offers/{ref}/end"}
 
 
 def _api_with_a_route():
@@ -53,10 +49,9 @@ def test_paths_are_written_as_a_retailer_calls_them() -> None:
 
     schema = partner_openapi_schema(api)
 
-    assert set(schema["paths"]) == {
-        *(f"/partner/v1{path}" for path in REAL_PATHS),
-        "/partner/v1/things/{thing_id}",
-    }
+    real = list(json.loads(PARTNER_SCHEMA.read_text(encoding="utf-8"))["paths"])
+    assert "/partner/v1/me" in real
+    assert list(schema["paths"]) == [*real, "/partner/v1/things/{thing_id}"]
     assert all(path.startswith(f"{PARTNER_PREFIX}/") for path in schema["paths"])
 
 
@@ -67,7 +62,8 @@ def test_asking_twice_does_not_prefix_twice_or_change_the_cached_schema() -> Non
     second = partner_openapi_schema(api)
 
     assert first == second
-    assert set(api.openapi()["paths"]) == {*REAL_PATHS, "/things/{thing_id}"}
+    assert list(api.openapi()["paths"])[-1] == "/things/{thing_id}"
+    assert not any(path.startswith("/partner") for path in api.openapi()["paths"])
 
 
 def test_the_internal_schema_has_no_partner_path() -> None:
@@ -125,9 +121,7 @@ def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -
     raw = target.read_bytes()
     assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert set(json.loads(raw)["paths"]) == {
-        f"/partner/v1{path}" for path in REAL_PATHS
-    }
+    assert json.loads(raw) == json.loads(PARTNER_SCHEMA.read_text(encoding="utf-8"))
 
 
 def test_the_committed_partner_schema_is_what_the_generator_writes(
@@ -168,3 +162,54 @@ def test_the_check_fails_when_the_schema_file_is_missing(
 
     assert checker.main() == 1
     assert "missing" in capsys.readouterr().out
+
+
+def test_the_generator_writes_identical_copies_when_given_them(tmp_path: Path) -> None:
+    target = tmp_path / "openapi.json"
+    copy = tmp_path / "public" / "partner-openapi.json"
+
+    generator.generate_partner_openapi_schema(target, copy)
+
+    assert copy.read_bytes() == target.read_bytes()
+
+
+def test_the_committed_frontend_copy_is_identical_to_the_committed_schema() -> None:
+    copy = REPO_ROOT / "nextjs-frontend" / "public" / "partner-openapi.json"
+
+    assert copy.read_bytes() == PARTNER_SCHEMA.read_bytes()
+
+
+def test_the_check_fails_when_the_frontend_copy_differs_or_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    differing = tmp_path / "copy.json"
+    differing.write_text("{}", encoding="utf-8")
+
+    for copy in (differing, tmp_path / "missing.json"):
+        monkeypatch.setattr(checker, "PUBLIC_COPY_FILE", copy)
+
+        assert checker.main() == 1
+        assert "partner-openapi.json is missing or differs" in capsys.readouterr().out
+
+
+def test_the_public_document_has_retailer_facing_wording_only() -> None:
+    text = PARTNER_SCHEMA.read_text(encoding="utf-8")
+    schema = json.loads(text)
+
+    for internal in (
+        "proves the whole path",
+        "the database or a limiter",
+        "documents the runtime envelope",
+        "Rate limiter unavailable",
+        "runtime envelope",
+    ):
+        assert internal not in text, internal
+    assert "ErrorResponse" not in schema["components"]["schemas"]
+    for name in ("PartnerErrorResponse", "PartnerRangeErrorResponse"):
+        assert schema["components"]["schemas"][name]["description"]
+    for path in schema["paths"].values():
+        for operation in path.values():
+            assert operation["description"]
+            assert operation["responses"]["503"]["description"].startswith(
+                "Service temporarily unavailable. Try again"
+            )

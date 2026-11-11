@@ -13,6 +13,10 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BACKEND_DIR.parent / "docs" / "partner" / "openapi.json"
+# The copy the public documentation page offers for download: identical to SCHEMA_FILE.
+PUBLIC_COPY_FILE = (
+    BACKEND_DIR.parent / "nextjs-frontend" / "public" / "partner-openapi.json"
+)
 REGENERATE = "  uv run python -m commands.generate_partner_openapi_schema"
 
 
@@ -39,6 +43,17 @@ def main() -> int:
         print(
             "partner-openapi-schema-check: docs/partner/openapi.json is out of date.\n"
             "Regenerate it from fastapi_backend/ with:\n" + REGENERATE
+        )
+        return 1
+
+    if (
+        not PUBLIC_COPY_FILE.exists()
+        or PUBLIC_COPY_FILE.read_bytes() != SCHEMA_FILE.read_bytes()
+    ):
+        print(
+            "partner-openapi-schema-check: nextjs-frontend/public/partner-openapi.json is missing or differs "
+            "from docs/partner/openapi.json.\n"
+            "Regenerate both from fastapi_backend/ with:\n" + REGENERATE
         )
         return 1
 

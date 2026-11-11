@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 
-from app.core.click_retention import CLICK_RETENTION_DAYS
+from app.core.click_retention import CLICK_RETENTION_DAYS, earliest_complete_date
 from app.repositories.merchant_clicks import (
     DayClicks,
     MerchantClickTotals,
@@ -108,12 +108,7 @@ class MerchantClickReportService:
         self.store, self.clock = store, clock
 
     def _earliest_complete_date(self) -> date:
-        cutoff = self.clock() - timedelta(days=CLICK_RETENTION_DAYS)
-        # The job deletes rows older than the cutoff, so the day holding the cutoff is whole only
-        # when the cutoff falls exactly on midnight.
-        if cutoff == _midnight(cutoff.date()):
-            return cutoff.date()
-        return cutoff.date() + timedelta(days=1)
+        return earliest_complete_date(self.clock())
 
     async def report(
         self, merchant_id: str, date_from: date, date_to: date

@@ -79,7 +79,7 @@ repos:
         # Fix: cd fastapi_backend && uv run python -m commands.generate_partner_openapi_schema
         entry: sh -c 'cd fastapi_backend && uv run python -m commands.check_partner_openapi_schema'
         language: system
-        files: ^(fastapi_backend/(app|commands)/.*\.py|fastapi_backend/pyproject\.toml|docs/partner/openapi\.json)$
+        files: ^(fastapi_backend/(app|commands)/.*\.py|fastapi_backend/pyproject\.toml|docs/partner/openapi\.json|nextjs-frontend/public/partner-openapi\.json)$
         pass_filenames: false
 
       # ------------------------------------------------------------ frontend

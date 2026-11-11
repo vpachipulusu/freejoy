@@ -17,13 +17,14 @@ from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import CodedHTTPException, ErrorResponse
+from app.core.errors import CodedHTTPException
 from app.core.rate_limit_enforcement import FAIL_CLOSED_RETRY_AFTER_SECONDS
 from app.partner.auth import PartnerContext, PartnerContextDep
 from app.partner.deps import get_partner_session
+from app.partner.error_models import PartnerErrorResponse
 from app.partner.errors import (
     MESSAGE_BUSY,
     MESSAGE_NOT_FOUND,
@@ -62,7 +63,7 @@ RefPath = Annotated[
 ]
 SessionDep = Annotated[AsyncSession, Depends(get_partner_session)]
 REFUSALS: dict[int | str, dict[str, object]] = {
-    404: {"model": ErrorResponse, "description": "No offer with this ref"},
+    404: {"model": PartnerErrorResponse, "description": "No offer with this ref"},
     409: {
         "model": CodedErrorResponse,
         "description": "The offer was archived by an editor",
@@ -115,11 +116,18 @@ def answers() -> Iterator[None]:
         raise HTTPException(404, MESSAGE_NOT_FOUND) from None
     except SubmissionBusy:
         raise _busy() from None
+    except IntegrityError as error:
+        # A constraint the service did not handle (it handles the two unique ones it expects): our rules should have
+        # prevented it, so it is a bug, not "the database cannot answer". Logged with its traceback (the partner engine
+        # hides statement parameters, so no retailer text is in it) and answered as the shared 500, never a misleading
+        # 503 that a client would retry for ever.
+        logger.error("partner submission hit a constraint", exc_info=error)
+        raise RuntimeError("partner submission integrity error") from error
     except DBAPIError as error:
         if _sqlstate(error) in BUSY_SQLSTATES:
             logger.warning("partner submission write was not taken in time")
             raise _busy() from None
-        raise
+        raise  # any other database failure is the sub-app's fixed 503 (app.partner.failures)
 
 
 @router.put(
@@ -129,7 +137,8 @@ def answers() -> Iterator[None]:
     summary="Create or update an offer submission",
     dependencies=[Depends(enforce_merchant_write_budget)],
     responses={
-        **REFUSALS,
+        # No 404: a ref that is valid is created, and a ref that is not is a 422 from the path pattern.
+        **{status: REFUSALS[status] for status in (409, 422, 429)},
         201: {
             "model": SubmissionResultResponse,
             "description": "A new submission was created",

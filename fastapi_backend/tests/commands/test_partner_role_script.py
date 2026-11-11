@@ -290,6 +290,7 @@ EXPECTED_SELECT = {
         "id merchant_id ref offer_id content_hash pending_payload pending_hash pending_at submitted_at key_id "
         "first_published_at created_at"
     ),
+    "click_events": "offer_id occurred_at user_agent_class",
 }
 EXPECTED_INSERT = {
     "offers": (

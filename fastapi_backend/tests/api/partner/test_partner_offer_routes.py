@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, get_args
 
 import pytest
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.config import settings
 from app.main import app
@@ -217,20 +217,35 @@ class FakeDriverError(Exception):
         self.sqlstate = sqlstate
 
 
-@pytest.mark.parametrize(
-    ("sqlstate", "status"),
-    [("55P03", 503), ("57014", 503), ("40P01", 503), ("23505", 500)],
-)
-async def test_a_lock_or_statement_timeout_is_a_503_and_any_other_database_error_stays_a_500(
-    world: PartnerWorld, service: FakeService, sqlstate: str, status: int
+@pytest.mark.parametrize("sqlstate", ["55P03", "57014", "40P01", "08006"])
+async def test_a_lock_timeout_or_any_other_database_failure_is_a_fixed_503(
+    world: PartnerWorld, service: FakeService, sqlstate: str
 ) -> None:
     service.raises = DBAPIError("stmt", {}, FakeDriverError(sqlstate))
 
     response = await call(world, "PUT", "/offers/sku-1", BODY)
 
-    assert response.status == status
-    assert response.json()["error"] in FIXED_MESSAGES
+    assert response.status == 503
+    assert response.json() == {
+        "success": False,
+        "error": "Service temporarily unavailable",
+    }
+    assert response.header("retry-after") is not None
     assert "stmt" not in response.body.decode()
+
+
+async def test_a_constraint_the_service_did_not_handle_is_a_500_not_a_misleading_503(
+    world: PartnerWorld, service: FakeService, caplog: pytest.LogCaptureFixture
+) -> None:
+    service.raises = IntegrityError(
+        "INSERT", {"title": MARKER}, FakeDriverError("23514")
+    )
+
+    response = await call(world, "PUT", "/offers/sku-1", BODY)
+
+    assert response.status == 500
+    assert response.json() == {"success": False, "error": "Internal server error"}
+    assert any("hit a constraint" in r.getMessage() for r in caplog.records)
 
 
 async def test_a_body_that_is_not_the_documented_shape_is_a_plain_422_and_the_service_is_not_called(

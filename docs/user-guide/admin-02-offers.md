@@ -92,6 +92,10 @@ nothing is changed.
 | **How to claim** | **Add a step**: each step has a **Step title** and **Step detail**; steps can be removed |
 | **Schedule and notes** | **Starts (UTC)**, **Ends (UTC)** (optional), **Publisher notes** (for admins only, never shown to visitors) |
 
+> **If you later move an offer to another merchant**, all of its click history moves with it. The first merchant's click
+> reports (the Analytics page and the partner API) stop counting those clicks, and the new merchant's reports count them,
+> including the clicks from before the move. The first merchant's earlier reports can no longer be reproduced.
+
 3. Press **Create draft**. If something is missing, each problem is written beside its field, the first problem field
    is focused, and the button stays on the page.
 

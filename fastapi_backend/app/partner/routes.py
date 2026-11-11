@@ -19,8 +19,12 @@ KEY_GONE_MESSAGE = "Unauthorized"
 
 
 class MeData(BaseModel):
-    merchant_name: str = Field(description="The name of the merchant this key was issued to.")
-    key_label: str = Field(description="The label the key was given when it was issued.")
+    merchant_name: str = Field(
+        description="The name of the merchant this key was issued to."
+    )
+    key_label: str = Field(
+        description="The label the key was given when it was issued."
+    )
 
 
 class MeResponse(BaseModel):
@@ -33,9 +37,13 @@ class MeResponse(BaseModel):
     response_model=MeResponse,
     operation_id="partner-me",
     summary="Who this key belongs to",
+    description=(
+        "Returns the name of the merchant your key was issued to and the label the key was given. "
+        "It changes nothing: use it to check that your key and the address work."
+    ),
 )
 async def read_me(context: PartnerContextDep, store: KeyStoreDep) -> MeResponse:
-    """The merchant the key was issued to and the key's label. It changes nothing; it proves the whole path."""
+    """The merchant the key was issued to and the key's label. It changes nothing."""
     profile = await store.profile(context.key_id)
     if (
         profile is None

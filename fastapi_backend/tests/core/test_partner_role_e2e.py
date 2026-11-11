@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg  # type: ignore[import-untyped]
@@ -33,7 +34,9 @@ from app.core.database import (
 )
 from app.core.ids import new_id
 from app.core.partner_keys import generate_key
+from app.partner.clicks_store import PartnerClickStore
 from app.partner.keys import PartnerKeyStore
+from tests.api.test_catalogue_e2e import add_category, add_offer
 from tests.partner_role_support import (
     DEFAULT_CONNECTION_LIMIT,
     apply_partner_role,
@@ -69,6 +72,7 @@ SELECT_COLUMNS = {
         "id merchant_id ref offer_id content_hash pending_payload pending_hash pending_at submitted_at "
         "key_id first_published_at created_at"
     ),
+    "click_events": "offer_id occurred_at user_agent_class",
 }
 INSERT_COLUMNS = {
     "offers": (
@@ -569,6 +573,13 @@ async def test_it_cannot_read_a_table_the_partner_surface_does_not_need(
         "UPDATE users SET email = 'x'",
         "DELETE FROM offers",
         "DELETE FROM users",
+        "UPDATE offers SET merchant_id = 'x'",
+        "INSERT INTO click_events (id, offer_id) VALUES ('x', 'x')",
+        "UPDATE click_events SET user_agent_class = 'OTHER'",
+        "UPDATE click_events SET occurred_at = now()",
+        "DELETE FROM click_events",
+        "TRUNCATE click_events",
+        "TRUNCATE offers",
     ],
 )
 async def test_it_is_refused_on_users_admins_billing_offers_and_the_like(
@@ -609,6 +620,29 @@ async def test_it_reads_only_the_listed_columns_and_changes_nothing_but_last_use
 @pytest.mark.parametrize(
     "statement",
     [
+        "SELECT source_url FROM offers",
+        "SELECT summary FROM offers",
+        "SELECT description FROM offers",
+        "SELECT publisher_notes FROM offers",
+        "SELECT commercial_basis FROM offers",
+        "SELECT * FROM offers",
+        "SELECT referrer_host FROM click_events",
+        "SELECT affiliate_link_id FROM click_events",
+        "SELECT id FROM click_events",
+        "SELECT * FROM click_events",
+        "SELECT offer_id, referrer_host FROM click_events",
+        "SELECT o.title FROM offers o WHERE o.source_url IS NOT NULL",
+    ],
+)
+async def test_it_reads_only_the_click_columns_the_query_needs(
+    partner: AsyncEngine, statement: str
+) -> None:
+    assert await denied(partner, statement)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
         "SELECT 1 FROM audit_logs",
         "SELECT id FROM audit_logs",
         "UPDATE audit_logs SET action = 'x'",
@@ -630,6 +664,10 @@ async def test_the_role_has_no_access_to_the_audit_trail_at_all(
         "ALTER TABLE partner_api_keys ADD COLUMN x int",
         "ALTER TABLE merchants DROP COLUMN name",
         "CREATE INDEX ix_partner_made_this ON merchants (name)",
+        "CREATE INDEX ix_partner_made_this ON click_events (offer_id)",
+        "DROP TABLE click_events",
+        "DROP TABLE offers",
+        "ALTER TABLE click_events ADD COLUMN x int",
         "CREATE SCHEMA partner_made_this",
         "CREATE ROLE partner_made_this",
         "TRUNCATE merchants",
@@ -683,6 +721,40 @@ async def test_the_key_lookup_works_as_the_role(
     assert profile is not None
     assert (profile.merchant_name, profile.key_label) == ("Shop", "Feed")
     assert missing is None
+
+
+async def test_the_role_runs_the_clicks_query_and_nothing_of_another_merchant_comes_back(
+    owner: AsyncEngine, partner_url: str, partner: AsyncEngine
+) -> None:
+    mine, _ = await seed_key(owner)
+    other, _ = await seed_key(owner)
+    category = await add_category(owner, "beauty")
+    mine_offer = await add_offer(owner, category, mine, "mine")
+    theirs = await add_offer(owner, category, other, "theirs")
+    at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    for offer in (mine_offer, theirs, theirs):
+        await seed_click(owner, offer, at)
+    start, end = datetime(2026, 3, 10, tzinfo=UTC), datetime(2026, 3, 11, tzinfo=UTC)
+    provider = PartnerSessionProvider(partner_url)
+
+    async with provider.session() as session:
+        store = PartnerClickStore(session)
+        page = await store.offers(mine, start, end, 100)
+        days = await store.daily(mine, [mine_offer, theirs], start, end)
+
+    assert [(o.offer_id, o.clicks) for o in page.offers] == [(mine_offer, 1)]
+    assert [(d.offer_id, d.clicks) for d in days] == [(mine_offer, 1)]
+
+
+async def seed_click(owner: AsyncEngine, offer_id: str, at: datetime) -> None:
+    async with owner.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO click_events (id, offer_id, occurred_at, user_agent_class) "
+                "VALUES (:id, :offer, :at, 'DESKTOP')"
+            ),
+            {"id": new_id(), "offer": offer_id, "at": at},
+        )
 
 
 async def test_the_role_can_move_last_used_at_and_the_lookup_then_says_it_is_not_due(
@@ -744,3 +816,41 @@ async def test_a_provider_built_with_the_owner_url_is_refused_by_the_live_check(
     with pytest.raises(PartnerRoleNotRestricted):
         async with provider.session():
             pass
+
+
+async def test_accepted_residual_any_sql_on_the_partner_session_reads_every_merchants_offers_and_clicks(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    """Documented (ADR-013): column grants cannot limit rows, so tenancy rests on the WHERE clauses of the code.
+
+    Whoever can run SQL on the partner session (a flaw in partner code, not a retailer) can read the granted columns of
+    EVERY merchant's offers, drafts included, and of every click. No visitor data is among them
+    (``test_it_reads_only_the_click_columns_the_query_needs``).
+    """
+    mine, _ = await seed_key(owner)
+    theirs, _ = await seed_key(owner)
+    category = await add_category(owner, "beauty")
+    published = await add_offer(owner, category, mine, "mine")
+    draft = await add_offer(
+        owner, category, theirs, "their-draft", status="DRAFT", last_verified_at=None
+    )
+    await seed_click(owner, published, datetime(2026, 3, 10, 9, 0, tzinfo=UTC))
+    await seed_click(owner, draft, datetime(2026, 3, 10, 9, 0, tzinfo=UTC))
+
+    async with partner.connect() as connection:
+        offers = (
+            await connection.execute(
+                text("SELECT id, merchant_id, title, slug, status FROM offers")
+            )
+        ).all()
+        clicks = (
+            await connection.execute(
+                text("SELECT offer_id, occurred_at, user_agent_class FROM click_events")
+            )
+        ).all()
+
+    assert {(row.merchant_id, row.status) for row in offers} == {
+        (mine, "PUBLISHED"),
+        (theirs, "DRAFT"),
+    }
+    assert {row.offer_id for row in clicks} == {published, draft}

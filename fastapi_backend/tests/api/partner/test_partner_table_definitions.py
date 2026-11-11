@@ -11,7 +11,7 @@ import pkgutil
 from typing import Any
 
 import pytest
-from sqlalchemy import Integer, Table, Text, column, table
+from sqlalchemy import Enum, Integer, Table, Text, column, table
 from sqlalchemy.sql.expression import TableClause
 
 import app.models.platform
@@ -67,6 +67,9 @@ EXPECTED_NULLABLE = {
         for nullable, names in ((True, nullable_names), (False, required_names))
         for name in names.split()
     },
+    ("click_events", "offer_id"): False,
+    ("click_events", "occurred_at"): False,
+    ("click_events", "user_agent_class"): True,
 }
 
 
@@ -100,6 +103,11 @@ def definition_problems(
                 problems.append(
                     f"column {core.name}.{col.name} is {type(col.type).__name__} here "
                     f"and {type(mapped.type).__name__} in the model"
+                )
+            elif isinstance(col.type, Enum) and col.type.enums != mapped.type.enums:
+                problems.append(
+                    f"column {core.name}.{col.name} allows {col.type.enums} here "
+                    f"and {mapped.type.enums} in the model"
                 )
     return problems
 
@@ -137,6 +145,7 @@ def test_the_partner_package_reads_exactly_these_tables() -> None:
         "affiliate_links",
         "audit_logs",
         "categories",
+        "click_events",
         "merchants",
         "offer_imports",
         "offers",
@@ -150,12 +159,23 @@ def test_the_check_notices_a_table_a_column_or_a_type_that_is_not_there() -> Non
         table("partner_api_keys", column("id", Text), column("hash_of_key", Text)),
         table("merchants", column("active", Integer)),
         table("nonsense", column("id", Text)),
+        table(
+            "offers",
+            column(
+                "status",
+                Enum("DRAFT", "PUBLISHED", native_enum=False, create_constraint=False),
+            ),
+        ),
     ]
 
     assert definition_problems(drifted, dict(Base.metadata.tables)) == [
         "column partner_api_keys.hash_of_key is not in the ORM model",
         "column merchants.active is Integer here and Boolean in the model",
         "table nonsense is not in the ORM metadata",
+        (
+            "column offers.status allows ['DRAFT', 'PUBLISHED'] here "
+            "and ['DRAFT', 'PUBLISHED', 'EXPIRED', 'ARCHIVED'] in the model"
+        ),
     ]
 
 

@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from app.core.catalogue_urls import MAX_URL_LENGTH
+from app.partner.error_models import PartnerErrorResponse
 from app.partner.errors import REFUSAL_CODES
 from app.partner.statuses import PartnerStatus
 
@@ -150,7 +151,7 @@ class SubmissionView(BaseModel):
     ref: str = Field(description="Your own id for the offer, as you sent it.")
     status: PartnerStatus = Field(
         description=(
-            "pending_review: with our editors, not yet published. live: published and not past its end date. "
+            "pending_review: with our editors, waiting to be published. live: published and not past its end date. "
             "ended: past its end date, or one of our editors retired it after it was live. "
             "declined: one of our editors turned it down before it was ever published; it is final, so send a new ref "
             "to submit again."
@@ -181,7 +182,7 @@ class SubmissionResult(SubmissionView):
 
     outcome: Outcome = Field(
         description=(
-            "created: a new submission. refreshed: our editors had not touched it yet, so it took your new content. "
+            "created: a new submission. refreshed: our editors had not touched it, so it took your new content. "
             "pending_update: our editors have edited, published or ended it, so your new content waits for them and the "
             "published page is unchanged. unchanged: nothing needed to change (the same content again, or content that "
             "matches what the offer already shows)."
@@ -228,13 +229,11 @@ class SubmissionsPageResponse(BaseModel):
     data: SubmissionsPage = Field(description="A page of submissions.")
 
 
-class CodedErrorResponse(BaseModel):
+class CodedErrorResponse(PartnerErrorResponse):
     """An error with a fixed message and, for a rule refusal, a stable ``code`` a retailer's software can branch on.
 
     A body that is not the documented shape is a plain 422 with no ``code``."""
 
-    success: Literal[False] = Field(default=False, description="Always false.")
-    error: str = Field(description="A fixed message. It never repeats what you sent.")
     code: REFUSAL_CODES | None = Field(
         default=None,
         description=(
