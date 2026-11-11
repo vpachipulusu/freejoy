@@ -19,6 +19,7 @@ import {
   redactLogEntry,
   redactString,
 } from '@/lib/logger';
+import { expectLinear } from '@/__tests__/unit/helpers/linear-growth';
 
 // Fake values assembled at runtime so no real-looking secret sits in the source.
 const EMAIL = ['jane.doe', 'example.com'].join('@');
@@ -174,11 +175,11 @@ describe('redactLogData', () => {
 });
 
 describe('hardening', () => {
-  it('stays fast on oversized input without an @ sign', () => {
-    const started = Date.now();
-    redactString('a'.repeat(200_000));
-    redactLogData({ message: 'a'.repeat(200_000) });
-    expect(Date.now() - started).toBeLessThan(1000);
+  it('costs time in proportion to oversized input without an @ sign', () => {
+    expectLinear((n) => {
+      redactString('a'.repeat(n));
+      redactLogData({ message: 'a'.repeat(n) });
+    }, 200_000);
   });
 
   it('truncates oversized strings', () => {

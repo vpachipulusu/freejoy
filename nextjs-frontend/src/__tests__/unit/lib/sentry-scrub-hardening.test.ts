@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FILTERED, scrubEvent } from '@/lib/sentry/scrub-event';
+import { expectLinear } from '@/__tests__/unit/helpers/linear-growth';
 
 const ADDRESS = 'victim@example.com';
 const ENCODED = 'victim%40example.com';
@@ -11,52 +12,75 @@ function expectNoLeak(value: unknown) {
   }
 }
 
-function elapsed(run: () => void): number {
-  const started = performance.now();
-  run();
-  return performance.now() - started;
+/**
+ * An object or array that counts how many times `scrubEvent` walks it (reads its keys, or maps over it).
+ * The count is the work done, so the tests below prove "each node is walked once" without a clock.
+ */
+function walked<T extends object>(target: T, counter: { walks: number }): T {
+  return new Proxy(target, {
+    ownKeys(node) {
+      counter.walks += 1;
+      return Reflect.ownKeys(node);
+    },
+    get(node, key, receiver) {
+      if (key === 'map') counter.walks += 1;
+      return Reflect.get(node, key, receiver);
+    },
+  });
 }
 
 describe('scrubEvent: cycles, shared references and depth', () => {
-  it('finishes fast on an object with six self-references and leaks nothing', () => {
-    const node: Record<string, unknown> = { url: `https://x.test/a?email=${ENCODED}` };
+  it('walks an object with six self-references once and leaks nothing', () => {
+    const counter = { walks: 0 };
+    const node = walked<Record<string, unknown>>(
+      { url: `https://x.test/a?email=${ENCODED}` },
+      counter
+    );
     for (let i = 0; i < 6; i++) node[`self${i}`] = node;
-    let result: unknown;
 
-    const ms = elapsed(() => {
-      result = scrubEvent({ extra: node });
-    });
+    const result = scrubEvent({ extra: node });
 
-    expect(ms).toBeLessThan(100);
+    // Without cycle detection the walk would branch six ways at every level down to the depth limit
+    // (6^12 visits), blow the node budget and return null.
+    expect(result).not.toBeNull();
+    expect(counter.walks).toBe(1);
     expectNoLeak(result);
     expect(JSON.stringify(result)).toContain('[Circular]');
   });
 
-  it('finishes fast on mutually referencing arrays and objects', () => {
-    const a: Record<string, unknown> = { to: `/a?email=${ENCODED}` };
-    const b: unknown[] = [a, a, a];
+  it('walks mutually referencing arrays and objects once each', () => {
+    const counter = { walks: 0 };
+    const a = walked<Record<string, unknown>>({ to: `/a?email=${ENCODED}` }, counter);
+    const b = walked<unknown[]>([a, a, a], counter);
     a.list = b;
     a.again = b;
 
-    const ms = elapsed(() => {
-      expectNoLeak(scrubEvent({ breadcrumbs: b }));
-    });
+    expectNoLeak(scrubEvent({ breadcrumbs: b }));
 
-    expect(ms).toBeLessThan(100);
+    expect(counter.walks).toBe(2); // b once, a once; every other reference is a cycle or a finished child
   });
 
-  it('finishes fast when one child is shared ten times, and again down a diamond chain', () => {
-    const shared = { url: `https://x.test/a?email=${ENCODED}` };
+  it('walks a child shared ten times once, and a diamond chain once per level', () => {
+    const urlOf = `https://x.test/a?email=${ENCODED}`;
+    const sharedCounter = { walks: 0 };
+    const shared = walked<Record<string, unknown>>({ url: urlOf }, sharedCounter);
     const wide = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i}`, shared]));
-    let level: Record<string, unknown> = shared;
-    for (let i = 0; i < 11; i++) level = { left: level, right: level };
+    const diamondCounter = { walks: 0 };
+    const levels = 9; // the leaf must sit above the depth limit (12) to be walked at all
+    let level: Record<string, unknown> = walked<Record<string, unknown>>(
+      { url: urlOf },
+      diamondCounter
+    );
+    for (let i = 0; i < levels; i++) {
+      level = walked<Record<string, unknown>>({ left: level, right: level }, diamondCounter);
+    }
 
-    const ms = elapsed(() => {
-      expectNoLeak(scrubEvent({ extra: wide }));
-      expectNoLeak(scrubEvent({ extra: level }));
-    });
+    expectNoLeak(scrubEvent({ extra: wide }));
+    expectNoLeak(scrubEvent({ extra: level }));
 
-    expect(ms).toBeLessThan(200);
+    // Walked afresh per parent, the diamond would cost 2^9 visits at the bottom.
+    expect(sharedCounter.walks).toBe(1);
+    expect(diamondCounter.walks).toBe(levels + 1);
   });
 
   it('drops the event rather than walk an unreasonable number of nodes', () => {
@@ -157,20 +181,19 @@ describe('scrubEvent: gaps in how an address can be written into a URL', () => {
     expect(scrubEvent(event)).toEqual(event);
   });
 
-  it('is fast on long runs of address-like characters', () => {
-    const runs = [
-      'a'.repeat(200_000),
-      `${'a'.repeat(200_000)}@`,
-      '%40'.repeat(100_000),
-      `${'a@'.repeat(100_000)}b`,
-      `x@${'a.'.repeat(100_000)}`,
-    ];
+  const ADDRESS_LIKE_RUNS: ReadonlyArray<readonly [string, (n: number) => string]> = [
+    ['letters', (n) => 'a'.repeat(n)],
+    ['letters and a trailing @', (n) => `${'a'.repeat(n)}@`],
+    ['encoded @ signs', (n) => '%40'.repeat(n / 2)],
+    ['alternating letters and @', (n) => `${'a@'.repeat(n / 2)}b`],
+    ['a domain of single-letter labels', (n) => `x@${'a.'.repeat(n / 2)}`],
+  ];
 
-    const ms = elapsed(() => {
-      for (const run of runs) scrubEvent({ message: run, extra: { url: `/a?${run}` } });
-    });
-
-    expect(ms).toBeLessThan(3000);
+  it.each(ADDRESS_LIKE_RUNS)('costs time in proportion to a long run of %s', (_name, build) => {
+    expectLinear((n) => {
+      const run = build(n);
+      scrubEvent({ message: run, extra: { url: `/a?${run}` } });
+    }, 200_000);
   });
 });
 
@@ -182,21 +205,18 @@ describe('scrubEvent: parameter-name and JSON-name patterns stay linear', () => 
     ['an escaped quote then repeated email', (n) => `\\"${'email'.repeat(n)}`],
     ['repeated percent-encoded email', (n) => '%22email%22'.repeat(n)],
   ];
-  const BOUNDS = [
-    ['20 000 repeats', 20_000, 50],
-    ['about 1 MB', 200_000, 1500],
+  const SIZES = [
+    ['20 000 repeats', 20_000],
+    ['about 1 MB', 200_000],
   ] as const;
 
   for (const [name, build] of REPEATED) {
-    for (const [size, repeats, limit] of BOUNDS) {
-      it(`${name}, ${size}, takes under ${limit} ms`, () => {
-        const text = build(repeats);
-
-        const ms = elapsed(() => {
+    for (const [size, repeats] of SIZES) {
+      it(`${name}, ${size}, costs time in proportion to its length`, () => {
+        expectLinear((n) => {
+          const text = build(n);
           scrubEvent({ message: text, request: { url: text } });
-        });
-
-        expect(ms).toBeLessThan(limit);
+        }, repeats);
       });
     }
   }
@@ -224,14 +244,12 @@ describe('scrubEvent: addresses with letters outside ASCII', () => {
     expect(scrubbed?.message).toBe(`for ${FILTERED}.`);
   });
 
-  it('is fast on a long run of non-ASCII labels', () => {
-    const ms = elapsed(() => {
+  it('costs time in proportion to a long run of non-ASCII labels', () => {
+    expectLinear((n) => {
       scrubEvent({
-        message: `x@${'Ã¤.'.repeat(100_000)}`,
-        extra: { u: `/a?${'Ã¤@'.repeat(50_000)}` },
+        message: `x@${'ä.'.repeat(n)}`,
+        extra: { u: `/a?${'ä@'.repeat(n / 2)}` },
       });
-    });
-
-    expect(ms).toBeLessThan(200);
+    }, 100_000);
   });
 });

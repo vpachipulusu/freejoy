@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FILTERED, scrubEvent } from '@/lib/sentry/scrub-event';
+import { expectLinear } from '@/__tests__/unit/helpers/linear-growth';
 
 const ADDRESS = 'victim@example.com';
 const ENCODED = 'victim%40example.com';
@@ -195,12 +196,10 @@ describe('scrubEvent: email addresses in URLs', () => {
     expect(scrubbed?.extra.long).toBe(`?email=${FILTERED}&x=1`);
   });
 
-  it('stays fast on input built to make a pattern backtrack', () => {
-    const hostile = `?${'a'.repeat(200_000)}&${'e'.repeat(200_000)}=${'&'.repeat(50_000)}`;
-    const started = performance.now();
-
-    scrubEvent({ message: hostile, extra: { query: hostile } });
-
-    expect(performance.now() - started).toBeLessThan(2000);
+  it('costs time in proportion to input built to make a pattern backtrack', () => {
+    expectLinear((n) => {
+      const hostile = `?${'a'.repeat(n)}&${'e'.repeat(n)}=${'&'.repeat(n / 4)}`;
+      scrubEvent({ message: hostile, extra: { query: hostile } });
+    }, 200_000);
   });
 });
