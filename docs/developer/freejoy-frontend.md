@@ -163,8 +163,9 @@ the admin publish, unpublish and expire actions (FREEJ-22); nothing calls it yet
   `public-copy.test.tsx` pins this. A `free_sample` card shows its postage on its own line under the title. Why each line reads as it does: `docs/compliance/uk-affiliate-checklist.md`
   section I.3.
 - A demo (fixture) offer has no destination, so its CTA opens a "Demo offer" dialog. A real offer's CTA links
-  to the first-party `/go/<offerId>` redirect (FREEJ-23), preceded by the "Ad" label and followed by the
-  commission sentence. No element on any page has an external `href`.
+  to the first-party `/go/<offerId>` redirect (FREEJ-23). The "Ad" label before the button and the commission
+  sentence after it appear only when the offer's `earnsCommission` is true (FREEJ-60: the link `/go/` would follow is on
+  an affiliate network); a direct-only offer shows neither. A missing flag counts as true. No element on any page has an external `href`.
 - The alerts form validates with Zod, requires consent, and submits through a server action
   (FREEJ-24). It answers "check your inbox" the same way for every address, and nothing starts until
   the visitor opens the emailed link and presses the button on `/alerts/confirm`. Until

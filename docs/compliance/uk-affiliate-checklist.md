@@ -69,7 +69,7 @@ domain outside the allowed research list; it is treated here as a product decisi
   disguised. Once `/go/` links earn commission, listing content that promotes those offers is marketing that
   Freejoy is responsible for.
 - **Where:** `src/components/offer/offer-cta.tsx`, `src/components/offer/outbound-link.tsx` (`AffiliateCta`), `src/components/catalogue/offer-card.tsx`, `/go/[offerId]`.
-- **Status:** `Built` for criteria 1 and 2 (FREEJ-23: `AffiliateCta` puts the "Ad" text before the button on every real offer page, and that button is the only `/go/` link). Criterion 3 (a label on the card) is `Needs professional review`: see decision D-10 in I.3.
+- **Status:** `Built` for criteria 1 and 2 (FREEJ-23: `AffiliateCta` puts the "Ad" text before the button, and that button is the only `/go/` link; FREEJ-60: it does so only when the followed link earns commission, so a `direct` link carries neither the label nor the commission sentence. Wording for owner approval). Criterion 3 (a label on the card) is `Needs professional review`: see decision D-10 in I.3.
 - **Acceptance criteria:**
   1. Every control that links to `/go/<offerId>` is preceded, in the DOM and visually, by the word "Ad" (not "Affiliate" alone).
   2. The label is real text in the accessibility tree (not `aria-hidden`, not an image), with at least 4.5:1 contrast.

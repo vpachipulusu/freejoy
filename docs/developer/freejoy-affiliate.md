@@ -252,6 +252,51 @@ GO_E2E_LIVE_OFFER_ID=<id> GO_E2E_LIVE_OFFER_SLUG=<slug> GO_E2E_ENDED_OFFER_ID=<i
 `npm run test:e2e:local -- src/__tests__/e2e/go-redirect.spec.ts` also works if the ids are exported, but it runs the auth
 setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e2e.md)).
 
+## When the page says "Ad"
+
+The "Ad" label and the commission sentence appear beside the button only when the link `/go/` would really follow for
+the offer, right now, is on an affiliate network that pays commission (FREEJ-60). "Sponsored" is a different
+disclosure and does not depend on it.
+
+- **The flag.** `GET /v1/catalogue/offers/{slug}` returns one extra required boolean, `earns_commission`, on the
+  detail body only (`OfferDetailData`, which extends the list item `OfferData`). The list endpoint does not carry it: a
+  card links to the offer page and never to the provider, so no list page needs it, and leaving it off keeps the list a
+  single query. It never exposes the provider, the commercial basis, the link id or the destination.
+- **One rule, two callers.** `app/core/followed_link.py` holds the selection: take the active links in stored order
+  (oldest first), skip any whose destination is not a clean https URL or whose host the provider may not use, follow the
+  first one left. `OutboundClickService` uses it to pick the destination of a click; `OfferCommissionService`
+  (`app/services/offer_commission.py`) uses it to compute the flag. The flag is true when the chosen link's provider is
+  not `direct` and not `sample`. No usable link gives false. `tests/services/test_offer_commission.py` runs both callers
+  over the same stored links (both orders, an unusable first link, no links, the sample provider) and asserts the click
+  and the flag describe the same link; `tests/api/test_catalogue_e2e.py` does the same against Postgres.
+- **What each state shows.**
+
+  | Followed link | Sponsored | Shown |
+  |---|---|---|
+  | network | no | "Ad", then the button, then "Freejoy is paid a commission by the brand ..." |
+  | network | yes | "Sponsored" badge, "Ad", the sponsored sentence plus "Freejoy may also earn a commission ..." |
+  | `direct` or none usable | no | the button and the redirect notice only: no "Ad", no commission sentence |
+  | `direct` or none usable | yes | "Sponsored" badge and the sponsored sentence only: no "Ad", no commission wording |
+
+  A link that is not shown as an "Ad" still goes through `/go/` with the `sponsored nofollow noopener` rel.
+- **A missing flag discloses.** `mapOffer` (`src/lib/catalogue/api-mapper.ts`) reads `earns_commission` and, when it is
+  absent or not a boolean, treats it as `true` and keeps the offer: showing "Ad" on a link that earns nothing
+  over-discloses, which is the safe side under UK ASA rules, whereas hiding it would not be. List items never carry the
+  flag, so they map to `true`; no list page reads it.
+- **Freshness.** The detail response is cached for up to 60 seconds (backend `Cache-Control` and the frontend data
+  cache), while a click always reads the live rows. After an editor changes the links, the page can describe the previous
+  choice for up to a minute. A change from a network link to a direct one only over-discloses for that minute. A change
+  the other way (a network link added in front of, or replacing, the direct one) can leave the page without "Ad" for up
+  to a minute while the click already follows the network link. Only an admin action that calls
+  `refreshPublicCatalogue` clears the cache sooner; the Awin import and direct database edits do not. This is
+  accepted for now; if it is not, shorten `CATALOGUE_REVALIDATE_SECONDS` or revalidate the `catalogue` tag when links
+  are saved.
+- **Deploy order: backend first, then frontend.** The generated client and the schema treat `earns_commission` as
+  required, so the backend that sends it must be live before the frontend that reads it. Against an older backend the
+  frontend still works and over-discloses (a missing flag counts as true), but that is a fallback, not a supported
+  order. No migration and no data change: the flag is computed from rows that already exist. To roll back, revert the
+  frontend first, then the backend.
+
 ## Known limits and follow-ups
 
 - Fixture (demo) offers keep the "Demo offer" dialog: their ids have no row, so `/go/` would answer 404. The CTA
@@ -263,10 +308,8 @@ setup project first and therefore needs `.env.e2e.local` ([local-e2e.md](local-e
   counted like any other. A `direct` link on an `EDITORIAL` offer means no payment at all. Publishing an offer with no network link
   needs the editor to confirm the basis ([backend-admin-catalogue.md](backend-admin-catalogue.md#commercial-basis)). The
   outbound `rel` is `sponsored nofollow noopener` for every basis. A sponsored offer's call to action does not state
-  as fact that a commission is paid: it says the listing is sponsored and that Freejoy "may also earn a commission".
-  **Known gap, follow-up FREEJ-60:** the "Ad" label and the commission sentence are shown for every real offer that is
-  not sponsored, including a `direct` one, where no commission is earned; FREEJ-60 shows "Ad" only on links that earn a
-  commission. The public disclosure page says so in the meantime.
+  as fact that a commission is paid: it says the listing is sponsored and that Freejoy "may also earn a commission"
+  (see [When the page says "Ad"](#when-the-page-says-ad)).
 - The "Ad" label and the sentence "Freejoy is paid a commission by the brand if you take up this offer through this
   link." are from the compliance checklist and still need the reviewer's sign-off on wording. Offer cards do not
   carry the label yet (checklist A1.3).
