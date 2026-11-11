@@ -98,11 +98,8 @@ jobs:
       # ratchet: this step fails if coverage drops below it.
       # --durations lists the 25 slowest tests in the log; the JUnit file
       # feeds the slowest-files table in the run summary.
-      # COVERAGE_CORE=sysmon: coverage.py measures line coverage through Python 3.12's
-      # sys.monitoring instead of the settrace tracer (same numbers, less overhead per test).
+      # The coverage tracer (core = "sysmon") is chosen in [tool.coverage.run] of pyproject.toml.
       - name: pytest with coverage
-        env:
-          COVERAGE_CORE: sysmon
         run: >-
           uv run pytest -n auto --dist loadfile
           --cov --cov-report=term-missing:skip-covered --cov-report=xml

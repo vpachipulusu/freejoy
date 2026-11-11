@@ -71,11 +71,14 @@ extend-select = ["TID251"]
 # 98.63%): raise it as tests are added, never lower it.
 #
 # core = "sysmon" (FREEJ-65): Python 3.12's `sys.monitoring`. The default tracer (CTracer) made the suite run
-# about 2.5 times slower than without coverage (full run: 640 to 745 s against 270 to 283 s; sysmon: 312 s), and
-# it loses every line that runs inside a SQLAlchemy greenlet (the async session code that the *_e2e tests
-# exercise): admin_subscriptions.py read 36% under CTracer and 46% under sysmon on the same tests (the same 46%
-# as CTracer with concurrency = ["greenlet", "thread"], which is slower still). sysmon measures lines only
-# (this project does not measure branches). Needs coverage 7.9 or newer (uv.lock pins 7.16.2).
+# about 2.5 times slower than without coverage (full run: 640 to 745 s against 270 to 283 s; sysmon: 307 to 351 s),
+# and CTracer without `concurrency = greenlet` loses its place when SQLAlchemy's asyncio layer switches greenlets,
+# so application lines that run after an awaited database call go unrecorded: admin_subscriptions.py read 36%
+# under CTracer and 46% under sysmon on the same tests (the same 46% as CTracer with concurrency = ["greenlet",
+# "thread"], which is slower still). sysmon measures lines only. Needs coverage 7.9 or newer (uv.lock pins 7.16.2).
+# Do not add `concurrency`, `branch`, `dynamic_context` or `timid` to [tool.coverage.run]: each makes coverage fall
+# back to CTracer. A COVERAGE_CORE variable in the environment overrides this setting.
+# tests/test_coverage_config.py checks the tracer that is really running.
 [tool.coverage.run]
 source = ["app", "commands"]
 core = "sysmon"
