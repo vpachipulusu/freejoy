@@ -8,6 +8,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -237,6 +238,40 @@ async def test_publishing_a_partner_offer_stores_the_basis_the_editor_chose(
 
     assert before.commercial_basis == "SPONSORED"
     assert after.commercial_basis == "AFFILIATE"
+
+
+@pytest.mark.parametrize(
+    ("basis", "earns_commission", "sponsored"),
+    [
+        ("AFFILIATE", True, False),
+        ("EDITORIAL", False, False),
+        ("SPONSORED", False, True),
+    ],
+)
+async def test_a_published_partner_offer_with_a_direct_link_discloses_what_the_editor_stated(
+    client: AsyncClient,
+    admin: dict[str, str],
+    partner_world: None,
+    basis: str,
+    earns_commission: bool,
+    sponsored: bool,
+) -> None:
+    category = await make_category(client, admin)
+    merchant = await make_merchant(client, admin)
+    await put_offer(merchant.key, "sku-1", offer_body(category))
+    url = f"{OFFERS}/{await sub.offer_id_of(client, admin, 'Free')}"
+    await approve(client, admin, url, "verify")
+    unconfirmed = await approve(client, admin, url, "publish")
+    assert (
+        unconfirmed.status_code == 422
+    )  # the placeholder can never be published as it is
+
+    await approve(client, admin, url, "publish", commercial_basis=basis)
+    slug = (await client.get(url, headers=admin)).json()["data"]["slug"]
+    public = (await client.get(f"/v1/catalogue/offers/{slug}")).json()["data"]
+
+    assert public["earns_commission"] is earns_commission
+    assert public["sponsored"] is sponsored
 
 
 async def test_the_slug_follows_the_title_an_editor_published_for_a_never_published_draft(
