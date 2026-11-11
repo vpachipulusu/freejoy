@@ -21,12 +21,14 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from app.api.deps import get_session_provider
+from app.api.deps import get_rate_limiter, get_session_provider
 from app.core.database import DefaultSessionProvider, build_engine
+from app.core.rate_limit import OUTBOUND_OFFER_BOT_POLICY, OUTBOUND_OFFER_POLICY
 from app.main import create_app
 from app.repositories.admin_merchants import AdminMerchantRepository
 from commands.prune_click_events import prune_click_events
 from tests.api.test_catalogue_e2e import add_category, add_merchant, add_offer, insert
+from tests.fakes import FakeRateLimiter, as_limiter
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -405,6 +407,49 @@ async def test_the_sample_provider_is_followed_in_the_test_environment(
 
     assert response.status_code == 200
     assert len(await click_rows(engine)) == 1
+
+
+# --- the per-offer recording budget (FREEJ-62) ----------------------------------
+
+
+async def test_a_flood_of_bot_requests_cannot_use_up_the_budget_genuine_clicks_need(
+    engine: AsyncEngine, shop: dict[str, str]
+) -> None:
+    offer = await add_offer(engine, shop["category"], shop["merchant"], "lipstick")
+    await add_link(engine, offer)
+    app = create_app()
+    provider = DefaultSessionProvider(
+        async_sessionmaker(engine, expire_on_commit=False)
+    )
+    app.dependency_overrides[get_session_provider] = lambda: provider
+    limiter = as_limiter(FakeRateLimiter())  # one instance, so the counts add up
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    flood = OUTBOUND_OFFER_POLICY.limit
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+        headers={"X-Internal-Key": KEY},
+    ) as http:
+        bots = [
+            await http.post(
+                click_path(offer),
+                json={"user_agent_class": "BOT"},
+                headers={"X-Client-IP": f"10.{n // 250}.{n % 250}.1"},
+            )
+            for n in range(flood)
+        ]
+        genuine = await http.post(
+            click_path(offer),
+            json={"user_agent_class": "DESKTOP"},
+            headers={"X-Client-IP": "10.9.9.9"},
+        )
+
+    assert [r.status_code for r in bots] == [200] * flood
+    assert genuine.status_code == 200
+    classes = [row.user_agent_class for row in await click_rows(engine)]
+    assert classes.count("BOT") == OUTBOUND_OFFER_BOT_POLICY.limit
+    assert classes.count("DESKTOP") == 1
 
 
 # --- retention --------------------------------------------------------------------

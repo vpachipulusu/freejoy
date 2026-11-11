@@ -20,7 +20,12 @@ from app.repositories.catalogue import OfferRecord
 from app.repositories.outbound_clicks import LinkRecord
 from app.services.catalogue import CatalogueService
 from app.services.outbound_clicks import OutboundClickService
-from tests.fakes import FakeRateLimiter, RaisingRateLimiter, as_limiter
+from tests.fakes import (
+    FakeRateLimiter,
+    RaisingRateLimiter,
+    ScopedOutageRateLimiter,
+    as_limiter,
+)
 from tests.fakes_catalogue import NOW, FakeCatalogueRepository, make_offer
 from tests.fakes_outbound import FakeClickStore, FakeCommitter, make_link
 
@@ -265,13 +270,9 @@ async def test_a_capped_offer_still_refuses_what_it_would_refuse_anyway() -> Non
 
 
 async def test_an_offer_cap_outage_records_the_click_as_usual() -> None:
-    class OfferKeyOutage(FakeRateLimiter):
-        async def hit(self, identifier, policy):  # type: ignore[no-untyped-def]
-            if identifier.startswith("outbound_offer:"):
-                raise RuntimeError("redis down")
-            return await super().hit(identifier, policy)
-
-    http, store, _, _ = build(make_offer(), limiter=OfferKeyOutage())
+    http, store, _, _ = build(
+        make_offer(), limiter=ScopedOutageRateLimiter({OUTBOUND_OFFER_POLICY.scope})
+    )
 
     async with http:
         response = await http.post(PATH)

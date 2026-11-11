@@ -310,7 +310,9 @@ public site: the role has no grant on `last_verified_at`, so the code cannot tel
   twice); visitors identified as automated are left out and nothing else is filtered; days are UTC; **recording is rate limited for each offer, so in a very
   busy minute some clicks are not recorded and the count can be low**; rows are deleted after 395 days; no visitor identity is kept. The public text gives
   **no figure and no description of the limiter**. The figure is internal: recording is limited to 600 clicks for one offer in a minute
-  (`OUTBOUND_OFFER_POLICY`: past it the visitor is still sent on and no row is written, so a very busy minute is undercounted). It fails open when the
+  (`OUTBOUND_OFFER_POLICY`: past it the visitor is still sent on and no row is written, so a very busy minute is undercounted). Requests classed `BOT` spend a separate per-offer
+  bucket (`OUTBOUND_OFFER_BOT_POLICY`, 60 a minute) and never this one (FREEJ-62), so automated traffic cannot use up the budget that
+  counted clicks need; a flood with a non-bot user agent still can, and those rows count. It fails open when the
   limiter is down. `tests/api/partner/test_partner_click_text.py` keeps this paragraph and `freejoy-affiliate.md` equal to the policy the click endpoint
   enforces, and keeps the figure out of the public schema. The 395 is read from `CLICK_RETENTION_DAYS` when the text is built, so the schema check fails if
   it changes.

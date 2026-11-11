@@ -18,8 +18,9 @@ CLICK_DEFINITION = (
 )
 BOT_RULE = (
     "Clicks the site classed as BOT (user_agent_class) are left out and counted in "
-    "excluded_bot_clicks; no other filtering is applied. Click records are deleted after the "
-    "retention period."
+    "excluded_bot_clicks; no other filtering is applied. Recording of bot clicks is capped for each "
+    "offer, so excluded_bot_clicks is a lower bound on automated traffic, not a full count. Click "
+    "records are deleted after the retention period."
 )
 
 __all__ = [

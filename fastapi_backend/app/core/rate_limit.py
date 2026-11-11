@@ -82,6 +82,12 @@ OUTBOUND_CLICK_POLICY = RateLimitPolicy(
 OUTBOUND_OFFER_POLICY = RateLimitPolicy(
     "outbound_offer", limit=600, window_seconds=60, fail_closed=False
 )
+# The same endpoint and key, for a request whose device class is BOT (FREEJ-62). Bot rows are stored but left out
+# of every report, so they get their own small per-offer budget and can never use up OUTBOUND_OFFER_POLICY,
+# which is for the clicks that are counted. The scope differs, so the two counters can never be shared.
+OUTBOUND_OFFER_BOT_POLICY = RateLimitPolicy(
+    "outbound_offer_bot", limit=60, window_seconds=60, fail_closed=False
+)
 # Bulk Stripe subscription reconciliation: up to 20 Stripe calls per run, so a
 # few runs a minute per admin are plenty. Fail closed: an outage must not lift the limit.
 ADMIN_SYNC_POLICY = RateLimitPolicy(

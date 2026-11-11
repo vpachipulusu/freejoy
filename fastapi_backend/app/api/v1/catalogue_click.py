@@ -26,7 +26,12 @@ from app.api.rate_limit import (
 )
 from app.api.v1.catalogue_schemas import ExpiredOfferResponse, expired_response
 from app.core.errors import ErrorResponse
-from app.core.rate_limit import OUTBOUND_CLICK_POLICY, OUTBOUND_OFFER_POLICY
+from app.core.rate_limit import (
+    OUTBOUND_CLICK_POLICY,
+    OUTBOUND_OFFER_BOT_POLICY,
+    OUTBOUND_OFFER_POLICY,
+    RateLimitPolicy,
+)
 from app.core.sentry import report_exception
 from app.models.platform.click_event import UserAgentClass
 from app.repositories.catalogue import CatalogueRepository
@@ -56,33 +61,6 @@ router = APIRouter(
 OfferIdPath = Annotated[str, Path(pattern=OFFER_ID_PATTERN)]
 
 
-async def offer_has_room(
-    request: Request, limiter: RateLimiterDep, offer_id: OfferIdPath
-) -> bool:
-    """Second limit, per offer id: True while this offer may still gain a recorded click this minute.
-
-    Past the cap the visitor is still sent on (``record`` is False): refusing would punish the visitor for
-    a crowd, while capping only limits how many clicks one offer can add per minute. A limiter outage
-    records the click as usual, like the other public routes (the policy fails open).
-    """
-    identifier = f"{OUTBOUND_OFFER_POLICY.scope}:offer:{offer_id}"
-    try:
-        decision = await limiter.hit(identifier, OUTBOUND_OFFER_POLICY)
-    except Exception as exc:
-        request_id = request.scope.get("state", {}).get("request_id")
-        logger.warning(
-            "offer cap limiter unavailable, recording the click",
-            exc_info=exc,
-            extra={"request_id": request_id},
-        )
-        report_exception(exc)
-        return True
-    return decision.allowed
-
-
-RecordAllowed = Annotated[bool, Depends(offer_has_room)]
-
-
 class ClickRequest(BaseModel):
     """What the Next.js route may tell the backend about the click. Nothing else is accepted."""
 
@@ -107,6 +85,51 @@ class ClickRequest(BaseModel):
             "only make the answer stricter."
         ),
     )
+
+
+ClickBody = Annotated[ClickRequest | None, Body()]
+
+
+def offer_policy_for(user_agent_class: UserAgentClass | None) -> RateLimitPolicy:
+    """The per-offer budget a click spends: BOT has its own, everything else (and no class) the main one."""
+    if user_agent_class == UserAgentClass.BOT:
+        return OUTBOUND_OFFER_BOT_POLICY
+    return OUTBOUND_OFFER_POLICY
+
+
+async def offer_has_room(
+    request: Request,
+    limiter: RateLimiterDep,
+    offer_id: OfferIdPath,
+    body: ClickBody = None,
+) -> bool:
+    """Second limit, per offer id: True while this offer may still gain a recorded click this minute.
+
+    The device class is in the body (the route and this dependency share the one body parameter, so both must
+    call it ``body``). A request classed ``BOT`` spends ``OUTBOUND_OFFER_BOT_POLICY`` and never the main
+    budget; every other class, and no class, spends ``OUTBOUND_OFFER_POLICY``. FastAPI runs the dependency once
+    per request, after the body is validated, so a request refused for its body spends no offer budget.
+    Past the cap the visitor is still sent on (``record`` is False): refusing would punish the visitor for a
+    crowd, while capping only limits how many clicks one offer can add per minute. A limiter outage records the
+    click as usual, like the other public routes (the policy fails open).
+    """
+    policy = offer_policy_for(body.user_agent_class if body else None)
+    identifier = f"{policy.scope}:offer:{offer_id}"
+    try:
+        decision = await limiter.hit(identifier, policy)
+    except Exception as exc:
+        request_id = request.scope.get("state", {}).get("request_id")
+        logger.warning(
+            "offer cap limiter unavailable, recording the click",
+            exc_info=exc,
+            extra={"request_id": request_id},
+        )
+        report_exception(exc)
+        return True
+    return decision.allowed
+
+
+RecordAllowed = Annotated[bool, Depends(offer_has_room)]
 
 
 class ClickData(BaseModel):
@@ -169,7 +192,7 @@ async def record_click(
     offer_id: OfferIdPath,
     service: ClickServiceDep,
     record: RecordAllowed,
-    body: Annotated[ClickRequest | None, Body()] = None,
+    body: ClickBody = None,
 ) -> Response:
     """Write one click event for a live offer and return its affiliate destination."""
     request = body or ClickRequest()

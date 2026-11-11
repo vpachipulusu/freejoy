@@ -95,6 +95,22 @@ class RaisingRateLimiter:
         raise RateLimiterUnavailable("redis down")
 
 
+class ScopedOutageRateLimiter(FakeRateLimiter):
+    """Counts like ``FakeRateLimiter``, but a Redis outage hits only the named policy scopes."""
+
+    def __init__(
+        self, failing_scopes: set[str], reset_at: float = 4_000_000_000.0
+    ) -> None:
+        super().__init__(reset_at)
+        self._failing_scopes = failing_scopes
+
+    async def hit(self, identifier: str, policy: RateLimitPolicy) -> RateLimitDecision:
+        if policy.scope in self._failing_scopes:
+            self.hits.append((identifier, policy))
+            raise RateLimiterUnavailable("redis down")
+        return await super().hit(identifier, policy)
+
+
 def as_limiter(limiter: FakeRateLimiter | RaisingRateLimiter) -> RateLimiter:
     """Static proof that the fakes satisfy the protocol (checked by mypy)."""
     return limiter
