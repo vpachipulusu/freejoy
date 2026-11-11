@@ -8,8 +8,6 @@ subscriber email, unique slugs, delete behaviour of every foreign key, and the d
 
 import enum
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +31,7 @@ from app.models.platform import (
     SubscriberStatus,
     UserAgentClass,
 )
+from tests.alembic_support import run_alembic
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -44,13 +43,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

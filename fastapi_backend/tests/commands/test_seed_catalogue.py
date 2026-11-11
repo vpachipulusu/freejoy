@@ -8,8 +8,6 @@ without it, like the ``*_e2e.py`` suites; CI provides one.
 import asyncio
 import os
 import re
-import subprocess
-import sys
 from collections.abc import Awaitable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -43,6 +41,7 @@ from commands.seed_data import (
     steps_for,
 )
 from commands.seed_data_offers import OFFERS
+from tests.alembic_support import run_alembic
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES_TS = (
@@ -372,13 +371,7 @@ def run[T](coroutine: Awaitable[T]) -> T:
 
 
 def _migrate_to_head(url: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, "upgrade", "head")
 
 
 @pytest.fixture(scope="module")

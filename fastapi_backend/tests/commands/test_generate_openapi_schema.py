@@ -11,6 +11,7 @@ from commands.generate_openapi_schema import (
     remove_operation_id_tag,
 )
 from tests._subprocess_support import (
+    CHILD_TIMEOUT_SECONDS,
     LEAKY_ENV_FILE,
     from_scratch_environment,
     run_module,
@@ -148,6 +149,7 @@ def test_importing_the_module_is_inert() -> None:
         env=from_scratch_environment(),
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
         check=False,
     )
 

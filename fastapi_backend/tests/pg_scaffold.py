@@ -29,6 +29,7 @@ from tests._worker_db import LOCAL_HOSTS
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 STALE_AFTER_SECONDS = 3600
 _EPOCH_DIGITS = 10
+CONNECT_TIMEOUT_SECONDS = 10
 
 
 def require_local_test_server() -> str:
@@ -67,7 +68,9 @@ async def create_database(server: AsyncEngine, name: str) -> None:
 async def create_platform_database(server: AsyncEngine, name: str) -> AsyncEngine:
     """Create ``name`` with every platform table from the models and return an engine."""
     await create_database(server, name)
-    platform = create_async_engine(url_for(name))
+    platform = create_async_engine(
+        url_for(name), connect_args={"timeout": CONNECT_TIMEOUT_SECONDS}
+    )
     try:
         async with platform.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)

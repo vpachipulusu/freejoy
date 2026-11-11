@@ -9,7 +9,11 @@ import pytest
 
 from app.core import env_file
 from app.core.config import Settings
-from tests._subprocess_support import BACKEND_ROOT, inherited_environment
+from tests._subprocess_support import (
+    BACKEND_ROOT,
+    CHILD_TIMEOUT_SECONDS,
+    inherited_environment,
+)
 
 LEAKED = "Leaked From Dotenv"
 
@@ -32,6 +36,7 @@ def _read_app_name(directory: Path, environment: dict[str, str]) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     return result.stdout.strip()
 

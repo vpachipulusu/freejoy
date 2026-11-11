@@ -8,6 +8,18 @@ from app.core.settings_environment import isolate_settings_environment
 isolate_settings_environment(os.environ)
 
 
+def _claim_database(url: str) -> None:
+    """Lock the database to this process and set its time limits; stop the run if another process holds it."""
+    import pytest
+
+    from tests.db_guard import DatabaseInUse, claim_test_database
+
+    try:
+        claim_test_database(url)
+    except DatabaseInUse as error:
+        pytest.exit(str(error), 4)
+
+
 def _isolate_worker_database() -> None:
     """Give each pytest-xdist worker its own database.
 
@@ -16,9 +28,11 @@ def _isolate_worker_database() -> None:
     so two workers must never share one database. A worker ``gw3`` running
     against ``yourapp_test`` uses ``yourapp_gw3_test`` instead (see
     ``tests/_worker_db.py``), created on first use, migrated to head and rebuilt by
-    the tests themselves. Without xdist (or without a test database) this does nothing,
-    so a plain ``pytest`` run is unchanged. Any failure stops the run with a
-    clear message rather than letting workers share a database.
+    the tests themselves. Without xdist a plain run (and the xdist controller) uses
+    ``TEST_DATABASE_URL`` itself; without a test database this does nothing. Either way the
+    process claims its database (``tests/db_guard.py``: an advisory lock, so a second run on the
+    same database fails at start, and test-sized ``lock_timeout`` and friends). Any failure stops
+    the run with a clear message rather than letting workers share a database.
 
     It runs at import time because the test modules read ``TEST_DATABASE_URL``
     when they are imported, and conftest files load before the test modules.

@@ -9,8 +9,6 @@ replaced, so no email is ever sent.
 import asyncio
 import json
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -36,6 +34,7 @@ from app.repositories.subscribers import SubscriberRepository
 from app.services.subscriber_delivery import PendingConfirmation
 from app.services.subscribers import SubscribeRequest, SubscriberService
 from commands.purge_subscribers import purge_subscribers
+from tests.alembic_support import run_alembic
 from tests.fakes import FakeRateLimiter, as_limiter
 from tests.fakes_subscribers import (
     GatedEmailProvider,
@@ -63,13 +62,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")

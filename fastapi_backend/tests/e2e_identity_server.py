@@ -103,7 +103,7 @@ def install_identity(sessions: dict[str, FakeAccount]) -> None:
 
 
 async def seed_users() -> None:
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_async_engine(settings.DATABASE_URL, connect_args={"timeout": 10})
     try:
         async with engine.begin() as connection:
             for account in (ADMIN, PLAIN):

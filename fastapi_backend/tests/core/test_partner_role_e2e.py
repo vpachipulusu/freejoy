@@ -13,8 +13,6 @@ module; the tests that dirty the role apply it again at the end.
 
 import asyncio
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +34,7 @@ from app.core.ids import new_id
 from app.core.partner_keys import generate_key
 from app.partner.clicks_store import PartnerClickStore
 from app.partner.keys import PartnerKeyStore
+from tests.alembic_support import run_alembic
 from tests.api.test_catalogue_e2e import add_category, add_offer
 from tests.partner_role_support import (
     DEFAULT_CONNECTION_LIMIT,
@@ -130,13 +129,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _migrate(url: str, *args: str) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL_DIRECT": url},
-        check=True,
-        capture_output=True,
-    )
+    run_alembic(url, *args)
 
 
 @pytest.fixture(scope="module")
