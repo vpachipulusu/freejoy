@@ -1,4 +1,9 @@
+import faulthandler
 import os
+from collections.abc import Iterator
+from typing import TextIO
+
+import pytest
 
 from app.core.settings_environment import isolate_settings_environment
 
@@ -7,16 +12,90 @@ from app.core.settings_environment import isolate_settings_environment
 # any test module or fixture imports the app. Child processes inherit the clean environment.
 isolate_settings_environment(os.environ)
 
+# The longest one test may run, fixtures included. Above two Alembic limits (tests/alembic_support.py: 300 s each,
+# a module fixture can run two). A test still running then has its stack, and every thread's, written to stderr
+# and the process ends at once (`faulthandler`): the run reports the worker as crashed on that test instead of
+# waiting for ever (FREEJ-64). The environment variable is only for the tests of this hook.
+HARD_TEST_LIMIT_SECONDS = float(
+    os.environ.get("FREEJOY_HARD_TEST_LIMIT_SECONDS", "900")
+)
 
-def _claim_database(url: str) -> None:
-    """Lock the database to this process and set its time limits; stop the run if another process holds it."""
-    import pytest
 
-    from tests.db_guard import DatabaseInUse, claim_test_database
+_real_stderr: list[TextIO] = []
+
+
+def _stderr_that_survives_capture(config: pytest.Config) -> TextIO:
+    """The process's real stderr, as pytest's own faulthandler plugin keeps it for the same purpose.
+
+    pytest captures file descriptor 2 during a test (and a pytest-xdist worker's console is not what a fresh
+    ``os.dup(2)`` gives back), so a dump written to descriptor 2 just before the process ends would land in a
+    temporary file nobody reads. pytest's faulthandler plugin saves a copy of the real descriptor at start-up
+    (``fault_handler_stderr_fd_key``); that copy is used here, falling back to one taken with capture off.
+    """
+    if not _real_stderr:
+        from _pytest.faulthandler import fault_handler_stderr_fd_key
+
+        saved = config.stash.get(fault_handler_stderr_fd_key, None)
+        if saved is None:
+            manager = config.pluginmanager.getplugin("capturemanager")
+            with manager.global_and_fixture_disabled():
+                saved = os.dup(2)
+        _real_stderr.append(os.fdopen(os.dup(saved), "w"))
+    return _real_stderr[0]
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_protocol(item: pytest.Item) -> Iterator[None]:
+    faulthandler.dump_traceback_later(
+        HARD_TEST_LIMIT_SECONDS,
+        exit=True,
+        file=_stderr_that_survives_capture(item.config),
+    )
+    try:
+        return (yield)
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _no_leaked_database_sessions(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail the module that leaves a session open in a transaction on the run's database.
+
+    Such a session keeps its locks and makes the next module's schema rebuild wait. ``run_alembic`` ends it as
+    a backstop; this names the module that leaked it. Runs only where this process holds the database guard.
+    """
+    yield
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        return
+    from sqlalchemy.engine import make_url
+
+    from tests import db_guard
+
+    if not db_guard.holds(make_url(url).database):
+        return
+    from tests.alembic_support import leaked_sessions
+
+    leaked = leaked_sessions(url)
+    if leaked:
+        pytest.fail(
+            f"{request.module.__name__} left {len(leaked)} database session(s) open:\n  "
+            + "\n  ".join(leaked),
+            pytrace=False,
+        )
+
+
+def _claim_database(url: str, *, strict: bool) -> None:
+    """Lock the database to this process and set its time limits; stop the run if that cannot be done.
+
+    A second pytest process on the same database, or any database error, ends the run with a message.
+    Only an unreachable server in a plain run (``strict`` False) is left to the tests that need it.
+    """
+    from tests.db_guard import DatabaseGuardError, DatabaseInUse, claim_test_database
 
     try:
-        claim_test_database(url)
-    except DatabaseInUse as error:
+        claim_test_database(url, strict=strict)
+    except (DatabaseInUse, DatabaseGuardError) as error:
         pytest.exit(str(error), 4)
 
 
@@ -44,13 +123,12 @@ def _isolate_worker_database() -> None:
     if not base_url:
         return
     if not worker:
-        _claim_database(base_url)
+        _claim_database(base_url, strict=False)
         return
 
     import asyncio
 
     import asyncpg  # type: ignore[import-untyped]
-    import pytest
     from sqlalchemy.engine import make_url
 
     from tests._worker_db import worker_database_url
@@ -72,6 +150,9 @@ def _isolate_worker_database() -> None:
             timeout=10,
         )
         try:
+            # The base database carries a statement_timeout (tests/db_guard.py); CREATE DATABASE may wait for
+            # a checkpoint on a slow disk, so this connection runs without one.
+            await connection.execute("SET statement_timeout = 0")
             exists = await connection.fetchval(
                 "SELECT 1 FROM pg_database WHERE datname = $1", worker_database
             )
@@ -93,7 +174,7 @@ def _isolate_worker_database() -> None:
             4,
         )
     worker_url_text = worker_url.render_as_string(hide_password=False)
-    _claim_database(worker_url_text)
+    _claim_database(worker_url_text, strict=True)
     os.environ["TEST_DATABASE_URL"] = worker_url_text
 
 
