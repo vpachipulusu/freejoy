@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { OfferCard } from '@/components/catalogue/offer-card';
 import { OfferHero } from '@/components/offer/offer-hero';
 import { SaveButton } from '@/components/saved/save-button';
@@ -38,7 +38,7 @@ describe('SaveButton', () => {
   });
 
   it('saves on click, then says so in its pressed state and its name, and stores only the slug', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
 
     await user.click(screen.getByRole('button', { name: 'Save Glow cream sample' }));
@@ -50,7 +50,7 @@ describe('SaveButton', () => {
   });
 
   it('keeps one constant name, saved or not: aria-pressed carries the state, the label never flips', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
     const button = screen.getByRole('button');
 
@@ -73,7 +73,7 @@ describe('SaveButton', () => {
   });
 
   it('removes the offer on a second click', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
 
     await user.click(screen.getByRole('button', { name: /^Save/ }));
@@ -87,7 +87,7 @@ describe('SaveButton', () => {
   });
 
   it('toggles from the keyboard with Enter and with Space', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
 
     await user.tab();
@@ -109,7 +109,7 @@ describe('SaveButton', () => {
   });
 
   it('keeps every heart for the same offer in step', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <>
         <SaveButton slug="glow-cream" title="Glow cream sample" />
@@ -144,7 +144,7 @@ describe('SaveButton', () => {
   });
 
   it('is at least 44 by 44 pixels, with a heart shape that changes (not only its colour)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SaveButton slug="glow-cream" title="Glow cream sample" />);
     const button = screen.getByRole('button');
 
@@ -203,7 +203,7 @@ describe('SaveButton', () => {
   });
 
   it('still toggles for this page when the browser refuses to store anything', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('full', 'QuotaExceededError');
     });
@@ -240,7 +240,7 @@ describe('the heart on an offer card', () => {
   });
 
   it('saves without following the link', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferCard offer={offer} merchant={merchant} />);
 
     await user.click(screen.getByRole('button', { name: `Save ${offer.title}` }));

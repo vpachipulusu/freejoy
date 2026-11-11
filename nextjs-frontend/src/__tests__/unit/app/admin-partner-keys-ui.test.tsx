@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const API_KEY = `fj_test_${'k'.repeat(24)}_${'0'.repeat(64)}`;
 const KEY_ID = 'k'.repeat(24);
@@ -124,7 +125,7 @@ function overlayOf(dialog: HTMLElement): HTMLElement {
 
 describe('CreatePartnerKeyDialog, step one', () => {
   it('opens a labelled dialog with the focus in the label field and the live regions mounted', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
 
     const dialog = await openCreate(user);
 
@@ -135,7 +136,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
   });
 
   it('closes on Escape and on Cancel without calling the backend', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCreate(user);
 
     await user.keyboard('{Escape}');
@@ -149,7 +150,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
   });
 
   it('closes when the overlay is clicked (the control for the guard in step two)', async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const user = setupUser({ pointerEventsCheck: 0 });
     const dialog = await openCreate(user);
 
     await user.click(overlayOf(dialog));
@@ -158,7 +159,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
   });
 
   it('shows the refused label on the field, announces it and puts focus there', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.createPartnerKeyAction.mockResolvedValue({
       success: false,
       error: 'Check the highlighted fields and try again.',
@@ -179,7 +180,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
   });
 
   it('shows the curated message of a refusal in the alert', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.createPartnerKeyAction.mockResolvedValue({
       success: false,
       error: 'Add the merchant website before issuing a key.',
@@ -197,7 +198,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
   });
 
   it('says a key may have been created when the call itself failed, and refreshes the list on close', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.createPartnerKeyAction.mockRejectedValue(new Error('network'));
     const dialog = await openCreate(user);
     await user.type(screen.getByLabelText(/Label/), 'Feed');
@@ -215,7 +216,7 @@ describe('CreatePartnerKeyDialog, step one', () => {
 
 describe('CreatePartnerKeyDialog, while the key is being created', () => {
   it('stays open on Escape, the close button and Cancel, so the key is always shown', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const pending = deferred();
     mocks.createPartnerKeyAction.mockReturnValue(pending.promise);
     await openCreate(user);
@@ -232,7 +233,7 @@ describe('CreatePartnerKeyDialog, while the key is being created', () => {
   });
 
   it('marks both buttons aria-disabled (not disabled) while pending', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.createPartnerKeyAction.mockReturnValue(deferred().promise);
     await openCreate(user);
     await user.type(screen.getByLabelText(/Label/), 'Feed');
@@ -246,7 +247,7 @@ describe('CreatePartnerKeyDialog, while the key is being created', () => {
   });
 
   it('sends one request for a double submit', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.createPartnerKeyAction.mockReturnValue(deferred().promise);
     await openCreate(user);
     await user.type(screen.getByLabelText(/Label/), 'Feed');
@@ -260,7 +261,7 @@ describe('CreatePartnerKeyDialog, while the key is being created', () => {
 
 describe('CreatePartnerKeyDialog, step two', () => {
   it('shows the key once in a read-only field with the focus on it and the once-only text as its description', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const dialog = await openCreate(user);
 
     const field = await createKey(user);
@@ -277,7 +278,7 @@ describe('CreatePartnerKeyDialog, step two', () => {
   });
 
   it('copies the key and announces it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const writeText = vi.fn().mockResolvedValue(undefined);
     await openCreate(user);
     await createKey(user);
@@ -292,7 +293,7 @@ describe('CreatePartnerKeyDialog, step two', () => {
   });
 
   it('announces a second copy again (the text changes even when the words do not)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCreate(user);
     await createKey(user);
     setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
@@ -310,7 +311,7 @@ describe('CreatePartnerKeyDialog, step two', () => {
     ['a rejected clipboard', () => ({ writeText: vi.fn().mockRejectedValue(new Error('no')) })],
     ['no clipboard at all', () => undefined],
   ])('focuses and selects the key when there is %s', async (_name, clipboard) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCreate(user);
     const field = (await createKey(user)) as HTMLInputElement;
     setClipboard(clipboard());
@@ -325,7 +326,7 @@ describe('CreatePartnerKeyDialog, step two', () => {
   });
 
   it('does not close on Escape or an overlay click while the key is shown, and closes on Done', async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const user = setupUser({ pointerEventsCheck: 0 });
     const dialog = await openCreate(user);
     await createKey(user);
 
@@ -339,7 +340,7 @@ describe('CreatePartnerKeyDialog, step two', () => {
   });
 
   it('closes on the close button, forgets the key, and reopens on the label form', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCreate(user);
     await createKey(user);
 
@@ -367,7 +368,7 @@ describe('RevokePartnerKeyButton', () => {
   }
 
   it('asks first, naming the key by its label, and does nothing on cancel', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRevoke();
     const trigger = screen.getByRole('button', { name: 'Revoke key Feed' });
 
@@ -383,7 +384,7 @@ describe('RevokePartnerKeyButton', () => {
   });
 
   it('returns focus to the button on Escape', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRevoke();
     const trigger = screen.getByRole('button', { name: 'Revoke key Feed' });
     await user.click(trigger);
@@ -396,7 +397,7 @@ describe('RevokePartnerKeyButton', () => {
   });
 
   it('revokes on confirmation, announces it with the label only, refreshes and focuses the heading', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRevoke();
 
     await user.click(screen.getByRole('button', { name: 'Revoke key Feed' }));
@@ -413,7 +414,7 @@ describe('RevokePartnerKeyButton', () => {
   });
 
   it('keeps the dialog open on a failure, shows the curated message and allows a retry', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.revokePartnerKeyAction
       .mockResolvedValueOnce({ success: false, error: 'Too many requests. Wait a minute.' })
       .mockResolvedValueOnce({ success: true, data: {} });
@@ -434,7 +435,7 @@ describe('RevokePartnerKeyButton', () => {
   });
 
   it('turns a thrown call into a message in the dialog', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.revokePartnerKeyAction.mockRejectedValue(new Error('network'));
     renderRevoke();
     await user.click(screen.getByRole('button', { name: 'Revoke key Feed' }));
@@ -447,7 +448,7 @@ describe('RevokePartnerKeyButton', () => {
   });
 
   it('cannot be closed or double sent while pending, and says it is revoking', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const pending = deferred();
     mocks.revokePartnerKeyAction.mockReturnValue(pending.promise);
     renderRevoke();

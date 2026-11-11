@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -39,7 +40,7 @@ describe('LoginForm', () => {
   afterEach(cleanup);
 
   it('moves focus to the first invalid field on submit', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginForm onTotpRequired={onTotpRequired} />);
 
     await user.type(screen.getByLabelText(/^password$/i), 'secret123');
@@ -55,7 +56,7 @@ describe('LoginForm', () => {
   it.each(['auth/user-not-found', 'auth/wrong-password'])(
     'shows the same neutral alert for %s and focuses it',
     async (code) => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.signInWithEmail.mockResolvedValue(fail(code));
       render(<LoginForm onTotpRequired={onTotpRequired} />);
 
@@ -70,7 +71,7 @@ describe('LoginForm', () => {
   );
 
   it('shows the network message', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue(fail('auth/network-request-failed'));
     render(<LoginForm onTotpRequired={onTotpRequired} />);
 
@@ -82,7 +83,7 @@ describe('LoginForm', () => {
   });
 
   it('shows the rate limit message with the wait', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue(fail('auth/too-many-requests'));
     render(<LoginForm onTotpRequired={onTotpRequired} />);
 
@@ -92,7 +93,7 @@ describe('LoginForm', () => {
   });
 
   it('shows the suspended message with a support link', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue(fail('auth/user-disabled'));
     render(<LoginForm onTotpRequired={onTotpRequired} />);
 
@@ -107,7 +108,7 @@ describe('LoginForm', () => {
   });
 
   it('hides the raw server refusal text', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -123,7 +124,7 @@ describe('LoginForm', () => {
   });
 
   it('names an outage when the action sets the typed flag', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -138,7 +139,7 @@ describe('LoginForm', () => {
   });
 
   it('does not name an outage from the message text alone', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -152,7 +153,7 @@ describe('LoginForm', () => {
   });
 
   it('treats a thrown error as a network problem', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockRejectedValue(new TypeError('Failed to fetch'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<LoginForm onTotpRequired={onTotpRequired} />);
@@ -163,7 +164,7 @@ describe('LoginForm', () => {
   });
 
   it('clears the alert on the next submit', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValueOnce(fail('auth/wrong-password'));
     mocks.signInWithEmail.mockReturnValueOnce(new Promise(() => {}));
     render(<LoginForm onTotpRequired={onTotpRequired} />);
@@ -176,7 +177,7 @@ describe('LoginForm', () => {
   });
 
   it('shows a loading label and submits once on a double submit', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockReturnValue(new Promise(() => {}));
     render(<LoginForm onTotpRequired={onTotpRequired} />);
 
@@ -191,7 +192,7 @@ describe('LoginForm', () => {
   });
 
   it('does not claim a network problem for other thrown errors', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockRejectedValue(new Error('boom'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<LoginForm onTotpRequired={onTotpRequired} />);
@@ -204,7 +205,7 @@ describe('LoginForm', () => {
   });
 
   it('gives the form back when the redirect throws', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({ success: true });
     mocks.push.mockImplementationOnce(() => {
@@ -222,7 +223,7 @@ describe('LoginForm', () => {
   it('gives the form back when the redirect stalls', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = setupUser({ advanceTimers: vi.advanceTimersByTime });
       mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
       mocks.verifyTokenAction.mockResolvedValue({ success: true });
       render(<LoginForm onTotpRequired={onTotpRequired} />);
@@ -242,7 +243,7 @@ describe('LoginForm', () => {
   });
 
   it('redirects to the dashboard on success', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({ success: true });
     render(<LoginForm onTotpRequired={onTotpRequired} />);
@@ -253,7 +254,7 @@ describe('LoginForm', () => {
   });
 
   it('hands the ID token to the two-factor step when the account needs a code', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 'tok-1', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -272,7 +273,7 @@ describe('LoginForm', () => {
   });
 
   it('does not open the two-factor step from the message text alone', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 'tok-1', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,
@@ -287,7 +288,7 @@ describe('LoginForm', () => {
   });
 
   it('shows the rate limit message when the API limits the sign-in', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 'tok-1', error: null });
     mocks.verifyTokenAction.mockResolvedValue({
       success: false,

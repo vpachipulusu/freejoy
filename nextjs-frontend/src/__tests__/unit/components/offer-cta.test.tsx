@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { OfferCta } from '@/components/offer/offer-cta';
 import { OfferHero } from '@/components/offer/offer-hero';
 import { CATEGORIES, OFFERS } from '@/lib/catalogue/fixtures';
 
 describe('OfferCta', () => {
   it('opens the demo offer dialog when the call to action is clicked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferCta sponsored={false} earnsCommission offerType="free_sample" demo />);
 
     await user.click(screen.getByRole('button', { name: /request this sample/i }));
@@ -18,7 +18,7 @@ describe('OfferCta', () => {
   });
 
   it('closes on Escape and returns focus to the call to action', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OfferCta sponsored={false} earnsCommission offerType="free_trial" demo />);
     const trigger = screen.getByRole('button', { name: /start the trial/i });
 

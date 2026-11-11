@@ -1,7 +1,7 @@
 /** the phone tab bar and its More sheet (focus trap and restore come from Radix Dialog). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ pathname: '/dashboard' }));
 vi.mock('next/navigation', () => ({ usePathname: () => mocks.pathname }));
@@ -67,7 +67,7 @@ describe('TabBar', () => {
   });
 
   it('opens a dialog listing the remaining items and returns focus to More on Escape', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     const more = screen.getByRole('button', { name: 'More' });
     expect(more).toHaveAttribute('aria-haspopup', 'dialog');
@@ -88,7 +88,7 @@ describe('TabBar', () => {
   });
 
   it('keeps Tab inside the open sheet', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     const dialog = await screen.findByRole('dialog', { name: 'More' });
@@ -99,7 +99,7 @@ describe('TabBar', () => {
   });
 
   it('closes the sheet when a link in it is chosen', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     const dialog = await screen.findByRole('dialog', { name: 'More' });
@@ -109,7 +109,7 @@ describe('TabBar', () => {
 
   it('flags More as current, and the item inside the sheet, when the page is one of its items', async () => {
     mocks.pathname = MORE_ITEMS[0].href;
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     const more = screen.getByRole('button', { name: /^More.*current section$/ });
     expect(more).toHaveAttribute('data-current', 'true');
@@ -122,7 +122,7 @@ describe('TabBar', () => {
   });
 
   it('closes the sheet when the page changes underneath it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     await screen.findByRole('dialog', { name: 'More' });
@@ -134,7 +134,7 @@ describe('TabBar', () => {
   });
 
   it('closes the sheet when the viewport grows to 900px', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     await screen.findByRole('dialog', { name: 'More' });
@@ -145,7 +145,7 @@ describe('TabBar', () => {
   });
 
   it('does not bring the sheet back when returning to the page it was opened on', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     await screen.findByRole('dialog', { name: 'More' });
@@ -159,7 +159,7 @@ describe('TabBar', () => {
   });
 
   it('does not bring the sheet back after a resize round trip', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     await screen.findByRole('dialog', { name: 'More' });
@@ -176,7 +176,7 @@ describe('TabBar', () => {
   });
 
   it('offers the link back to the public home page first in the More sheet and closes it on use', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TabBar />);
     await user.click(screen.getByRole('button', { name: 'More' }));
     const dialog = await screen.findByRole('dialog', { name: 'More' });

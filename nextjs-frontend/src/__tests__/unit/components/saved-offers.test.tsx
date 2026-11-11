@@ -2,7 +2,7 @@ import { renderToString } from 'react-dom/server';
 import { StrictMode, act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock('@/app/actions/saved-actions', () => ({ loadSavedOffersAction: mocks.load }));
@@ -204,7 +204,7 @@ describe('SavedOffers: the list', () => {
   });
 
   it('removes a card when its heart is pressed, updates storage and keeps the rest', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug, second.slug);
     render(<SavedOffers />);
     await screen.findByRole('heading', { level: 3, name: first.title });
@@ -219,7 +219,7 @@ describe('SavedOffers: the list', () => {
   });
 
   it('shows the empty state when the last card is removed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug);
     render(<SavedOffers />);
 
@@ -259,7 +259,7 @@ describe('SavedOffers: a long list is read one chunk at a time', () => {
   });
 
   it('asks for the next chunk only when "Show more" is pressed, and puts focus on its first card', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(...offerSlugs(200));
     render(<SavedOffers />);
     await waitFor(() => expect(allHearts()).toHaveLength(PAGE));
@@ -274,7 +274,7 @@ describe('SavedOffers: a long list is read one chunk at a time', () => {
   });
 
   it('keeps focus on the button while the next chunk is loading', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(...offerSlugs(60));
     render(<SavedOffers />);
     await waitFor(() => expect(allHearts()).toHaveLength(PAGE));
@@ -288,7 +288,7 @@ describe('SavedOffers: a long list is read one chunk at a time', () => {
   });
 
   it('hides "Show more" once everything is shown', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(...offerSlugs(PAGE + 3));
     render(<SavedOffers />);
     await user.click(await screen.findByRole('button', { name: 'Show more' }));
@@ -314,7 +314,7 @@ describe('SavedOffers: a long list is read one chunk at a time', () => {
   });
 
   it('keeps the first chunk when a later chunk fails, removes nothing, and does not keep asking', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(...offerSlugs(60));
     render(<SavedOffers />);
     await waitFor(() => expect(allHearts()).toHaveLength(PAGE));
@@ -403,7 +403,7 @@ describe('SavedOffers: offers that are gone', () => {
 
 describe('SavedOffers: when the catalogue cannot be read', () => {
   it('keeps unreadable offers saved, counts honestly, and tries again on request', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug, second.slug);
     mocks.load.mockImplementationOnce(async () => ({
       success: true,
@@ -442,7 +442,7 @@ describe('SavedOffers: when the catalogue cannot be read', () => {
   });
 
   it('shows a curated error with a retry when the whole call fails, and removes nothing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug);
     mocks.load.mockResolvedValueOnce({ success: false, error: 'We could not load them.' });
 
@@ -553,7 +553,7 @@ describe('SavedOffers: focus', () => {
   }
 
   it('moves focus to the next card heart when the middle card is removed from the keyboard', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderThree();
 
     heart(second).focus();
@@ -563,7 +563,7 @@ describe('SavedOffers: focus', () => {
   });
 
   it('moves focus to the previous card heart when the last card is removed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await renderThree();
 
     heart(first).focus();
@@ -573,7 +573,7 @@ describe('SavedOffers: focus', () => {
   });
 
   it('moves focus to the "Nothing saved yet" heading when the only card is removed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug);
     render(<SavedOffers />);
     await screen.findByRole('heading', { level: 3, name: first.title });
@@ -597,7 +597,7 @@ describe('SavedOffers: focus', () => {
   });
 
   it('does not drop focus to the page when "Try again" is pressed in the error alert', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug);
     mocks.load.mockResolvedValueOnce({ success: false, error: 'x' });
     render(<SavedOffers />);
@@ -611,7 +611,7 @@ describe('SavedOffers: focus', () => {
   });
 
   it('does not drop focus to the page when "Try again" is pressed beside some cards', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     save(first.slug, second.slug);
     mocks.load.mockImplementationOnce(async () => ({
       success: true,

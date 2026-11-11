@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({ subscribe: vi.fn() }));
 vi.mock('@/app/actions/alerts-actions', () => ({ subscribeToAlertsAction: mocks.subscribe }));
@@ -23,7 +23,7 @@ const UNAVAILABLE = {
 } as const;
 
 function setup() {
-  const user = userEvent.setup();
+  const user = setupUser();
   render(<AlertsForm categories={CATEGORIES} live />);
   const form = {
     user,

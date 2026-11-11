@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   signInWithEmail: vi.fn(),
@@ -81,7 +82,7 @@ describe('two-factor code step', () => {
   });
 
   it('opens when the password step answers totpRequired, forwarding the same ID token later', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
 
     const field = await openCodeStep(user);
 
@@ -94,7 +95,7 @@ describe('two-factor code step', () => {
   });
 
   it('is an accessible numeric one-time-code field with a visible label and help text', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
 
     const field = await openCodeStep(user);
 
@@ -109,7 +110,7 @@ describe('two-factor code step', () => {
   });
 
   it('keeps only digits', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const field = await openCodeStep(user);
 
     await user.type(field, '12a 3-4');
@@ -118,7 +119,7 @@ describe('two-factor code step', () => {
   });
 
   it('signs in with the code and goes to the dashboard', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({ success: true, data: {} });
 
@@ -130,7 +131,7 @@ describe('two-factor code step', () => {
   });
 
   it('announces a wrong code, clears the field and lets the person retry', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce(totpInvalid);
 
@@ -155,7 +156,7 @@ describe('two-factor code step', () => {
   });
 
   it('asks for six digits without calling the server for a short code', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     await submitCode(user, '123');
@@ -165,7 +166,7 @@ describe('two-factor code step', () => {
   });
 
   it('shows the rate limit message when too many codes were tried', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({
       success: false,
@@ -182,7 +183,7 @@ describe('two-factor code step', () => {
   });
 
   it('names an outage rather than a wrong code', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({
       success: false,
@@ -198,7 +199,7 @@ describe('two-factor code step', () => {
   });
 
   it('closes the code step, signed out, with a notice when the sign-in is too old to finish', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({
       success: false,
@@ -219,7 +220,7 @@ describe('two-factor code step', () => {
   });
 
   it('shows the timed-out notice until the next sign-in attempt', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({
       success: false,
@@ -236,7 +237,7 @@ describe('two-factor code step', () => {
   });
 
   it('keeps only digits from a paste and takes the first six', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const field = await openCodeStep(user);
 
     await user.click(field);
@@ -253,7 +254,7 @@ describe('two-factor code step', () => {
   });
 
   it('announces a second short code again (a new alert, not the same one)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     await submitCode(user, '123');
@@ -267,7 +268,7 @@ describe('two-factor code step', () => {
   });
 
   it('empties the password field when the code step opens', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     expect(screen.getByLabelText(/^password$/i)).toHaveValue('');
@@ -275,7 +276,7 @@ describe('two-factor code step', () => {
   });
 
   it('treats a thrown network error as a connection problem, without echoing it', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockRejectedValueOnce(new TypeError(`Failed to fetch ${CODE}`));
 
@@ -288,7 +289,7 @@ describe('two-factor code step', () => {
   });
 
   it('shows no raw server text for an unknown failure', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce({
       success: false,
@@ -301,7 +302,7 @@ describe('two-factor code step', () => {
   });
 
   it('checks the code once when the form is submitted twice before the first answer', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const field = await openCodeStep(user);
     mocks.verifyTokenAction.mockReturnValueOnce(new Promise(() => {}));
     await user.type(field, CODE);
@@ -319,7 +320,7 @@ describe('two-factor code step', () => {
   });
 
   it('Back returns to the sign-in form with the email kept, focus on the password, signed out once', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     await user.click(screen.getByRole('button', { name: /back to sign in/i }));
@@ -334,7 +335,7 @@ describe('two-factor code step', () => {
   });
 
   it('signs in again after Back with a new ID token, with no old alert or code', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
     mocks.verifyTokenAction.mockResolvedValueOnce(totpInvalid);
     await submitCode(user, '000000');
@@ -355,7 +356,7 @@ describe('two-factor code step', () => {
   });
 
   it('hides the provider buttons and the password form while the code step is open', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     expect(screen.getByLabelText(/email/i)).not.toBeVisible();
@@ -363,7 +364,7 @@ describe('two-factor code step', () => {
   });
 
   it('offers a support link for someone who cannot get a code', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     await openCodeStep(user);
 
     expect(screen.getByRole('link', { name: /contact support/i })).toHaveAttribute(
@@ -373,7 +374,7 @@ describe('two-factor code step', () => {
   });
 
   it('opens from a provider sign-in too, with the same ID token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.signInWithGoogle.mockResolvedValue({ user: {}, idToken: ID_TOKEN, error: null });
     mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
     render(<LoginPanel />);
@@ -400,7 +401,7 @@ describe('TotpChallengeForm', () => {
   });
 
   it('calls onSignedIn after a successful code, submitted with Enter, and stays locked', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSignedIn = vi.fn();
     mocks.verifyTokenAction.mockResolvedValue({ success: true, data: {} });
     render(<TotpChallengeForm idToken={ID_TOKEN} onSignedIn={onSignedIn} onCancel={vi.fn()} />);
@@ -414,7 +415,7 @@ describe('TotpChallengeForm', () => {
   });
 
   it('calls onCancel from Back, after signing out', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onCancel = vi.fn();
     render(<TotpChallengeForm idToken={ID_TOKEN} onSignedIn={vi.fn()} onCancel={onCancel} />);
 
@@ -502,7 +503,7 @@ describe('TotpChallengeForm', () => {
   });
 
   it('keeps the Firebase sign-in after a successful code, even when unmounted', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSignedIn = vi.fn();
     mocks.verifyTokenAction.mockResolvedValue({ success: true, data: {} });
     const { unmount } = render(

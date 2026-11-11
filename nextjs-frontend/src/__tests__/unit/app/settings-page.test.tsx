@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   getUserSettingsAction: vi.fn(),
@@ -67,7 +67,7 @@ describe('SettingsPage structure', () => {
 
   it('offers a retry instead of the form when loading fails', async () => {
     mocks.getUserSettingsAction.mockResolvedValueOnce({ success: false, error: 'down' });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<SettingsPage />);
 
@@ -98,7 +98,7 @@ describe('SettingsPage saving', () => {
         finish = resolve;
       })
     );
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<SettingsPage />);
     await user.click(await screen.findByRole('button', { name: /save settings/i }));
@@ -117,7 +117,7 @@ describe('SettingsPage saving', () => {
 
   it('shows a destructive toast when saving fails', async () => {
     mocks.updateUserSettingsAction.mockResolvedValue({ success: false, error: 'Nope' });
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<SettingsPage />);
     await user.click(await screen.findByRole('button', { name: /save settings/i }));
@@ -132,7 +132,7 @@ describe('SettingsPage saving', () => {
 
 describe('SettingsPage reset', () => {
   it('restores the saved values after Reset', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<SettingsPage />);
     const language = await screen.findByRole('combobox', { name: 'Language' });

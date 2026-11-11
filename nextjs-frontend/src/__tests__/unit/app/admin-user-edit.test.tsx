@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const mocks = vi.hoisted(() => ({
@@ -64,7 +64,7 @@ describe('UserProfileForm', () => {
   });
 
   it('saves the edited fields, turning blanks into null, and announces success', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserProfileForm userId="user-1" initialValues={INITIAL} />);
 
     await user.clear(screen.getByLabelText('Display name'));
@@ -91,7 +91,7 @@ describe('UserProfileForm', () => {
   });
 
   it('blocks an invalid website and phone number before calling the action', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserProfileForm userId="user-1" initialValues={INITIAL} />);
 
     await user.type(screen.getByLabelText('Website'), 'ftp://nope');
@@ -106,7 +106,7 @@ describe('UserProfileForm', () => {
   it.each(['HTTPS://x.com', 'https:x.com', 'data:text/html,x'])(
     'rejects the website %j as the backend would, without calling the action',
     async (value) => {
-      const user = userEvent.setup();
+      const user = setupUser();
       render(<UserProfileForm userId="user-1" initialValues={INITIAL} />);
 
       await user.type(screen.getByLabelText('Website'), value);
@@ -122,7 +122,7 @@ describe('UserProfileForm', () => {
       success: false,
       error: 'You do not have permission to do that',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserProfileForm userId="user-1" initialValues={INITIAL} />);
 
     await user.type(screen.getByLabelText('Location'), 'London');
@@ -135,7 +135,7 @@ describe('UserProfileForm', () => {
 
   it('shows a generic message when the action call throws', async () => {
     mocks.updateUserAction.mockRejectedValue(new Error('network'));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<UserProfileForm userId="user-1" initialValues={INITIAL} />);
 
     await user.type(screen.getByLabelText('Location'), 'London');

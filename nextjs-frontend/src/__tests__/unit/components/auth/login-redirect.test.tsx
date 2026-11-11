@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   signInWithEmail: vi.fn(),
@@ -79,7 +80,7 @@ afterEach(async () => {
 
 describe('email and password sign-in', () => {
   it('goes to the redirect target, then refreshes', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginForm onTotpRequired={vi.fn()} redirectTo={TARGET} />);
 
     await submitPassword(user);
@@ -90,7 +91,7 @@ describe('email and password sign-in', () => {
   });
 
   it('goes to /dashboard when there is no redirect', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginForm onTotpRequired={vi.fn()} />);
 
     await submitPassword(user);
@@ -99,7 +100,7 @@ describe('email and password sign-in', () => {
   });
 
   it.each(UNSAFE)('goes to /dashboard for the unsafe value %j', async (unsafe) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginForm onTotpRequired={vi.fn()} redirectTo={unsafe} />);
 
     await submitPassword(user);
@@ -109,7 +110,7 @@ describe('email and password sign-in', () => {
   });
 
   it('does not navigate when the sign-in is refused', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.verifyTokenAction.mockResolvedValue({ success: false, error: 'nope' });
     render(<LoginForm onTotpRequired={vi.fn()} redirectTo={TARGET} />);
 
@@ -125,7 +126,7 @@ describe('provider sign-in', () => {
     ['Google', /google/i],
     ['GitHub', /github/i],
   ])('%s goes to the redirect target', async (_name, button) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OAuthButtons redirectTo={TARGET} />);
 
     await user.click(screen.getByRole('button', { name: button }));
@@ -135,7 +136,7 @@ describe('provider sign-in', () => {
   });
 
   it('goes to /dashboard when there is no redirect (the sign-up page has none)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OAuthButtons />);
 
     await user.click(screen.getByRole('button', { name: /google/i }));
@@ -144,7 +145,7 @@ describe('provider sign-in', () => {
   });
 
   it.each(UNSAFE)('goes to /dashboard for the unsafe value %j', async (unsafe) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<OAuthButtons redirectTo={unsafe} />);
 
     await user.click(screen.getByRole('button', { name: /github/i }));
@@ -155,7 +156,7 @@ describe('provider sign-in', () => {
 
 describe('LoginPanel', () => {
   it('passes the redirect to the password form', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginPanel redirectTo={TARGET} />);
 
     await submitPassword(user);
@@ -164,7 +165,7 @@ describe('LoginPanel', () => {
   });
 
   it('passes the redirect to the provider buttons', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginPanel redirectTo={TARGET} />);
 
     await user.click(screen.getByRole('button', { name: /github/i }));
@@ -173,7 +174,7 @@ describe('LoginPanel', () => {
   });
 
   it('goes to /dashboard without a redirect', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginPanel />);
 
     await submitPassword(user);
@@ -182,7 +183,7 @@ describe('LoginPanel', () => {
   });
 
   it.each(UNSAFE)('goes to /dashboard for the unsafe value %j', async (unsafe) => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<LoginPanel redirectTo={unsafe} />);
 
     await submitPassword(user);
@@ -192,7 +193,7 @@ describe('LoginPanel', () => {
 
   describe('two-factor code step', () => {
     it('keeps the redirect after a password sign-in that needs a code', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
       render(<LoginPanel redirectTo={TARGET} />);
       await submitPassword(user);
@@ -206,7 +207,7 @@ describe('LoginPanel', () => {
     });
 
     it('keeps the redirect after a provider sign-in that needs a code', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
       render(<LoginPanel redirectTo={TARGET} />);
       await user.click(screen.getByRole('button', { name: /google/i }));
@@ -217,7 +218,7 @@ describe('LoginPanel', () => {
     });
 
     it('keeps the redirect when the person presses Back and signs in again with a code', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
       render(<LoginPanel redirectTo={TARGET} />);
       await submitPassword(user);
@@ -235,7 +236,7 @@ describe('LoginPanel', () => {
     });
 
     it('keeps the redirect after Back when the second sign-in needs no code', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
       render(<LoginPanel redirectTo={TARGET} />);
       await submitPassword(user);
@@ -248,7 +249,7 @@ describe('LoginPanel', () => {
     });
 
     it('goes to /dashboard from the code step without a redirect', async () => {
-      const user = userEvent.setup();
+      const user = setupUser();
       mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
       render(<LoginPanel />);
       await submitPassword(user);
@@ -261,7 +262,7 @@ describe('LoginPanel', () => {
     it.each(UNSAFE)(
       'goes to /dashboard from the code step for the unsafe value %j',
       async (unsafe) => {
-        const user = userEvent.setup();
+        const user = setupUser();
         mocks.verifyTokenAction.mockResolvedValueOnce(totpRequired);
         render(<LoginPanel redirectTo={unsafe} />);
         await submitPassword(user);

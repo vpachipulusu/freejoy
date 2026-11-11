@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 vi.mock('@/app/actions/auth-actions', () => ({ logoutAction: vi.fn() }));
 
@@ -17,7 +18,7 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>) {
 describe('DashboardHeader account menu', () => {
   it('links to /admin for an admin', async () => {
     render(<DashboardHeader user={{ ...base, isAdmin: true }} />);
-    await openMenu(userEvent.setup());
+    await openMenu(setupUser());
     expect(await screen.findByRole('menuitem', { name: 'Admin' })).toHaveAttribute(
       'href',
       '/admin'
@@ -26,7 +27,7 @@ describe('DashboardHeader account menu', () => {
 
   it.each([[{}], [{ isAdmin: false }]])('has no Admin link for %j', async (extra) => {
     render(<DashboardHeader user={{ ...base, ...extra }} />);
-    const items = await openMenu(userEvent.setup());
+    const items = await openMenu(setupUser());
     expect(items.map((item) => item.textContent)).toEqual([
       'Dashboard',
       'Profile',
@@ -39,7 +40,7 @@ describe('DashboardHeader account menu', () => {
 
   it('lists the items in order for an admin, with the separator just before Log out', async () => {
     render(<DashboardHeader user={{ ...base, isAdmin: true }} />);
-    const items = await openMenu(userEvent.setup());
+    const items = await openMenu(setupUser());
 
     expect(items.map((item) => item.textContent)).toEqual([
       'Dashboard',
@@ -62,7 +63,7 @@ describe('DashboardHeader account menu', () => {
   });
 
   it('reaches the Admin item with the arrow keys', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<DashboardHeader user={{ ...base, isAdmin: true }} />);
     await openMenu(user);
 
@@ -78,7 +79,7 @@ describe('DashboardHeader account menu', () => {
 
   it('gives every menu item a 44px minimum height', async () => {
     render(<DashboardHeader user={{ ...base, isAdmin: true }} />);
-    const items = await openMenu(userEvent.setup());
+    const items = await openMenu(setupUser());
 
     expect(items).toHaveLength(6);
     for (const item of items) expect(item.className).toContain('min-h-11');
@@ -86,7 +87,7 @@ describe('DashboardHeader account menu', () => {
 
   it('links back to the public home page', async () => {
     render(<DashboardHeader user={base} />);
-    await openMenu(userEvent.setup());
+    await openMenu(setupUser());
     expect(await screen.findByRole('menuitem', { name: 'Back to Freejoy' })).toHaveAttribute(
       'href',
       '/'

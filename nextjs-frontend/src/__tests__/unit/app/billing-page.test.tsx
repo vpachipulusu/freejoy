@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 const mocks = vi.hoisted(() => ({
   getSubscriptionDetailsAction: vi.fn(),
@@ -177,7 +177,7 @@ describe('BillingPage inline errors', () => {
   });
 
   it('shows the backend message inline when an action fails, and clears it on success', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     givenBilling();
     mocks.cancelSubscriptionAction.mockResolvedValueOnce({
       success: false,
@@ -209,7 +209,7 @@ describe('BillingPage inline errors', () => {
   });
 
   it('shows an inline alert when the billing portal cannot be opened', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     givenBilling();
     mocks.createBillingPortalSessionAction.mockResolvedValue({
       success: false,
@@ -225,7 +225,7 @@ describe('BillingPage inline errors', () => {
 
 describe('BillingPage actions are unchanged', () => {
   it('turns auto-renewal off through cancelSubscriptionAction', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     givenBilling();
     mocks.cancelSubscriptionAction.mockResolvedValue({ success: true, data: { message: 'Done' } });
     await renderPage();
@@ -237,7 +237,7 @@ describe('BillingPage actions are unchanged', () => {
   });
 
   it('sets a non-default card as default and removes a card', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     givenBilling({
       paymentMethods: [
         { id: 'pm_1', brand: 'visa', last4: '4242', expMonth: 4, expYear: 2030, isDefault: true },

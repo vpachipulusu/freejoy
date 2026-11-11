@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 
 // Typing into a long form is slow under coverage instrumentation: the typing-heavy suites get more time.
 const SLOW = { timeout: 30_000 };
@@ -93,7 +93,7 @@ beforeEach(() => {
 
 describe('OfferForm validation', SLOW, () => {
   it('ties each error to its field, announces it, and focuses the first invalid field', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -110,7 +110,7 @@ describe('OfferForm validation', SLOW, () => {
   });
 
   it('keeps the hint and the error both attached to a field', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
     await user.type(screen.getByLabelText(/^Slug/), 'Bad Slug');
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -122,7 +122,7 @@ describe('OfferForm validation', SLOW, () => {
   });
 
   it('asks for the postage amount only when postage costs money', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
     expect(screen.queryByLabelText(/Postage cost/)).not.toBeInTheDocument();
 
@@ -132,7 +132,7 @@ describe('OfferForm validation', SLOW, () => {
   });
 
   it('adds and removes steps and focuses the new step', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
     await user.click(screen.getByRole('button', { name: 'Add a step' }));
 
@@ -147,7 +147,7 @@ describe('OfferForm validation', SLOW, () => {
 
 describe('OfferForm submit', SLOW, () => {
   it('creates a draft with the typed values and opens its edit page', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -172,7 +172,7 @@ describe('OfferForm submit', SLOW, () => {
       error: 'Check the highlighted fields and try again.',
       fieldErrors: { sourceUrl: 'Enter a full https:// address.' },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -192,7 +192,7 @@ describe('OfferForm submit', SLOW, () => {
       success: false,
       error: 'That slug is already in use. Choose another.',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -204,7 +204,7 @@ describe('OfferForm submit', SLOW, () => {
 
   it('shows a curated message and focuses it when the action call itself throws', async () => {
     mocks.createOfferAction.mockRejectedValue(new Error('SECRET network detail'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
 
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
@@ -221,7 +221,7 @@ describe('OfferForm submit', SLOW, () => {
   });
 
   it('moves focus to the next step, or to Add a step, when a step is removed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({
       initialValues: {
         ...filled,
@@ -239,7 +239,7 @@ describe('OfferForm submit', SLOW, () => {
   });
 
   it('clears the saved message once the form is edited again', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({
       mode: 'edit',
       offerId: 'o1',
@@ -253,7 +253,7 @@ describe('OfferForm submit', SLOW, () => {
   });
 
   it('saves an edit, announces it and moves focus to the message', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({
       mode: 'edit',
       offerId: 'o1',
@@ -292,7 +292,7 @@ describe('OfferForm submit', SLOW, () => {
 describe('form footer', () => {
   it('names the failure group and does not also make it a live region', async () => {
     mocks.createOfferAction.mockResolvedValue({ success: false, error: 'Nope for now.' });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
     await user.click(screen.getByRole('button', { name: 'Create draft' }));
 
@@ -305,7 +305,7 @@ describe('form footer', () => {
   it('ignores a second submit while the first is in flight (double click)', async () => {
     let finish: (value: unknown) => void = () => undefined;
     mocks.createOfferAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: filled });
 
     const submit = screen.getByRole('button', { name: 'Create draft' });
@@ -324,7 +324,7 @@ describe('form footer', () => {
   });
 
   it('warns about unsaved changes, and only while there are some', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({
       mode: 'edit',
       offerId: 'o1',
@@ -352,7 +352,7 @@ describe('form footer', () => {
   });
 
   it('warns on a new offer too once it has been typed into', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
     await user.type(screen.getByLabelText(/^Title/), 'Free tea');
     expect(await screen.findByText('You have unsaved changes.')).toBeInTheDocument();
@@ -361,7 +361,7 @@ describe('form footer', () => {
 
 describe('preview card', () => {
   it('updates as the title is typed and says a new offer is not public', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm();
     const preview = screen.getByRole('complementary', { name: 'Card preview' });
     expect(within(preview).getByText('Title not written yet')).toBeInTheDocument();
@@ -397,7 +397,7 @@ describe('preview card', () => {
   });
 
   it('prices postage in pounds from the typed amount', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderForm({ initialValues: { ...filled, postageKind: 'COST', postageAmount: '' } });
     const preview = screen.getByRole('complementary', { name: 'Card preview' });
     expect(within(preview).getByText('Postage costs money')).toBeInTheDocument();
@@ -412,7 +412,7 @@ describe('CategoryForm', SLOW, () => {
       success: true,
       data: { id: 'c9', slug: 'pets', enabled: true },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<CategoryForm mode="create" initialValues={emptyCategoryFormValues()} />);
 
     await user.click(screen.getByRole('button', { name: 'Create category' }));
@@ -439,7 +439,7 @@ describe('CategoryForm', SLOW, () => {
       success: false,
       error: 'You do not have permission to do that',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <CategoryForm
         mode="edit"
@@ -470,7 +470,7 @@ describe('MerchantForm', SLOW, () => {
       success: true,
       data: { id: 'm9', slug: 'acme', active: true },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<MerchantForm mode="create" initialValues={emptyMerchantFormValues()} />);
 
     await user.type(screen.getByLabelText(/^Name/), 'Acme');
@@ -497,7 +497,7 @@ describe('MerchantForm', SLOW, () => {
       success: true,
       data: { id: 'm1', slug: 'acme', active: true },
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <MerchantForm
         mode="edit"
@@ -516,7 +516,7 @@ describe('MerchantForm', SLOW, () => {
 
 describe('edit page: the form and the status buttons together', () => {
   it('holds the buttons back while the form has unsaved edits and frees them after a save', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <DirtyFormProvider>
         <OfferLifecycleButtons
@@ -596,7 +596,7 @@ describe('edit page: the form follows the offer data it is given', SLOW, () => {
   });
 
   it('keeps what the editor typed while the fields they did not touch update', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(editForm());
     await user.type(screen.getByLabelText(/^Title/), ' (my edit)');
 
@@ -607,7 +607,7 @@ describe('edit page: the form follows the offer data it is given', SLOW, () => {
   });
 
   it('the whole edit page tree shows the new values and the buttons send the new token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.offerLifecycleAction.mockResolvedValue({
       success: true,
       data: { id: 'o1', slug: 's', status: 'PUBLISHED', reviewToken: 'tok-3' },
@@ -637,7 +637,7 @@ describe('edit page: a field the editor saved keeps following the server', SLOW,
   );
 
   it('shows a later foreign change to a field the editor saved earlier', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const { rerender } = render(editForm());
     const title = screen.getByLabelText(/^Title/);
     await user.clear(title);
@@ -686,7 +686,7 @@ describe('edit page: the notice when a save went over a foreign change', SLOW, (
   }
 
   it('alerts when the state the save replaced is not the one the editor loaded', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.updateOfferAction.mockResolvedValue({
       success: true,
       data: {
@@ -708,7 +708,7 @@ describe('edit page: the notice when a save went over a foreign change', SLOW, (
   });
 
   it('does not alert on the editor own save when nothing foreign was there', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mocks.updateOfferAction.mockResolvedValue({
       success: true,
       data: {
@@ -732,7 +732,7 @@ describe('edit page: the notice when a save went over a foreign change', SLOW, (
 
 describe('edit page: the buttons wait for the reload that follows a save', SLOW, () => {
   it('stays disabled after the save resolves and is released only by the new token', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let finishRefresh: () => void = () => undefined;
     mocks.refresh.mockImplementation(
       () => new Promise<void>((resolve) => (finishRefresh = resolve))
@@ -768,7 +768,7 @@ describe('category and merchant forms: one submit at a time', SLOW, () => {
   it('a double click on Create category calls the action once', async () => {
     let finish: (value: unknown) => void = () => undefined;
     mocks.createCategoryAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <CategoryForm
         mode="create"
@@ -794,7 +794,7 @@ describe('category and merchant forms: one submit at a time', SLOW, () => {
   it('a double click on Create merchant calls the action once', async () => {
     let finish: (value: unknown) => void = () => undefined;
     mocks.createMerchantAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <MerchantForm mode="create" initialValues={{ ...emptyMerchantFormValues(), name: 'Acme' }} />
     );
@@ -805,7 +805,7 @@ describe('category and merchant forms: one submit at a time', SLOW, () => {
   });
 
   it('warn about unsaved changes while dirty', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<MerchantForm mode="create" initialValues={emptyMerchantFormValues()} />);
     expect(screen.queryByText('You have unsaved changes.')).not.toBeInTheDocument();
     await user.type(screen.getByLabelText(/^Name/), 'A');

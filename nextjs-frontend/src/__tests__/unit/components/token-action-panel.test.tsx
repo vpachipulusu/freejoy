@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/__tests__/unit/helpers/user';
 import { TokenActionPanel, type TokenActionCopy } from '@/components/alerts/token-action-panel';
 import { ALERTS_FAILURE_MESSAGES } from '@/lib/alerts/outcomes';
 
@@ -49,7 +49,7 @@ describe('TokenActionPanel', () => {
   it('sends the token from the link when the button is pressed, then shows the result', async () => {
     const action = renderPanel();
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
 
     expect(action).toHaveBeenCalledExactlyOnceWith(TOKEN);
     expect(await screen.findByRole('heading', { name: 'All done' })).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe('TokenActionPanel', () => {
       </StrictMode>
     );
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
 
     expect(action).toHaveBeenCalledExactlyOnceWith(TOKEN);
     expect(window.location.search).toBe('');
@@ -76,7 +76,7 @@ describe('TokenActionPanel', () => {
     let finish: (value: { success: true }) => void = () => {};
     const action = vi.fn().mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderPanel(action);
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(await screen.findByRole('button', { name: 'Do it' }));
     const working = screen.getByRole('button', { name: 'Doing it…' });
@@ -98,7 +98,7 @@ describe('TokenActionPanel', () => {
       })
     );
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
     await screen.findByRole('alert');
 
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Do it' }));
@@ -119,7 +119,7 @@ describe('TokenActionPanel', () => {
     renderPanel(
       vi.fn().mockResolvedValue({ success: false, code: 'unavailable', error: 'try again' })
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     const button = await screen.findByRole('button', { name: 'Do it' });
     const before = button.parentElement?.previousElementSibling;
 
@@ -134,7 +134,7 @@ describe('TokenActionPanel', () => {
     let finish: (value: { success: true }) => void = () => {};
     renderPanel(vi.fn().mockReturnValue(new Promise((resolve) => (finish = resolve))));
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
 
     expect(screen.getByRole('button', { name: 'Doing it…' })).toHaveAttribute(
       'aria-disabled',
@@ -153,7 +153,7 @@ describe('TokenActionPanel', () => {
       })
     );
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/not valid any more/i);
     expect(screen.queryByRole('button', { name: 'Do it' })).toBeNull();
@@ -170,7 +170,7 @@ describe('TokenActionPanel', () => {
       })
       .mockResolvedValueOnce({ success: true });
     renderPanel(action);
-    const user = userEvent.setup();
+    const user = setupUser();
 
     await user.click(await screen.findByRole('button', { name: 'Do it' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(ALERTS_FAILURE_MESSAGES.unavailable);
@@ -183,7 +183,7 @@ describe('TokenActionPanel', () => {
   it('shows a curated message when the action throws', async () => {
     renderPanel(vi.fn().mockRejectedValue(new Error('internal detail')));
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Do it' }));
+    await setupUser().click(await screen.findByRole('button', { name: 'Do it' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/something went wrong/i);
