@@ -53,7 +53,15 @@ beforeEach(() => {
 
 describe('offer call to action for a real offer', () => {
   it('links through the first-party redirect, with no demo wording and no external link', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="api-1" />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo={false}
+        offerId="api-1"
+      />
+    );
 
     const link = screen.getByRole('link', { name: 'Request this sample' });
     expect(link).toHaveAttribute('href', '/go/api-1');
@@ -66,7 +74,7 @@ describe('offer call to action for a real offer', () => {
   });
 
   it('leaves the demo button exactly as it was, with no coming-soon badge', () => {
-    render(<OfferCta offerType="free_sample" demo />);
+    render(<OfferCta sponsored={false} earnsCommission offerType="free_sample" demo />);
 
     const button = screen.getByRole('button', { name: 'Request this sample' });
     expect(button).not.toHaveTextContent(/coming soon/i);
@@ -74,7 +82,15 @@ describe('offer call to action for a real offer', () => {
   });
 
   it('keeps the affiliate disclosure link beside the real offer button', () => {
-    render(<OfferCta offerType="voucher" demo={false} offerId="api-1" />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="voucher"
+        demo={false}
+        offerId="api-1"
+      />
+    );
 
     expect(screen.getByRole('link', { name: /affiliate disclosure/i })).toHaveAttribute(
       'href',

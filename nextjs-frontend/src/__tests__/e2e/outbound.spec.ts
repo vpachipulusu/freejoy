@@ -78,10 +78,15 @@ test.describe('Money path: browse, offer, tracked outbound click', () => {
     const cta = page.locator('a[href^="/go/"]');
     await expect(cta).toHaveCount(1);
     await expect(cta).toHaveAttribute('rel', OUTBOUND_REL);
-    await expect(cta).toHaveAttribute('href', /^\/go\/[A-Za-z0-9_-]{1,64}$/);
-    await expect(page.getByText('Ad', { exact: true })).toBeVisible();
+    await expect(cta).toHaveAttribute('href', /^\/go\/[A-Za-z0-9_-]{1,64}\?nd=1$/);
+    // The seeded offers are EDITORIAL with a `sample` link, which earns no commission (FREEJ-60), so neither the
+    // label nor either commission sentence is shown, and the link is marked "not disclosed" with ?nd=1. An offer
+    // that earns would show both and a plain link; that is covered by unit tests, because a real network host
+    // cannot be seeded here.
+    await expect(page.getByText('Ad', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/paid a commission|may also earn a commission/i)).toHaveCount(0);
     await expect(page.locator('main a[href^="http"]')).toHaveCount(0);
-    const offerId = (await cta.getAttribute('href'))?.replace('/go/', '') ?? '';
+    const offerId = (await cta.getAttribute('href'))?.replace('/go/', '').replace('?nd=1', '') ?? '';
 
     const clicksBefore = DB_SEAM
       ? clickCount(offerId, { userAgentClass: deviceClass, referrerHost: origin.hostname })
@@ -96,7 +101,7 @@ test.describe('Money path: browse, offer, tracked outbound click', () => {
     await test.step('the click is a redirect to the stored https destination', async () => {
       const hop = providerRequest.redirectedFrom();
       expect(hop?.url(), 'the provider request followed a redirect from /go/').toBe(
-        `${origin.origin}/go/${offerId}`
+        `${origin.origin}/go/${offerId}?nd=1`
       );
       const redirect = await hop?.response();
       expect(redirect?.status()).toBe(307);

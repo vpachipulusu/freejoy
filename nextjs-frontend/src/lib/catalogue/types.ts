@@ -77,6 +77,14 @@ export interface Offer {
    * "Sponsored" label on the card and the page. The editor's three-way basis is never public; only this flag is.
    */
   sponsored: boolean;
+  /**
+   * True when the offer earns Freejoy a commission (its confirmed basis is affiliate, or the link `/go/<id>`
+   * follows is on an affiliate network); false when it does not; null when not known: a list item (the list
+   * response does not carry the flag) or a detail body that omitted it. It gates the "Ad" label and the
+   * commission sentence beside the outbound button; "Sponsored" is separate. Only the offer page reads it, and
+   * `OfferHero` shows the disclosure unless it is exactly false.
+   */
+  earnsCommission: boolean | null;
   featured: boolean;
   image: OfferImage;
   postage: Postage;

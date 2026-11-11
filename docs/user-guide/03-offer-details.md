@@ -35,15 +35,16 @@ On a phone the same content is stacked in one column:
 
 ## Step 3. Understand the claim button and the "Ad" label
 
-1. Above the coral button you see the word **AD**. It tells you this link is an affiliate link: the brand pays
-   Freejoy if you take up the offer through it.
+1. When the button leads to the brand through an affiliate link, you see the word **AD** above the coral button. It
+   tells you the brand pays Freejoy if you take up the offer through it. A button that goes straight to the brand's own
+   website earns Freejoy nothing, so it has no **AD** label and no commission sentence.
 2. The button is named for the kind of offer: **Request this sample**, **Start the trial**, **Get this cashback**,
    **Get this voucher** or **Enter this competition**.
 3. Directly below the button is a line of conditions that travels with it:
    - for a free sample, "Postage: £2.99." (or "Postage: Free." or "Postage: Check the brand's terms.");
    - for a free trial that needs a card, "A payment card is required to start."
 4. Under that, in smaller type: "Freejoy is paid a commission by the brand if you take up this offer through this
-   link." and "This takes you to the brand's website to request your sample." with a link to the
+   link." (only when the **AD** label is shown) and "This takes you to the brand's website to request your sample." with a link to the
    **Affiliate disclosure** page ([page 5](05-information-pages.md)).
 
 A trial that needs a card looks like this:

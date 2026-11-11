@@ -15,7 +15,11 @@ function goAnchors(container: HTMLElement): HTMLAnchorElement[] {
 
 describe('OutboundLink', () => {
   it('is a plain anchor to the first-party redirect with the paid-link rel values', () => {
-    render(<OutboundLink offerId="offer_1">Go</OutboundLink>);
+    render(
+      <OutboundLink commissionDisclosed offerId="offer_1">
+        Go
+      </OutboundLink>
+    );
 
     const link = screen.getByRole('link', { name: 'Go' });
     expect(link).toHaveAttribute('href', '/go/offer_1');
@@ -26,15 +30,44 @@ describe('OutboundLink', () => {
   });
 
   it('encodes the id so it cannot add path segments or a query', () => {
-    render(<OutboundLink offerId="a/b?x=1">Go</OutboundLink>);
+    render(
+      <OutboundLink offerId="a/b?x=1" commissionDisclosed>
+        Go
+      </OutboundLink>
+    );
 
     expect(screen.getByRole('link')).toHaveAttribute('href', '/go/a%2Fb%3Fx%3D1');
+  });
+
+  it('adds ?nd=1 (not disclosed) only when the page shows no commission disclosure', () => {
+    render(
+      <>
+        <OutboundLink offerId="offer_1" commissionDisclosed>
+          Disclosed
+        </OutboundLink>
+        <OutboundLink offerId="offer_1" commissionDisclosed={false}>
+          Undisclosed
+        </OutboundLink>
+      </>
+    );
+
+    expect(screen.getByRole('link', { name: 'Disclosed' })).toHaveAttribute('href', '/go/offer_1');
+    expect(screen.getByRole('link', { name: 'Undisclosed' })).toHaveAttribute(
+      'href',
+      '/go/offer_1?nd=1'
+    );
+    expect(screen.getByRole('link', { name: 'Undisclosed' })).toHaveAttribute(
+      'rel',
+      'sponsored nofollow noopener'
+    );
   });
 });
 
 describe('AffiliateCta', () => {
   it.each(OFFER_TYPES)('links a %s offer through /go/ with its own honest label', (offerType) => {
-    const { container } = render(<AffiliateCta offerId="offer_1" offerType={offerType} />);
+    const { container } = render(
+      <AffiliateCta sponsored={false} earnsCommission offerId="offer_1" offerType={offerType} />
+    );
 
     const link = screen.getByRole('link', { name: CTA_LABELS[offerType] });
     expect(link).toHaveAttribute('href', '/go/offer_1');
@@ -43,7 +76,9 @@ describe('AffiliateCta', () => {
   });
 
   it('puts the Ad label before the button and states the commission plainly', () => {
-    const { container } = render(<AffiliateCta offerId="offer_1" offerType="free_sample" />);
+    const { container } = render(
+      <AffiliateCta sponsored={false} earnsCommission offerId="offer_1" offerType="free_sample" />
+    );
 
     const label = screen.getByText('Ad');
     const link = screen.getByRole('link', { name: CTA_LABELS.free_sample });
@@ -60,7 +95,9 @@ describe('AffiliateCta', () => {
   });
 
   it('renders no external href: the only way out is the redirect', () => {
-    render(<AffiliateCta offerId="offer_1" offerType="cashback" />);
+    render(
+      <AffiliateCta sponsored={false} earnsCommission offerId="offer_1" offerType="cashback" />
+    );
 
     for (const link of screen.getAllByRole('link')) {
       expect(link.getAttribute('href') ?? '').not.toMatch(/^(https?:)?\/\//);
@@ -70,7 +107,15 @@ describe('AffiliateCta', () => {
 
 describe('OfferCta with an offer id', () => {
   it('links through /go/ instead of opening the demo dialog', () => {
-    render(<OfferCta offerType="free_trial" demo={false} offerId="offer_9" />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_trial"
+        demo={false}
+        offerId="offer_9"
+      />
+    );
 
     expect(screen.getByRole('link', { name: CTA_LABELS.free_trial })).toHaveAttribute(
       'href',
@@ -81,14 +126,18 @@ describe('OfferCta with an offer id', () => {
   });
 
   it('keeps the demo dialog for a demo offer even if an id is passed', () => {
-    const { container } = render(<OfferCta offerType="free_sample" demo offerId="offer_9" />);
+    const { container } = render(
+      <OfferCta sponsored={false} earnsCommission offerType="free_sample" demo offerId="offer_9" />
+    );
 
     expect(screen.getByRole('button', { name: CTA_LABELS.free_sample })).toBeInTheDocument();
     expect(goAnchors(container)).toEqual([]);
   });
 
   it('keeps the demo dialog when there is no offer id', () => {
-    const { container } = render(<OfferCta offerType="free_sample" demo offerId={null} />);
+    const { container } = render(
+      <OfferCta sponsored={false} earnsCommission offerType="free_sample" demo offerId={null} />
+    );
 
     expect(screen.getByRole('button', { name: CTA_LABELS.free_sample })).toBeInTheDocument();
     expect(goAnchors(container)).toEqual([]);

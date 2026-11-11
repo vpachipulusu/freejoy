@@ -140,7 +140,9 @@ describe('detail page hero sponsored label', () => {
 
 describe('the call to action of a sponsored offer', () => {
   it('says in a sentence that the brand pays for the listing, and still links with the paid-link rel', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" sponsored />);
+    render(
+      <OfferCta earnsCommission offerType="free_sample" demo={false} offerId="offer-9" sponsored />
+    );
 
     expect(screen.getByText(/sponsored listing: the brand pays Freejoy/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /request this sample/i })).toHaveAttribute(
@@ -152,6 +154,7 @@ describe('the call to action of a sponsored offer', () => {
   it('describes the outbound link with that sentence, and with the conditions line when there is one', () => {
     render(
       <OfferCta
+        earnsCommission
         offerType="free_sample"
         demo={false}
         offerId="offer-9"
@@ -166,7 +169,9 @@ describe('the call to action of a sponsored offer', () => {
   });
 
   it('describes the link with the sponsored sentence alone when there are no conditions', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" sponsored />);
+    render(
+      <OfferCta earnsCommission offerType="free_sample" demo={false} offerId="offer-9" sponsored />
+    );
 
     expect(screen.getByRole('link', { name: /request this sample/i })).toHaveAccessibleDescription(
       /sponsored listing/i
@@ -174,7 +179,9 @@ describe('the call to action of a sponsored offer', () => {
   });
 
   it('does not state as fact that a commission is paid on a sponsored offer: it says it may be', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" sponsored />);
+    render(
+      <OfferCta earnsCommission offerType="free_sample" demo={false} offerId="offer-9" sponsored />
+    );
 
     expect(screen.queryByText(/is paid a commission by the brand/i)).toBeNull();
     expect(
@@ -183,14 +190,30 @@ describe('the call to action of a sponsored offer', () => {
   });
 
   it('keeps the commission sentence for an offer that is not sponsored', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo={false}
+        offerId="offer-9"
+      />
+    );
 
     expect(screen.getByText(/is paid a commission by the brand/i)).toBeInTheDocument();
     expect(screen.queryByText(/may also earn/i)).toBeNull();
   });
 
   it('does not add that sentence when the offer is not sponsored', () => {
-    render(<OfferCta offerType="free_sample" demo={false} offerId="offer-9" />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo={false}
+        offerId="offer-9"
+      />
+    );
 
     expect(screen.queryByText(/sponsored listing/i)).toBeNull();
   });

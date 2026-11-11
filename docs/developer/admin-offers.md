@@ -92,7 +92,7 @@ published.
 The form has a required **Commercial basis** choice in its own section, with nothing selected on a new offer and one line
 of help under each option: **Editorial** (no payment or benefit), **Affiliate** (a commission through a network) and
 **Sponsored** (the merchant pays Freejoy, or gives it a benefit, for the listing or where it appears; visitors see a
-"Sponsored" label). The card preview shows the Sponsored label as soon as Sponsored is chosen. The server action
+"Sponsored" label). **Editorial with a `direct` link is the only combination shown without an "Ad" or a "Sponsored" label**: pick Affiliate for a link to the brand's own site that carries a commission tag, because the page shows "Ad" for Affiliate ([freejoy-affiliate.md](freejoy-affiliate.md#when-the-page-says-ad)). The card preview shows the Sponsored label as soon as Sponsored is chosen. The server action
 validates with the same Zod schema (`commercialBasis`, "Choose the commercial basis."); API refusals map to curated
 messages by code (an unconfirmed basis reads "its commercial basis has not been confirmed (confirm it on the offer page;
 for a live offer, unpublish it, change its links, then publish again)"). Changing it is a change like any other: it is

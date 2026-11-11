@@ -78,6 +78,18 @@ class OfferData(BaseModel):
     steps: list[ClaimStep]
 
 
+class OfferDetailData(OfferData):
+    """The offer page: everything in a list item plus whether its outbound link earns commission.
+
+    A list card links to this page, never to the provider, so only the page needs the flag.
+    """
+
+    # True only when the link ``/go/<id>`` would follow right now is on an affiliate network that pays
+    # commission. Gates the "Ad" label and the commission sentence. The provider, the commercial basis, the
+    # link id and the destination are never public.
+    earns_commission: bool
+
+
 class OfferListData(BaseModel):
     items: list[OfferData]
     total: int
@@ -92,7 +104,7 @@ class OfferListResponse(BaseModel):
 
 class OfferResponse(BaseModel):
     success: Literal[True] = True
-    data: OfferData
+    data: OfferDetailData
 
 
 class ExpiredOfferData(BaseModel):
@@ -173,6 +185,12 @@ def offer_data(record: OfferRecord) -> OfferData:
         last_verified_at=record.last_verified_at,
         freshness=cast(FreshnessValue | None, freshness),
         steps=_steps(record.steps),
+    )
+
+
+def offer_detail_data(record: OfferRecord, earns_commission: bool) -> OfferDetailData:
+    return OfferDetailData(
+        **offer_data(record).model_dump(), earns_commission=earns_commission
     )
 
 

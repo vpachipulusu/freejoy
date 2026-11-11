@@ -713,6 +713,12 @@ export type ClickRequest = {
      * Coarse device class; the raw user agent is never sent
      */
     user_agent_class?: UserAgentClass | null;
+    /**
+     * Commission Disclosed
+     *
+     * False when the page the visitor clicked on showed no commission disclosure. If the offer earns commission the answer is 409 disclosure_required and nothing is recorded. It can only make the answer stricter.
+     */
+    commission_disclosed?: boolean;
 };
 
 /**
@@ -1036,6 +1042,37 @@ export type DisableRequest = {
      * Id Token
      */
     id_token: string;
+};
+
+/**
+ * DisclosureRequiredData
+ */
+export type DisclosureRequiredData = {
+    /**
+     * Slug
+     */
+    slug: string;
+};
+
+/**
+ * DisclosureRequiredResponse
+ *
+ * The 409 body: the page did not disclose a commission, so send the visitor back to ``slug``.
+ */
+export type DisclosureRequiredResponse = {
+    /**
+     * Success
+     */
+    success?: false;
+    /**
+     * Error
+     */
+    error?: string;
+    /**
+     * Code
+     */
+    code?: 'disclosure_required';
+    data: DisclosureRequiredData;
 };
 
 /**
@@ -2016,6 +2053,92 @@ export type OfferData = {
      * Steps
      */
     steps: Array<ClaimStep>;
+};
+
+/**
+ * OfferDetailData
+ *
+ * The offer page: everything in a list item plus whether its outbound link earns commission.
+ *
+ * A list card links to this page, never to the provider, so only the page needs the flag.
+ */
+export type OfferDetailData = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Slug
+     */
+    slug: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Description
+     */
+    description: Array<string>;
+    category: CategoryRef;
+    merchant: MerchantData;
+    /**
+     * Offer Type
+     */
+    offer_type: 'free_sample' | 'free_trial' | 'cashback' | 'voucher' | 'competition';
+    /**
+     * Sponsored
+     */
+    sponsored: boolean;
+    /**
+     * Featured
+     */
+    featured: boolean;
+    image: ImageData;
+    postage: PostageData;
+    /**
+     * Requires Card
+     */
+    requires_card: boolean;
+    /**
+     * Subscription Terms
+     */
+    subscription_terms: string | null;
+    /**
+     * Eligibility
+     */
+    eligibility: string;
+    /**
+     * Availability
+     */
+    availability: string;
+    /**
+     * Start At
+     */
+    start_at: string;
+    /**
+     * End At
+     */
+    end_at: string | null;
+    /**
+     * Last Verified At
+     */
+    last_verified_at: string | null;
+    /**
+     * Freshness
+     */
+    freshness: 'new_today' | 'just_added' | 'popular' | 'ends_soon' | 'limited' | null;
+    /**
+     * Steps
+     */
+    steps: Array<ClaimStep>;
+    /**
+     * Earns Commission
+     */
+    earns_commission: boolean;
 };
 
 /**
@@ -4036,7 +4159,7 @@ export type AppApiV1CatalogueSchemasOfferResponse = {
      * Success
      */
     success?: true;
-    data: OfferData;
+    data: OfferDetailData;
 };
 
 /**
@@ -8720,6 +8843,10 @@ export type RecordClickErrors = {
      * Not available
      */
     404: ErrorResponse;
+    /**
+     * The page did not disclose a commission this offer earns
+     */
+    409: DisclosureRequiredResponse;
     /**
      * The offer has ended
      */

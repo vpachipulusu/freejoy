@@ -18,14 +18,13 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, Resp
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.auth import require_internal_key
-from app.api.deps import SessionDep
+from app.api.deps import SessionDep, allow_sample_provider
 from app.api.rate_limit import (
     RATE_LIMIT_RESPONSES,
     RateLimiterDep,
     limit_by_client_ip,
 )
 from app.api.v1.catalogue_schemas import ExpiredOfferResponse, expired_response
-from app.core.config import settings
 from app.core.errors import ErrorResponse
 from app.core.rate_limit import (
     OUTBOUND_CLICK_POLICY,
@@ -38,7 +37,11 @@ from app.models.platform.click_event import UserAgentClass
 from app.repositories.catalogue import CatalogueRepository
 from app.repositories.outbound_clicks import OutboundClickRepository
 from app.services.catalogue import CatalogueService, ExpiredOffer
-from app.services.outbound_clicks import MAX_HOST_LENGTH, OutboundClickService
+from app.services.outbound_clicks import (
+    MAX_HOST_LENGTH,
+    DisclosureNeeded,
+    OutboundClickService,
+)
 
 logger = logging.getLogger("yourapp.outbound")
 NO_STORE = {"Cache-Control": "no-store"}
@@ -73,6 +76,14 @@ class ClickRequest(BaseModel):
     user_agent_class: UserAgentClass | None = Field(
         default=None,
         description="Coarse device class; the raw user agent is never sent",
+    )
+    commission_disclosed: bool = Field(
+        default=True,
+        description=(
+            "False when the page the visitor clicked on showed no commission disclosure. If the offer "
+            "earns commission the answer is 409 disclosure_required and nothing is recorded. It can "
+            "only make the answer stricter."
+        ),
     )
 
 
@@ -130,12 +141,25 @@ class ClickResponse(BaseModel):
     data: ClickData
 
 
+class DisclosureRequiredData(BaseModel):
+    slug: str
+
+
+class DisclosureRequiredResponse(BaseModel):
+    """The 409 body: the page did not disclose a commission, so send the visitor back to ``slug``."""
+
+    success: Literal[False] = False
+    error: str = "Disclosure required"
+    code: Literal["disclosure_required"] = "disclosure_required"
+    data: DisclosureRequiredData
+
+
 def get_click_service(session: SessionDep) -> OutboundClickService:
     return OutboundClickService(
         CatalogueService(CatalogueRepository(session)),
         OutboundClickRepository(session),
         session,
-        allow_sample_provider=settings.relaxed_environment,
+        allow_sample_provider=allow_sample_provider(),
     )
 
 
@@ -158,6 +182,10 @@ def _no_store(body: BaseModel, status_code: int = 200) -> Response:
     responses={
         404: {"model": ErrorResponse, "description": "Not available"},
         410: {"model": ExpiredOfferResponse, "description": "The offer has ended"},
+        409: {
+            "model": DisclosureRequiredResponse,
+            "description": "The page did not disclose a commission this offer earns",
+        },
     },
 )
 async def record_click(
@@ -169,12 +197,21 @@ async def record_click(
     """Write one click event for a live offer and return its affiliate destination."""
     request = body or ClickRequest()
     outcome = await service.record_click(
-        offer_id, request.referrer_host, request.user_agent_class, record=record
+        offer_id,
+        request.referrer_host,
+        request.user_agent_class,
+        record=record,
+        commission_disclosed=request.commission_disclosed,
     )
     if outcome is None:
         raise HTTPException(404, "Offer not found", headers=NO_STORE)
     if isinstance(outcome, ExpiredOffer):
         return _no_store(expired_response(outcome), 410)
+    if isinstance(outcome, DisclosureNeeded):
+        body_409 = DisclosureRequiredResponse(
+            data=DisclosureRequiredData(slug=outcome.slug)
+        )
+        return _no_store(body_409, 409)
     return _no_store(
         ClickResponse(data=ClickData(destination_url=outcome.destination_url))
     )

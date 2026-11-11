@@ -5,7 +5,8 @@ import { handleOutboundRequest } from '@/lib/outbound/respond';
 /**
  * `/go/[offerId]`: the first-party outbound redirect for affiliate offers (not under `/api`).
  *
- * Only the path id is used; every query parameter is ignored (see `@/lib/outbound/respond`). The
+ * Only the path id is used, plus the exact query value `nd=1` which can only make the backend stricter
+ * (see `@/lib/outbound/respond`); every other query parameter is ignored. The
  * destination is resolved by the backend from the stored affiliate link, so nothing the visitor sends
  * can choose where they are redirected. The response sets no cookie.
  */

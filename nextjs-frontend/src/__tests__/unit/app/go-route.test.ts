@@ -7,6 +7,8 @@ vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('@/lib/api/outbound', () => ({ recordOutboundClick: vi.fn() }));
+const cacheMocks = vi.hoisted(() => ({ revalidateTag: vi.fn(), revalidatePath: vi.fn() }));
+vi.mock('next/cache', () => cacheMocks);
 
 import { GET, HEAD } from '@/app/go/[offerId]/route';
 import { recordOutboundClick, type OutboundClickResult } from '@/lib/api/outbound';
@@ -45,6 +47,7 @@ describe('GET /go/[offerId]', () => {
     const outcomes: OutboundClickResult[] = [
       { kind: 'redirect', destination: DESTINATION },
       { kind: 'ended', slug: 'free-shampoo' },
+      { kind: 'disclosure_required', slug: 'free-shampoo' },
       { kind: 'not_found' },
       { kind: 'rate_limited', retryAfterSeconds: 60 },
       { kind: 'unavailable' },
@@ -153,6 +156,107 @@ describe('GET /go/[offerId]', () => {
       expect(response.headers.get('Location')).toBeNull();
     }
   );
+
+  describe('the not-disclosed marker (?nd=1)', () => {
+    it('forwards exactly nd=1 to the backend as commissionDisclosed false', async () => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      const response = await call('/go/offer_1?nd=1');
+
+      expect(recordMock).toHaveBeenCalledWith('offer_1', {
+        referrerHost: null,
+        userAgentClass: 'OTHER',
+        commissionDisclosed: false,
+      });
+      expect(response.headers.get('Location')).toBe(DESTINATION);
+    });
+
+    it('sends nothing extra for a plain link', async () => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      await call('/go/offer_1');
+
+      expect(recordMock.mock.calls[0][1]).not.toHaveProperty('commissionDisclosed');
+    });
+
+    it.each([
+      '?nd=0',
+      '?nd=true',
+      '?nd=',
+      '?nd=1%20',
+      '?nd=01',
+      '?ND=1',
+      '?nd=1&nd=1',
+      '?nd=1&nd=0',
+      '?nd[]=1',
+    ])('treats %s as disclosed', async (query) => {
+      backendAnswers({ kind: 'redirect', destination: DESTINATION });
+
+      await call(`/go/offer_1${query}`);
+
+      expect(recordMock.mock.calls[0][1]).not.toHaveProperty('commissionDisclosed');
+    });
+
+    it('answers a backend disclosure_required with a relative 303 to the offer page carrying ?ad=1', async () => {
+      backendAnswers({ kind: 'disclosure_required', slug: 'free-shampoo' });
+
+      const response = await call('/go/offer_1?nd=1&url=//evil.example', {
+        host: 'evil.example',
+        'x-forwarded-host': 'evil.example',
+      });
+
+      expect(response.status).toBe(303);
+      expect(response.headers.get('Location')).toBe('/freebies/free-shampoo?ad=1');
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Set-Cookie')).toBeNull();
+    });
+
+    it.each(['../admin', 'a/b', 'Free Shampoo', '//evil.example', 'x?y=1', ''])(
+      'answers 404, with no redirect, when the disclosure slug is %j',
+      async (slug) => {
+        backendAnswers({ kind: 'disclosure_required', slug });
+
+        const response = await call('/go/offer_1?nd=1');
+
+        expect(response.status).toBe(404);
+        expect(response.headers.get('Location')).toBeNull();
+      }
+    );
+
+    it('logs only the offer id and a reason, never a destination', async () => {
+      backendAnswers({ kind: 'disclosure_required', slug: 'free-shampoo' });
+
+      await call('/go/offer_1?nd=1');
+
+      expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toMatch(/https?:/);
+      expect(vi.mocked(logger.info).mock.calls[0][1]).toEqual({ offerId: 'offer_1' });
+    });
+
+    it('never touches the catalogue cache: no tag expiry or path revalidation on any outcome', async () => {
+      const outcomes: OutboundClickResult[] = [
+        { kind: 'redirect', destination: DESTINATION },
+        { kind: 'disclosure_required', slug: 'free-shampoo' },
+        { kind: 'ended', slug: 'free-shampoo' },
+        { kind: 'not_found' },
+      ];
+      for (const outcome of outcomes) {
+        backendAnswers(outcome);
+        await call('/go/offer_1?nd=1');
+      }
+
+      expect(cacheMocks.revalidateTag).not.toHaveBeenCalled();
+      expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+    });
+
+    it('does not import the admin catalogue module', async () => {
+      const { readFileSync } = await import('node:fs');
+      const source = readFileSync('src/lib/outbound/respond.ts', 'utf8');
+
+      expect(source).not.toMatch(
+        /admin-catalogue-action|refreshPublicCatalogue|revalidateTag|revalidatePath|next\/cache/
+      );
+    });
+  });
 
   it('answers an unknown or unpublished offer with an uncached 404', async () => {
     backendAnswers({ kind: 'not_found' });

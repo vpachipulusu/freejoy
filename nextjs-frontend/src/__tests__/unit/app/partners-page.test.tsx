@@ -80,8 +80,10 @@ describe('partners page (FREEJ-55)', () => {
       /a listing that a retailer pays for, or gives Freejoy any other benefit for, is labelled .Sponsored./i
     );
     expect(text).toMatch(
-      /links that earn Freejoy a commission through an affiliate network carry an .Ad. label, and a sponsored listing with such a link shows both/i
+      /only some links earn Freejoy a commission. Those links carry an .Ad. label, and a sponsored listing whose link earns a commission shows both/i
     );
+    expect(text).toMatch(/a link that earns Freejoy no commission carries no .Ad. label/i);
+    expect(text).not.toMatch(/earns Freejoy nothing|affiliate network|straight to/i);
     expect(text).not.toMatch(/label instead/i);
     expect(text).toMatch(/payment does not change the checks/i);
     expect(text).not.toMatch(/otherwise rewarded/i);
