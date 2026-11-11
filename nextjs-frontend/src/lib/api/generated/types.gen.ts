@@ -2121,6 +2121,10 @@ export type OfferOut = {
      * Needs Basis Confirmation
      */
     needs_basis_confirmation: boolean;
+    /**
+     * Basis Is Placeholder
+     */
+    basis_is_placeholder: boolean;
     provenance: OfferProvenanceOut | null;
     partner_submission: PartnerSubmissionOut | null;
     /**
@@ -2359,6 +2363,10 @@ export type OfferWriteOut = {
      * Needs Basis Confirmation
      */
     needs_basis_confirmation: boolean;
+    /**
+     * Basis Is Placeholder
+     */
+    basis_is_placeholder: boolean;
     provenance: OfferProvenanceOut | null;
     partner_submission: PartnerSubmissionOut | null;
     /**

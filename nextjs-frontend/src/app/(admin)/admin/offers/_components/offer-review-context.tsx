@@ -23,7 +23,11 @@ import {
  * A reload can land before the write's own result does, so while a write is in flight the loaded token is only
  * noted; when the result arrives a version other than the editor's own that landed meanwhile still raises it.
  *
- * The handlers only touch refs and `setChanged`, so they are created once: a changing identity would re-run the
+ * `writing` is true from the moment a write began until it ended, for every control on the page that writes (the
+ * form, the lifecycle steps, the retailer update and source-change buttons): each holds while another one runs, so
+ * a second write cannot go out with a token the first is about to replace.
+ *
+ * The handlers only touch refs and the two state setters, so they are created once: a changing identity would re-run the
  * page's "this token was loaded" effect with its still-old token and raise the notice again after a success.
  */
 type OfferReviewHandlers = {
@@ -37,10 +41,11 @@ type OfferReviewHandlers = {
   /** The token of the last version the editor was shown (what a save sends back), or undefined before any. */
   currentToken: () => string | undefined;
 };
-type OfferReview = OfferReviewHandlers & { changed: boolean };
+type OfferReview = OfferReviewHandlers & { changed: boolean; writing: boolean };
 
 const NOOP: OfferReview = {
   changed: false,
+  writing: false,
   beginWrite: () => undefined,
   recordWrite: () => undefined,
   recordFailure: () => undefined,
@@ -52,6 +57,7 @@ const OfferReviewContext = createContext<OfferReview>(NOOP);
 
 export function OfferReviewProvider({ children }: { children: ReactNode }) {
   const [changed, setChanged] = useState(false);
+  const [writing, setWriting] = useState(false);
   const seen = useRef<string | null>(null);
   const loaded = useRef<string | null>(null);
   const loadedAtStart = useRef<string | null>(null);
@@ -62,9 +68,11 @@ export function OfferReviewProvider({ children }: { children: ReactNode }) {
       beginWrite() {
         inFlight.current = true;
         loadedAtStart.current = loaded.current;
+        setWriting(true);
       },
       recordWrite(token, previous) {
         inFlight.current = false;
+        setWriting(false);
         const foreignBefore = previous !== undefined && previous !== seen.current;
         const now = loaded.current;
         // A different version landed while the write ran: not the editor's own.
@@ -75,6 +83,7 @@ export function OfferReviewProvider({ children }: { children: ReactNode }) {
       },
       recordFailure(reason) {
         inFlight.current = false;
+        setWriting(false);
         if (reason === 'offer_changed') setChanged(true);
       },
       currentToken() {
@@ -95,7 +104,10 @@ export function OfferReviewProvider({ children }: { children: ReactNode }) {
     }),
     []
   );
-  const value = useMemo<OfferReview>(() => ({ ...handlers, changed }), [handlers, changed]);
+  const value = useMemo<OfferReview>(
+    () => ({ ...handlers, changed, writing }),
+    [handlers, changed, writing]
+  );
 
   return <OfferReviewContext.Provider value={value}>{children}</OfferReviewContext.Provider>;
 }

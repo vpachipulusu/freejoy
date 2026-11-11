@@ -17146,6 +17146,10 @@
             "type": "boolean",
             "title": "Needs Basis Confirmation"
           },
+          "basis_is_placeholder": {
+            "type": "boolean",
+            "title": "Basis Is Placeholder"
+          },
           "provenance": {
             "anyOf": [
               {
@@ -17321,6 +17325,7 @@
           "partner_ref",
           "review_token",
           "needs_basis_confirmation",
+          "basis_is_placeholder",
           "provenance",
           "partner_submission",
           "summary",
@@ -17629,6 +17634,10 @@
             "type": "boolean",
             "title": "Needs Basis Confirmation"
           },
+          "basis_is_placeholder": {
+            "type": "boolean",
+            "title": "Basis Is Placeholder"
+          },
           "provenance": {
             "anyOf": [
               {
@@ -17808,6 +17817,7 @@
           "partner_ref",
           "review_token",
           "needs_basis_confirmation",
+          "basis_is_placeholder",
           "provenance",
           "partner_submission",
           "summary",

@@ -18,6 +18,8 @@ export type OfferWriteRequest = {
   failureTitle: string;
   /** The toast text under the title of a success: the offer's title. */
   description: string;
+  /** Told the curated message of a failure, for a control that keeps it on the page after the toast is gone. */
+  onFailure?: (message: string) => void;
 };
 
 /**
@@ -35,7 +37,13 @@ export function useOfferWrite() {
   const [isPending, startTransition] = useTransition();
   const busy = useRef(false);
 
-  function run({ call, successTitle, failureTitle, description }: OfferWriteRequest): void {
+  function run({
+    call,
+    successTitle,
+    failureTitle,
+    description,
+    onFailure,
+  }: OfferWriteRequest): void {
     if (busy.current) return;
     busy.current = true;
     review.beginWrite();
@@ -47,6 +55,7 @@ export function useOfferWrite() {
           toast({ title: successTitle, description });
         } else {
           review.recordFailure(result.reason);
+          onFailure?.(result.error);
           toast({ variant: 'destructive', title: failureTitle, description: result.error });
         }
         router.refresh();

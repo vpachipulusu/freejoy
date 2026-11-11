@@ -304,6 +304,7 @@ export function toOfferDetail(offer: OfferOut): OfferDetailView {
     createdAt: offer.created_at,
     links: offer.links.map(toOfferLink),
     needsBasisConfirmation: offer.needs_basis_confirmation,
+    basisIsPlaceholder: Boolean(offer.basis_is_placeholder),
     provenance: toProvenance(offer.provenance),
     partnerSubmission: toPartnerSubmission(offer.partner_submission),
   };

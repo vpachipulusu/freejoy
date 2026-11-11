@@ -1,15 +1,20 @@
 import { availableOfferActions, type OfferRowStatus } from '@/lib/admin-catalogue/offer-status';
 import type { OfferDetailView } from '@/lib/admin-catalogue/offer-view';
 import { buildProposalRows } from '@/lib/admin-catalogue/partner-proposal';
-import { formatAdminDate } from '../../_components/format-admin-date';
+import { formatAdminDate, formatAdminDateTime } from '../../_components/format-admin-date';
 import { PartnerUpdateReview } from './partner-update-review';
 
 type PartnerSubmissionPanelProps = {
   offer: OfferDetailView;
   status: OfferRowStatus;
-  /** Category names by id, for the comparison (an id with no name shows as "Unknown category"). */
+  /** Category names by id, for the comparison. */
   categoryNames: Record<string, string>;
+  /** The category pick list was cut short, so an id with no name may be a real category that was not loaded. */
+  categoriesTruncated?: boolean;
 };
+
+const UNKNOWN_CATEGORY = 'Unknown category';
+const CATEGORY_NOT_LISTED = 'Category not in this list';
 
 /**
  * "Submitted by retailer": the merchant and the ref the retailer chose, when it was last sent, and, when an update
@@ -20,17 +25,20 @@ export function PartnerSubmissionPanel({
   offer,
   status,
   categoryNames,
+  categoriesTruncated = false,
 }: PartnerSubmissionPanelProps) {
   const partner = offer.partnerSubmission;
   if (!partner) return null;
   const pending = partner.pending;
+  // Only the map's own entries are names: an id such as "toString" is not read from the prototype.
+  const nameOf = (id: string): string =>
+    Object.hasOwn(categoryNames, id)
+      ? categoryNames[id]
+      : categoriesTruncated
+        ? CATEGORY_NOT_LISTED
+        : UNKNOWN_CATEGORY;
   const rows = pending
-    ? buildProposalRows(
-        offer,
-        pending.payload,
-        (id) => categoryNames[id] ?? 'Unknown category',
-        formatAdminDate
-      )
+    ? buildProposalRows(offer, pending.payload, nameOf, formatAdminDateTime)
     : [];
 
   return (

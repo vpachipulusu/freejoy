@@ -21,15 +21,24 @@ export function OfferImportBadge({
   if (importProvider === 'partner') {
     const waiting = sourceChangedAt !== null;
     return (
-      <StatusPill
-        variant={waiting ? 'warn' : 'neutral'}
-        icon={Store}
-        data-testid="offer-import-badge"
-        className="mt-1"
-      >
-        {waiting ? 'Retailer update waiting' : 'Submitted by retailer'}
-        {partnerRef ? ` · ref ${partnerRef}` : ''}
-      </StatusPill>
+      <>
+        <StatusPill
+          variant={waiting ? 'warn' : 'neutral'}
+          icon={Store}
+          data-testid="offer-import-badge"
+          className="mt-1"
+        >
+          {waiting ? 'Retailer update waiting' : 'Submitted by retailer'}
+        </StatusPill>
+        {partnerRef ? (
+          <div
+            data-testid="offer-partner-ref"
+            className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]"
+          >
+            Ref {partnerRef}
+          </div>
+        ) : null}
+      </>
     );
   }
   if (sourceChangedAt) {

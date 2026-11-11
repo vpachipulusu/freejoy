@@ -63,6 +63,10 @@ export function failed(
   if (result.code === 'slug_taken' || result.code === 'invalid_slug') {
     return { success: false, error, fieldErrors: { slug: error } };
   }
+  // A retailer's submission staying with its merchant belongs to the merchant field of the edit form.
+  if (result.code === 'partner_merchant_fixed') {
+    return { success: false, error, fieldErrors: { merchantId: error } };
+  }
   return { success: false, error };
 }
 

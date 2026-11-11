@@ -87,6 +87,11 @@ export interface OfferDetailView extends OfferRowView {
    * affiliate network). The API works it out; this page does not hold its own copy of the rule.
    */
   needsBasisConfirmation: boolean;
+  /**
+   * True while a retailer's submission has a commercial basis nobody chose: the stored value is only a placeholder, so
+   * it is never shown as the offer's basis. Publishing then asks the editor to choose one.
+   */
+  basisIsPlaceholder: boolean;
   /** Null for an offer made by hand. */
   provenance: OfferProvenanceView | null;
   /** Null unless the offer was submitted through the partner API. */
@@ -117,7 +122,11 @@ export function offerToFormValues(offer: OfferDetailView): OfferFormValues {
     categoryId: offer.categoryId,
     merchantId: offer.merchantId,
     offerType: offer.offerType as OfferFormValues['offerType'],
-    commercialBasis: isCommercialBasis(offer.commercialBasis) ? offer.commercialBasis : '',
+    // A placeholder basis is not a choice: the form starts with nothing selected until an editor picks one.
+    commercialBasis:
+      !offer.basisIsPlaceholder && isCommercialBasis(offer.commercialBasis)
+        ? offer.commercialBasis
+        : '',
     featured: offer.featured,
     imageTint: offer.imageTint as OfferFormValues['imageTint'],
     imageLabel: offer.imageLabel,

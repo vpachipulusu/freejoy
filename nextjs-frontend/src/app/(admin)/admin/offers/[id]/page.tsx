@@ -104,6 +104,7 @@ export default async function EditOfferPage({ params }: { params: Params }) {
               reviewToken={offer.reviewToken}
               commercialBasis={offer.commercialBasis}
               confirmBasisToPublish={offer.needsBasisConfirmation}
+              basisIsPlaceholder={offer.basisIsPlaceholder}
             />
           </div>
 
@@ -114,6 +115,7 @@ export default async function EditOfferPage({ params }: { params: Params }) {
               categoryNames={Object.fromEntries(
                 categoryOptions.map((option) => [option.id, option.name])
               )}
+              categoriesTruncated={categories.truncated}
             />
           ) : offer.provenance ? (
             <OfferProvenancePanel
@@ -139,6 +141,7 @@ export default async function EditOfferPage({ params }: { params: Params }) {
             categories={categoryOptions}
             merchants={merchantOptions}
             readOnly={offer.status === 'ARCHIVED' || offer.status === 'UNKNOWN'}
+            basisIsPlaceholder={offer.basisIsPlaceholder}
           />
         </div>
       </OfferReviewProvider>

@@ -4,6 +4,7 @@ import {
   descriptionParagraphs,
   emptyOfferFormValues,
   minorToPounds,
+  offerEditSchema,
   offerFormSchema,
   poundsToMinor,
   type OfferFormValues,
@@ -222,6 +223,7 @@ describe('offerToFormValues', () => {
     createdAt: '2026-01-01T00:00:00Z',
     links: [],
     needsBasisConfirmation: false,
+    basisIsPlaceholder: false,
   };
 
   it('maps an offer to form values with blanks for nulls', () => {
@@ -239,6 +241,67 @@ describe('offerToFormValues', () => {
 
   it('gives a loaded offer values that pass the schema', () => {
     expect(offerFormSchema.safeParse(offerToFormValues(detail)).success).toBe(true);
+  });
+
+  it('never presents a placeholder basis as chosen, whatever value is stored', () => {
+    const placeholder = { ...detail, commercialBasis: 'SPONSORED', basisIsPlaceholder: true };
+
+    expect(offerToFormValues(placeholder).commercialBasis).toBe('');
+    expect(offerToFormValues({ ...placeholder, basisIsPlaceholder: false }).commercialBasis).toBe(
+      'SPONSORED'
+    );
+  });
+
+  it('gives a placeholder offer values that pass the editing schema but not the creating one', () => {
+    const values = offerToFormValues({ ...detail, basisIsPlaceholder: true });
+
+    expect(offerEditSchema.safeParse(values).success).toBe(true);
+    expect(offerFormSchema.safeParse(values).success).toBe(false);
+  });
+});
+
+describe('offerEditSchema', () => {
+  const values = offerToFormValues({
+    ...(JSON.parse('{}') as OfferDetailView),
+    id: 'o1',
+    title: 'T',
+    slug: 'tt',
+    categoryId: 'c',
+    merchantId: 'm',
+    offerType: 'VOUCHER',
+    commercialBasis: 'AFFILIATE',
+    basisIsPlaceholder: false,
+    featured: false,
+    endAt: null,
+    startAt: null,
+    summary: 'S',
+    description: [],
+    imageTint: 'mint',
+    imageLabel: 'L',
+    imageAlt: 'A',
+    sourceUrl: null,
+    postageKind: 'FREE',
+    postageAmountMinor: null,
+    requiresCard: false,
+    subscriptionTerms: null,
+    eligibility: 'E',
+    availability: 'V',
+    steps: [],
+    freshness: null,
+    publisherNotes: null,
+  } as unknown as OfferDetailView);
+
+  it('accepts an unchosen basis and still refuses every other fault', () => {
+    expect(offerEditSchema.safeParse({ ...values, commercialBasis: '' }).success).toBe(true);
+    expect(offerEditSchema.safeParse({ ...values, commercialBasis: 'NOPE' }).success).toBe(false);
+    expect(offerEditSchema.safeParse({ ...values, title: '' }).success).toBe(false);
+    expect(
+      offerEditSchema.safeParse({
+        ...values,
+        startAt: '2026-05-02T00:00',
+        endAt: '2026-05-01T00:00',
+      }).success
+    ).toBe(false);
   });
 });
 

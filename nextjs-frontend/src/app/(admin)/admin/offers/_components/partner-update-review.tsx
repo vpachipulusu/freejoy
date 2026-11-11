@@ -1,18 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import type { ProposalRow } from '@/lib/admin-catalogue/partner-proposal';
 import { useFormBusy, useFormDirty } from '../../_components/dirty-form-context';
 import { ARIA_DISABLED_STYLE } from './disabled-style';
+import { useOfferReview } from './offer-review-context';
+import { PartnerConfirmDialog } from './partner-confirm-dialog';
+import { ChangedFields, NotAppliedNotes } from './partner-proposal-list';
 import { usePartnerUpdate } from './use-partner-update';
 
 type PartnerUpdateReviewProps = {
@@ -31,28 +26,27 @@ type PartnerUpdateReviewProps = {
   live: boolean;
 };
 
+type Pending = { kind: 'apply' | 'dismiss'; hash: string };
+
 const NOT_ACTIONABLE_NOTICE =
   'This offer can no longer be changed here, so the retailer update cannot be applied. You can still dismiss it.';
-
-function Lines({ lines }: { lines: string[] }) {
-  return (
-    <ul className="space-y-1">
-      {lines.map((line, index) => (
-        <li key={`${index}-${line}`} className="whitespace-pre-wrap break-words">
-          {line}
-        </li>
-      ))}
-    </ul>
-  );
-}
+const CHANGED_NOTICE =
+  "The offer or the retailer's update changed while you were looking. This is the latest: compare it again.";
+const DIRTY_NOTICE =
+  'Save or discard your changes first: applying uses the saved version of the offer.';
+const RELOADING_NOTICE = 'Loading the saved version of the offer.';
+const WRITING_NOTICE = 'Another change is being saved. Wait for it to finish.';
 
 /**
  * The retailer's proposal beside the current content, and the two things an editor can do with it: apply it
- * (through the normal edit path) or dismiss it (after a confirmation). Each changed field is a group with two
- * labelled regions, Current and Proposed, that stack below 640px, so the comparison reads the same on a phone and
- * with a screen reader; a field that did not change is only named. The buttons act on the saved offer, so they
- * wait (aria-disabled, which keeps focus) while the form beside them holds unsaved edits, while a save reloads and
- * while a write runs.
+ * (through the normal edit path) or dismiss it. Each changed field is a group with two labelled regions, Current
+ * and Proposed, that stack below 640px, so the comparison reads the same on a phone and with a screen reader; a
+ * field that did not change is only named. Dismissing, and applying to a live offer (which changes the public page
+ * at once), ask first; applying to a draft is one press.
+ *
+ * The buttons act on the saved offer, so they wait (aria-disabled, which keeps focus, with the reason attached)
+ * while the form beside them holds unsaved edits, while a save reloads and while any write on the page runs. A
+ * failure stays on the page as an alert, because a toast is gone after a few seconds.
  *
  * The component stays mounted when nothing is waiting any more: after a write the buttons disappear, so a stable
  * paragraph takes their place and receives the focus the button held (otherwise focus would fall to the page body).
@@ -67,20 +61,25 @@ export function PartnerUpdateReview({
   actionable,
   live,
 }: PartnerUpdateReviewProps) {
-  const { apply, dismiss, isPending } = usePartnerUpdate();
+  const { apply, dismiss, isPending, failure } = usePartnerUpdate();
   const dirty = useFormDirty();
   const reloading = useFormBusy();
-  const [confirming, setConfirming] = useState(false);
+  const { changed: offerChanged, writing } = useOfferReview();
+  const [confirming, setConfirming] = useState<Pending | null>(null);
   const [attempted, setAttempted] = useState(false);
   const applyRef = useRef<HTMLButtonElement>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
   const doneRef = useRef<HTMLParagraphElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const keepFocusHere = useRef(false);
+  const statusId = useId();
   const waiting = pendingHash !== null;
-  const blocked = isPending || dirty || reloading;
+  const blocked = isPending || writing || dirty || reloading;
   const changed = rows.filter((row) => row.changed);
-  const unchanged = rows.filter((row) => !row.changed);
+  const unchanged = rows.filter((row) => !row.changed && row.note === undefined);
+  // The confirmation belongs to the proposal it was opened for: a different one closes it.
+  const open = (kind: Pending['kind']): boolean =>
+    confirming !== null && confirming.kind === kind && confirming.hash === pendingHash;
 
   useEffect(() => {
     if (!keepFocusHere.current) return;
@@ -90,22 +89,41 @@ export function PartnerUpdateReview({
     (applyRef.current ?? dismissRef.current ?? doneRef.current)?.focus();
   }, [reviewToken, waiting]);
 
-  function onApply(): void {
+  useEffect(() => {
+    // A refused write leaves the buttons where they are: nothing is left to move focus back to later.
+    if (failure !== null) keepFocusHere.current = false;
+  }, [failure]);
+
+  function send(kind: Pending['kind']): void {
+    setConfirming(null);
     if (blocked || pendingHash === null) return;
     keepFocusHere.current = true;
     setAttempted(true);
-    apply(offerId, offerTitle, reviewToken, pendingHash);
+    (kind === 'apply' ? apply : dismiss)(offerId, offerTitle, reviewToken, pendingHash);
   }
 
-  function onConfirmDismiss(): void {
-    setConfirming(false);
-    if (pendingHash === null) return;
-    keepFocusHere.current = true;
-    setAttempted(true);
-    dismiss(offerId, offerTitle, reviewToken, pendingHash);
+  function ask(kind: Pending['kind']): void {
+    if (blocked || pendingHash === null) return;
+    if (kind === 'apply' && !live) send('apply');
+    else setConfirming({ kind, hash: pendingHash });
   }
 
   if (!waiting && !attempted) return null;
+
+  const statusText = isPending
+    ? `Updating ${offerTitle}`
+    : writing
+      ? WRITING_NOTICE
+      : dirty
+        ? DIRTY_NOTICE
+        : reloading
+          ? RELOADING_NOTICE
+          : '';
+  const heldProps = {
+    className: ARIA_DISABLED_STYLE,
+    'aria-disabled': blocked || undefined,
+    'aria-describedby': blocked ? statusId : undefined,
+  };
 
   return (
     <section
@@ -123,6 +141,7 @@ export function PartnerUpdateReview({
       <h2 id="partner-update-heading" className="text-base font-semibold">
         Retailer update
       </h2>
+      {offerChanged ? <p className="text-sm font-medium">{CHANGED_NOTICE}</p> : null}
       {waiting ? (
         <>
           <p className="text-sm text-muted-foreground">
@@ -131,32 +150,20 @@ export function PartnerUpdateReview({
             apply the update or dismiss it. An offer that has already ended keeps its end date
             unless the update gives a new one in the future.
           </p>
+          {live && actionable ? (
+            <p className="text-sm font-medium">
+              Applying changes the published page straight away.
+            </p>
+          ) : null}
           {changed.length === 0 ? (
             <p className="text-sm">
               Nothing in the update differs from the offer as it is now. Dismiss it to clear the
               review queue.
             </p>
           ) : (
-            <ul className="space-y-3">
-              {changed.map((row) => (
-                <li key={row.key} className="space-y-2 rounded-lg border p-3 text-sm">
-                  <h3 className="font-medium">{row.label}</h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div role="group" aria-label={`${row.label}, current`} className="space-y-1">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Current</p>
-                      <Lines lines={row.current} />
-                    </div>
-                    <div role="group" aria-label={`${row.label}, proposed`} className="space-y-1">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">
-                        Proposed
-                      </p>
-                      <Lines lines={row.proposed} />
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <ChangedFields rows={changed} />
           )}
+          <NotAppliedNotes rows={rows} />
           {unchanged.length > 0 ? (
             <p className="text-sm text-muted-foreground">
               Not changed: {unchanged.map((row) => row.label).join(', ')}.
@@ -165,27 +172,23 @@ export function PartnerUpdateReview({
           {actionable ? null : (
             <p className="text-sm text-muted-foreground">{NOT_ACTIONABLE_NOTICE}</p>
           )}
+          {failure === null ? null : (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              {failure}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {actionable ? (
-              <Button
-                ref={applyRef}
-                type="button"
-                className={ARIA_DISABLED_STYLE}
-                aria-disabled={blocked || undefined}
-                onClick={onApply}
-              >
-                Apply retailer update
+              <Button ref={applyRef} type="button" {...heldProps} onClick={() => ask('apply')}>
+                {live ? 'Apply to the published offer' : 'Apply retailer update'}
               </Button>
             ) : null}
             <Button
               ref={dismissRef}
               type="button"
               variant="outline"
-              className={ARIA_DISABLED_STYLE}
-              aria-disabled={blocked || undefined}
-              onClick={() => {
-                if (!blocked) setConfirming(true);
-              }}
+              {...heldProps}
+              onClick={() => ask('dismiss')}
             >
               Dismiss retailer update
             </Button>
@@ -196,35 +199,40 @@ export function PartnerUpdateReview({
           The retailer update has been dealt with.
         </p>
       )}
-      <p className="text-sm text-muted-foreground" role="status">
-        {isPending ? `Updating ${offerTitle}` : ''}
+      <p id={statusId} className="text-sm text-muted-foreground" role="status">
+        {statusText}
       </p>
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            (dismissRef.current ?? applyRef.current)?.focus();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Dismiss this retailer update?</DialogTitle>
-            <DialogDescription>
-              The update the retailer sent for{' '}
-              <span className="break-words font-medium">{offerTitle}</span> will be forgotten and
-              the offer leaves the review queue. Nothing on the offer is edited. If the retailer
-              sends different content later, it will be queued again.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={onConfirmDismiss}>
-              Dismiss update
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PartnerConfirmDialog
+        open={open('apply')}
+        onOpenChange={(next) => !next && setConfirming(null)}
+        title="Apply this retailer update to the published offer?"
+        description={
+          <>
+            This changes the published page for{' '}
+            <span className="font-medium [overflow-wrap:anywhere]">{offerTitle}</span> straight away
+            {changed.length > 0 ? `. Changed: ${changed.map((row) => row.label).join(', ')}` : ''}.
+          </>
+        }
+        confirmLabel="Apply update"
+        onConfirm={() => send('apply')}
+        onReturnFocus={() => applyRef.current?.focus()}
+      />
+      <PartnerConfirmDialog
+        open={open('dismiss')}
+        onOpenChange={(next) => !next && setConfirming(null)}
+        title="Dismiss this retailer update?"
+        description={
+          <>
+            The update the retailer sent for{' '}
+            <span className="font-medium [overflow-wrap:anywhere]">{offerTitle}</span> will be
+            forgotten and the offer leaves the review queue. Nothing on the offer is edited. If the
+            retailer sends different content later, it will be queued again.
+          </>
+        }
+        confirmLabel="Dismiss update"
+        onConfirm={() => send('dismiss')}
+        onReturnFocus={() => (dismissRef.current ?? applyRef.current)?.focus()}
+      />
     </section>
   );
 }

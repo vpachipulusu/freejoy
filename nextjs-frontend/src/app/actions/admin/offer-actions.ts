@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { logger } from '@/lib/logger';
-import { isCommercialBasis, offerFormSchema } from '@/lib/admin-catalogue/offer-schema';
+import {
+  isCommercialBasis,
+  offerEditSchema,
+  offerFormSchema,
+} from '@/lib/admin-catalogue/offer-schema';
 import {
   isOfferAction,
   isReviewedOfferAction,
@@ -22,16 +26,20 @@ import {
   type CatalogueActionResult,
 } from '@/lib/api/admin-catalogue-action';
 import {
+  applyErrorMessage,
   NO_PARTNER_UPDATE_MESSAGE,
   NO_SOURCE_CHANGE_MESSAGE,
   OFFER_CHANGED_MESSAGE,
   OFFER_NOT_FOUND_MESSAGE,
+  PARTNER_UPDATE_ARCHIVED_MESSAGE,
+  PARTNER_UPDATE_NOT_APPLICABLE_MESSAGE,
 } from '@/lib/api/admin-catalogue-errors';
 import {
   applyAdminOfferPartnerUpdate,
   createAdminOffer,
   dismissAdminOfferPartnerUpdate,
   dismissAdminOfferSourceChange,
+  fetchAdminOffer,
   patchAdminOffer,
   runAdminOfferAction,
   type OfferActionRequest,
@@ -101,13 +109,16 @@ export async function updateOfferAction(
 ): Promise<CatalogueActionResult<OfferWrittenData>> {
   return asAdmin(async () => {
     if (!resourceIdSchema.safeParse(offerId).success) return notFound(OFFER_NOT_FOUND_MESSAGE);
-    const parsed = offerFormSchema.safeParse(input);
+    // An offer's basis may be one nobody has chosen yet (a retailer's submission): it is then left out, not refused.
+    const parsed = offerEditSchema.safeParse(input);
     if (!parsed.success) return invalidForm(parsed.error);
 
     const token = reviewTokenSchema.safeParse(reviewToken);
     const result = await patchAdminOffer(
       offerId,
-      toUpdateOfferBody(parsed.data, token.success ? token.data : undefined)
+      toUpdateOfferBody(parsed.data, token.success ? token.data : undefined, {
+        basisOptional: true,
+      })
     );
     if (!result.success) {
       const refusal = failed(result, OFFER_NOT_FOUND_MESSAGE, 'Admin update offer failed');
@@ -264,6 +275,21 @@ export async function offerLifecycleAction(
 }
 
 type PartnerUpdateCall = typeof applyAdminOfferPartnerUpdate;
+type PartnerUpdateName = 'apply_partner_update' | 'dismiss_partner_update';
+
+/**
+ * What a 409 `illegal_transition` means for a retailer update. For a dismissal it is always "nothing waiting". For an
+ * apply the API gives the same answer for an archived offer (which only allows dismissing), so the offer is read
+ * to tell the two apart; when it cannot be read the message claims neither.
+ */
+async function illegalTransitionMessage(name: PartnerUpdateName, offerId: string): Promise<string> {
+  if (name === 'dismiss_partner_update') return NO_PARTNER_UPDATE_MESSAGE;
+  const offer = await fetchAdminOffer(offerId);
+  if (!offer.success) return PARTNER_UPDATE_NOT_APPLICABLE_MESSAGE;
+  return offer.data.status === 'ARCHIVED'
+    ? PARTNER_UPDATE_ARCHIVED_MESSAGE
+    : NO_PARTNER_UPDATE_MESSAGE;
+}
 
 /**
  * The shared body of applying or dismissing a retailer's update: the id, the review token and the proposal hash
@@ -272,7 +298,7 @@ type PartnerUpdateCall = typeof applyAdminOfferPartnerUpdate;
  * pages. `publicToo` also refreshes the public catalogue: applying edits what a live offer says.
  */
 async function partnerUpdateAction(
-  name: 'apply_partner_update' | 'dismiss_partner_update',
+  name: PartnerUpdateName,
   call: PartnerUpdateCall,
   offerId: string,
   reviewToken: string | undefined,
@@ -299,9 +325,10 @@ async function partnerUpdateAction(
       }
       if (result.code === 'illegal_transition') {
         refreshAdminPages(offerId);
-        return { success: false, error: NO_PARTNER_UPDATE_MESSAGE };
+        return { success: false, error: await illegalTransitionMessage(name, offerId) };
       }
-      return refusal;
+      const specific = name === 'apply_partner_update' ? applyErrorMessage(result) : undefined;
+      return specific === undefined ? refusal : { success: false, error: specific };
     }
 
     refreshAdminPages(offerId);

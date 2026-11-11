@@ -21,6 +21,8 @@ import {
   type MerchantFormValues,
 } from '@/lib/admin-catalogue/merchant-schema';
 import {
+  applyAdminOfferPartnerUpdate,
+  dismissAdminOfferPartnerUpdate,
   fetchAdminOffer,
   dismissAdminOfferSourceChange,
   fetchAdminOffers,
@@ -75,6 +77,7 @@ const PROVENANCE = {
 };
 
 const MARKER = '2026-02-05T09:00:00.123456Z';
+const HASH = 'a'.repeat(64);
 
 const OFFER_OUT = {
   ...OFFER_SUMMARY,
@@ -220,6 +223,40 @@ describe('admin catalogue wrappers', () => {
         expect(result).toMatchObject({ success: false, status: 409, code });
       }
     );
+
+    it.each([
+      ['apply', applyAdminOfferPartnerUpdate, '/v1/admin/offers/o1/apply-partner-update'],
+      ['dismiss', dismissAdminOfferPartnerUpdate, '/v1/admin/offers/o1/dismiss-partner-update'],
+    ] as const)(
+      'posts the %s of a retailer update to its own route with the review token and the proposal hash',
+      async (_name, call, path) => {
+        fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
+
+        const result = await call('o1', 'tok-1', HASH);
+
+        const sent = fetchMock.mock.calls[0][0];
+        expect(sent.method).toBe('POST');
+        expect(new URL(sent.url).pathname).toBe(path);
+        expect(await sent.json()).toEqual({ review_token: 'tok-1', pending_hash: HASH });
+        expect(sent.headers.get('X-Session-Token')).toBe('firebase-session-cookie');
+        expect(sent.headers.get('X-Internal-Key')).toBe('server-key');
+        expect(result.success).toBe(true);
+      }
+    );
+
+    it.each([
+      [409, 'offer_changed'],
+      [409, 'illegal_transition'],
+      [403, 'permission_denied'],
+      [422, 'invalid_pending_payload'],
+      [422, 'destination_not_allowed'],
+    ])('hands the %s %s code back from applying a retailer update', async (status, code) => {
+      fetchMock.mockResolvedValue(jsonResponse({ success: false, error: 'words', code }, status));
+
+      const result = await applyAdminOfferPartnerUpdate('o1', 'old', HASH);
+
+      expect(result).toMatchObject({ success: false, status, code });
+    });
 
     it('reads one offer by id', async () => {
       fetchMock.mockResolvedValue(jsonResponse({ success: true, data: OFFER_OUT }));
@@ -391,6 +428,50 @@ describe('admin catalogue wrappers', () => {
       });
     });
 
+    it('maps the retailer submission of a partner offer, with and without a waiting update', () => {
+      const partner = {
+        ref: 'sku-1',
+        merchant_id: 'm1',
+        merchant_name: 'Acme Ltd',
+        submitted_at: '2026-02-01T09:00:00Z',
+        pending: null,
+      };
+      const pending = {
+        hash: HASH,
+        submitted_at: '2026-02-05T09:00:00Z',
+        payload: { title: 'Retailer title', steps: [] },
+      };
+
+      expect(
+        toOfferDetail({ ...OFFER_OUT, partner_submission: partner } as never).partnerSubmission
+      ).toEqual({
+        ref: 'sku-1',
+        merchantId: 'm1',
+        merchantName: 'Acme Ltd',
+        submittedAt: '2026-02-01T09:00:00Z',
+        pending: null,
+      });
+      expect(
+        toOfferDetail({ ...OFFER_OUT, partner_submission: { ...partner, pending } } as never)
+          .partnerSubmission?.pending
+      ).toEqual({
+        hash: HASH,
+        submittedAt: '2026-02-05T09:00:00Z',
+        payload: { title: 'Retailer title', steps: [] },
+      });
+      expect(toOfferDetail(OFFER_OUT as never).partnerSubmission).toBeNull();
+    });
+
+    it('maps whether the basis is only a placeholder, and treats an absent flag as no', () => {
+      expect(
+        toOfferDetail({ ...OFFER_OUT, basis_is_placeholder: true } as never).basisIsPlaceholder
+      ).toBe(true);
+      expect(
+        toOfferDetail({ ...OFFER_OUT, basis_is_placeholder: false } as never).basisIsPlaceholder
+      ).toBe(false);
+      expect(toOfferDetail(OFFER_OUT as never).basisIsPlaceholder).toBe(false);
+    });
+
     it('keeps an unknown status as UNKNOWN instead of guessing a draft', () => {
       expect(toOfferRow({ ...OFFER_SUMMARY, status: 'SOMETHING_NEW' } as never).status).toBe(
         'UNKNOWN'
@@ -426,6 +507,21 @@ describe('admin catalogue wrappers', () => {
       const values = offerForm({ commercialBasis: 'SPONSORED' });
       expect(toCreateOfferBody(values).commercial_basis).toBe('SPONSORED');
       expect(toUpdateOfferBody(values).commercial_basis).toBe('SPONSORED');
+    });
+
+    it('leaves an unchosen basis out of an update only when told it may be, never out of a create', () => {
+      const unchosen = offerForm({ commercialBasis: '' });
+
+      const body = toUpdateOfferBody(unchosen, 'tok-1', { basisOptional: true });
+
+      expect('commercial_basis' in body).toBe(false);
+      expect(body.review_token).toBe('tok-1');
+      expect(() => toCreateOfferBody(unchosen)).toThrow('commercial basis was not chosen');
+      expect(
+        toUpdateOfferBody(offerForm({ commercialBasis: 'AFFILIATE' }), undefined, {
+          basisOptional: true,
+        }).commercial_basis
+      ).toBe('AFFILIATE');
     });
 
     it('refuses to build a body for a form that skipped validation and has no basis', () => {

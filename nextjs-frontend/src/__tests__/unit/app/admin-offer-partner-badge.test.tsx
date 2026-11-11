@@ -4,15 +4,18 @@ import { OfferImportBadge } from '@/app/(admin)/admin/offers/_components/offer-i
 import { toOfferRow } from '@/lib/api/admin-offers';
 
 describe('the offers list badge for a retailer submission', () => {
-  it('says "Submitted by retailer" with the ref', () => {
+  it('says only "Submitted by retailer" in the pill, with the ref in an element of its own', () => {
     render(<OfferImportBadge importProvider="partner" sourceChangedAt={null} partnerRef="sku-1" />);
 
-    expect(screen.getByTestId('offer-import-badge')).toHaveTextContent(
-      'Submitted by retailer · ref sku-1'
-    );
+    const pill = screen.getByTestId('offer-import-badge');
+    expect(pill).toHaveTextContent(/^Submitted by retailer$/);
+    const ref = screen.getByTestId('offer-partner-ref');
+    expect(ref).toHaveTextContent('Ref sku-1');
+    expect(pill).not.toContainElement(ref);
+    expect(ref).toHaveClass('text-muted-foreground', '[overflow-wrap:anywhere]');
   });
 
-  it('says an update is waiting when the marker is set', () => {
+  it('says only "Retailer update waiting" in the pill when the marker is set', () => {
     render(
       <OfferImportBadge
         importProvider="partner"
@@ -21,7 +24,16 @@ describe('the offers list badge for a retailer submission', () => {
       />
     );
 
-    expect(screen.getByTestId('offer-import-badge')).toHaveTextContent('Retailer update waiting');
+    expect(screen.getByTestId('offer-import-badge')).toHaveTextContent(/^Retailer update waiting$/);
+    expect(screen.getByTestId('offer-partner-ref')).toHaveTextContent('Ref sku-1');
+  });
+
+  it('keeps a 64-character ref out of the pill, which cannot wrap', () => {
+    const ref64 = 'r'.repeat(64);
+    render(<OfferImportBadge importProvider="partner" sourceChangedAt={null} partnerRef={ref64} />);
+
+    expect(screen.getByTestId('offer-import-badge')).not.toHaveTextContent(ref64);
+    expect(screen.getByTestId('offer-partner-ref')).toHaveTextContent(ref64);
   });
 
   it('works without a ref and leaves the Awin badges alone', () => {
@@ -29,9 +41,14 @@ describe('the offers list badge for a retailer submission', () => {
       <OfferImportBadge importProvider="partner" sourceChangedAt={null} />
     );
     expect(screen.getByTestId('offer-import-badge')).toHaveTextContent(/^Submitted by retailer$/);
+    expect(screen.queryByTestId('offer-partner-ref')).not.toBeInTheDocument();
 
     rerender(<OfferImportBadge importProvider="awin" sourceChangedAt={null} />);
     expect(screen.getByTestId('offer-import-badge')).toHaveTextContent('Imported');
+    expect(screen.queryByTestId('offer-partner-ref')).not.toBeInTheDocument();
+
+    rerender(<OfferImportBadge importProvider="awin" sourceChangedAt="2026-02-05T00:00:00Z" />);
+    expect(screen.getByTestId('offer-import-badge')).toHaveTextContent('Source changed');
   });
 
   it('maps the ref of a list row', () => {
