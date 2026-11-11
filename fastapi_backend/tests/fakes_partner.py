@@ -112,6 +112,8 @@ class FakeClickStore:
     def __init__(self) -> None:
         self.offers_by_id: list[FakeOffer] = []
         self.calls: list[tuple[Any, ...]] = []
+        # An error to raise from ``offers``, as a database that cannot answer would.
+        self.error: Exception | None = None
 
     def add(
         self,
@@ -138,6 +140,8 @@ class FakeClickStore:
         self, merchant_id: str, start: datetime, end: datetime, limit: int
     ) -> PartnerOfferPage:
         self.calls.append(("offers", merchant_id, start, end, limit))
+        if self.error is not None:
+            raise self.error
         mine = [o for o in self.offers_by_id if o.merchant_id == merchant_id]
         ranked = sorted(
             mine,

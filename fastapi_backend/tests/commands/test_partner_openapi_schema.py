@@ -49,7 +49,7 @@ def test_paths_are_written_as_a_retailer_calls_them() -> None:
 
     schema = partner_openapi_schema(api)
 
-    real = list(partner_openapi_schema(create_partner_api())["paths"])
+    real = list(json.loads(PARTNER_SCHEMA.read_text(encoding="utf-8"))["paths"])
     assert "/partner/v1/me" in real
     assert list(schema["paths"]) == [*real, "/partner/v1/things/{thing_id}"]
     assert all(path.startswith(f"{PARTNER_PREFIX}/") for path in schema["paths"])
@@ -112,9 +112,7 @@ def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -
     raw = target.read_bytes()
     assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert list(json.loads(raw)["paths"]) == list(
-        partner_openapi_schema(create_partner_api())["paths"]
-    )
+    assert json.loads(raw) == json.loads(PARTNER_SCHEMA.read_text(encoding="utf-8"))
 
 
 def test_the_committed_partner_schema_is_what_the_generator_writes(
@@ -183,3 +181,26 @@ def test_the_check_fails_when_the_frontend_copy_differs_or_is_missing(
 
         assert checker.main() == 1
         assert "partner-openapi.json is missing or differs" in capsys.readouterr().out
+
+
+def test_the_public_document_has_retailer_facing_wording_only() -> None:
+    text = PARTNER_SCHEMA.read_text(encoding="utf-8")
+    schema = json.loads(text)
+
+    for internal in (
+        "proves the whole path",
+        "the database or a limiter",
+        "documents the runtime envelope",
+        "Rate limiter unavailable",
+        "runtime envelope",
+    ):
+        assert internal not in text, internal
+    assert "ErrorResponse" not in schema["components"]["schemas"]
+    for name in ("PartnerErrorResponse", "PartnerRangeErrorResponse"):
+        assert schema["components"]["schemas"][name]["description"]
+    for path in schema["paths"].values():
+        for operation in path.values():
+            assert operation["description"]
+            assert operation["responses"]["503"]["description"].startswith(
+                "Service temporarily unavailable. Try again"
+            )

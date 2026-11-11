@@ -19,7 +19,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 
 from app.core.click_retention import CLICK_RETENTION_DAYS, earliest_complete_date
-from app.core.rate_limit import OUTBOUND_OFFER_POLICY
 from app.partner.clicks_store import (
     PartnerDayClicks,
     PartnerOffer,
@@ -31,17 +30,17 @@ MAX_OFFERS = 100
 MIN_DATE = date(2000, 1, 1)
 MAX_DATE = date(2999, 12, 31)
 
-# One fixed text for every caller. The cap is read from the policy the click endpoint enforces, so the sentence
-# cannot say a number the code no longer uses (the committed partner schema carries this text, and its freshness
-# check fails when it changes).
+# One fixed text for every caller. It states no figure about how clicks are recorded: recording is rate limited, and
+# the figure belongs in the internal docs, tied to the code by ``tests/api/partner/test_partner_click_text.py``. The
+# retention period is read from the code that deletes the rows, so the sentence cannot name a number the job no
+# longer uses (the committed partner schema carries this text, and its freshness check fails when it changes).
 CLICK_DEFINITION = (
     "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, "
     "and it does not count different people: a person who clicks twice counts twice. Clicks from visitors "
-    "identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is "
-    f"limited to {OUTBOUND_OFFER_POLICY.limit} clicks for one offer in a minute: past that a visitor is still "
-    "sent on but the click is not recorded, so a very busy minute is undercounted. Click records are deleted "
-    f"after {CLICK_RETENTION_DAYS} days, so an earlier day can be incomplete. Counts only: Freejoy keeps no "
-    "visitor identity."
+    "identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is rate "
+    "limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. "
+    f"Click records are deleted after {CLICK_RETENTION_DAYS} days, so an earlier day can be incomplete. Counts "
+    "only: Freejoy keeps no visitor identity."
 )
 
 

@@ -2,8 +2,9 @@
 
 The merchant is the one the key was issued to (``PartnerContext``); there is no merchant or offer parameter, so a
 key cannot name another merchant's data and there is nothing to probe. Authentication and the per-key read limit
-(``PARTNER_READ_POLICY``) are applied by the surface before routing, so nothing is added per route here, and the
-surface sets ``Cache-Control: no-store, private`` on every response, this route's own errors included.
+(``PARTNER_READ_POLICY``) are applied by the surface before routing. This route adds one lower limit of its own
+(``PARTNER_CLICKS_POLICY``, a dependency), because it is the one read that aggregates over many rows. The surface
+sets ``Cache-Control: no-store, private`` on every response, this route's own errors included.
 
 The response is narrower than the admin report on purpose: no internal merchant or offer id, no bot count, no
 count of offers. Offers are named by title, public slug and public URL, and only listed offers (published or
@@ -15,7 +16,7 @@ import logging
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from starlette.responses import Response
@@ -24,11 +25,13 @@ from app.core.click_retention import CLICK_RETENTION_DAYS
 from app.core.config import settings
 from app.core.errors import (
     CodedHTTPException,
-    ErrorResponse,
     error_response,
     validation_exception_handler,
 )
 from app.core.iso_day import IsoDay
+from app.core.rate_limit import PARTNER_CLICKS_POLICY
+from app.core.rate_limit_enforcement import enforce_rate_limit
+from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner.auth import PartnerContextDep
 from app.partner.clicks_report import (
     CLICK_DEFINITION,
@@ -42,24 +45,20 @@ from app.partner.clicks_report import (
     PartnerClickReportService,
 )
 from app.partner.deps import ClickStoreDep
+from app.partner.error_models import PartnerRangeErrorResponse
 
 logger = logging.getLogger("yourapp.partner")
 router = APIRouter()
 
 INVALID_RANGE_CODE = "invalid_range"
+CLICKS_PATH = "/clicks"
 # One text for every refusal of ``from`` or ``to`` (missing, not a real YYYY-MM-DD date, reversed, too long, out of
 # bounds). It states the rule and never repeats what the caller sent.
 RANGE_MESSAGE = (
-    "Send from and to as dates written YYYY-MM-DD, with from on or before to, "
-    f"at most {MAX_RANGE_DAYS} days apart (both included) and between {MIN_DATE.year} and {MAX_DATE.year}"
+    "Send from and to once each, as dates written YYYY-MM-DD, with from on or before to, "
+    f"covering at most {MAX_RANGE_DAYS} days (both days included) and between {MIN_DATE.year} and {MAX_DATE.year}"
 )
 RANGE_PARAMETERS = (("query", "from"), ("query", "to"))
-
-
-class PartnerErrorResponse(ErrorResponse):
-    """An error body that may carry a stable machine-readable ``code`` (only ``invalid_range`` today)."""
-
-    code: Literal["invalid_range"] | None = None
 
 
 class ClickDay(BaseModel):
@@ -109,6 +108,7 @@ class ClicksResponse(BaseModel):
 
 
 def offer_url(slug: str) -> str:
+    """The offer's public page. ``PUBLIC_SITE_URL`` is an origin; a trailing slash is tolerated."""
     return f"{settings.PUBLIC_SITE_URL.rstrip('/')}/freebies/{quote(slug, safe='')}"
 
 
@@ -146,19 +146,46 @@ def refused_range() -> Response:
 async def partner_validation_handler(
     request: Request, exc: RequestValidationError
 ) -> Response:
-    """The shared 422 (``Invalid request``), except that every problem with ``from`` or ``to`` gets the one range text.
+    """The shared 422 (``Invalid request``), except that every problem with ``from`` or ``to`` of THIS route gets
+    the one range text. Another partner route that takes a query parameter of the same name keeps the shared text.
 
     Nothing the caller sent is echoed: the answer is built from fixed text and ignores the error details.
     """
-    if exc.errors() and all(
-        tuple(error["loc"]) in RANGE_PARAMETERS for error in exc.errors()
+    route = request.scope.get("route")
+    if (
+        getattr(route, "path", None) == CLICKS_PATH
+        and exc.errors()
+        and all(tuple(error["loc"]) in RANGE_PARAMETERS for error in exc.errors())
     ):
         return refused_range()
     return await validation_exception_handler(request, exc)
 
 
+async def limit_clicks(request: Request, context: PartnerContextDep) -> None:
+    """The clicks budget of this key, on top of the read limit the surface applied (429, or 503 when the limiter is down).
+
+    Every request to the route counts, a refused range included: the budget is for the route, not for the answer.
+    The headers of a success are left alone (only a 429 carries ``X-RateLimit-*``), so the helper gets a throwaway
+    response.
+    """
+    await enforce_rate_limit(
+        request,
+        Response(),
+        get_rate_limiter(),
+        PARTNER_CLICKS_POLICY,
+        [f"{PARTNER_CLICKS_POLICY.scope}:key:{context.key_id}"],
+    )
+
+
+async def refuse_repeated_range_parameters(request: Request) -> None:
+    """``from`` and ``to`` must each appear exactly once: a repeated one is refused, not resolved to the last."""
+    query = request.query_params
+    if len(query.getlist("from")) > 1 or len(query.getlist("to")) > 1:
+        raise CodedHTTPException(422, RANGE_MESSAGE, INVALID_RANGE_CODE)
+
+
 @router.get(
-    "/clicks",
+    CLICKS_PATH,
     response_model=ClicksResponse,
     operation_id="partner-clicks",
     summary="Clicks on your offers, per offer per day",
@@ -168,9 +195,10 @@ async def partner_validation_handler(
         f"At most {MAX_OFFERS} offers are returned, busiest first. "
         f"{CLICK_DEFINITION}"
     ),
+    dependencies=[Depends(limit_clicks), Depends(refuse_repeated_range_parameters)],
     responses={
         422: {
-            "model": PartnerErrorResponse,
+            "model": PartnerRangeErrorResponse,
             "description": f"Invalid request. A refused range has the code `{INVALID_RANGE_CODE}`.",
         }
     },

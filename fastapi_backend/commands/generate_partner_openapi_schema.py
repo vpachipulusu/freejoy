@@ -2,13 +2,12 @@
 
 This is the retailer-facing contract. It is a separate file from ``nextjs-frontend/openapi.json``
 (the internal contract the generated client is built from), which must never contain a
-``/partner`` path. It lives under ``docs/`` because nothing in the frontend consumes it and
-the contract is what gets shared with retailers. Every path is written as it is called
-(``/partner/v1/...``).
+``/partner`` path. The committed copy lives under ``docs/`` because it is what gets shared with
+retailers. Every path is written as it is called (``/partner/v1/...``).
 
-The same bytes are also written to ``nextjs-frontend/public/partner-openapi.json``, the copy the public
-documentation page offers for download (FREEJ-59). The default run writes both; the frontend test and
-``commands.check_partner_openapi_schema`` fail when they differ.
+The same bytes are also written to ``nextjs-frontend/public/partner-openapi.json`` (FREEJ-59): the public
+documentation page is built from that copy at build time and offers it for download. The default run writes both;
+the frontend test and ``commands.check_partner_openapi_schema`` fail when they differ.
 """
 
 import json

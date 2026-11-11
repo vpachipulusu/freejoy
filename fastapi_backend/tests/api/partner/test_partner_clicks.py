@@ -12,7 +12,7 @@ from datetime import date
 import pytest
 
 from app.core.config import settings
-from app.core.rate_limit import PARTNER_READ_POLICY
+from app.core.rate_limit import PARTNER_CLICKS_POLICY, PARTNER_READ_POLICY
 from app.main import app
 from app.partner.clicks_report import CLICK_DEFINITION, MAX_OFFERS
 from app.partner.clicks_routes import INVALID_RANGE_CODE, RANGE_MESSAGE
@@ -43,8 +43,9 @@ async def get_clicks(
 
 
 async def test_it_returns_the_days_of_each_offer_busiest_first(
-    world: PartnerWorld,
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(settings, "PUBLIC_SITE_URL", "https://freejoy.test/")
     world.clicks.add(MERCHANT_ID, "quiet", {date(2026, 3, 2): 1})
     world.clicks.add(
         MERCHANT_ID, "busy", {date(2026, 3, 1): 4, date(2026, 3, 3): 2}, title="Busy"
@@ -58,7 +59,7 @@ async def test_it_returns_the_days_of_each_offer_busiest_first(
     assert data["offers"][0] == {
         "title": "Busy",
         "slug": "busy",
-        "url": f"{settings.PUBLIC_SITE_URL.rstrip('/')}/freebies/busy",
+        "url": "https://freejoy.test/freebies/busy",
         "total_clicks": 6,
         "days": [
             {"date": "2026-03-01", "clicks": 4},
@@ -114,15 +115,18 @@ async def test_the_definition_is_the_one_fixed_text(world: PartnerWorld) -> None
 
 def test_the_definition_says_only_what_the_code_does() -> None:
     from app.core.click_retention import CLICK_RETENTION_DAYS
-    from app.core.rate_limit import OUTBOUND_OFFER_POLICY
 
     assert "not a sale" in CLICK_DEFINITION
     assert "clicks twice counts twice" in CLICK_DEFINITION
-    assert f"{OUTBOUND_OFFER_POLICY.limit} clicks for one offer in a minute" in (
-        CLICK_DEFINITION
-    )
     assert f"{CLICK_RETENTION_DAYS} days" in CLICK_DEFINITION
     assert "UTC" in CLICK_DEFINITION
+    # Recording is rate limited, and the public text says so without a figure or a description of the limiter.
+    assert "rate limited for each offer" in CLICK_DEFINITION
+    assert "some clicks are not recorded" in CLICK_DEFINITION
+    assert not any(
+        ch.isdigit() for ch in CLICK_DEFINITION.replace(str(CLICK_RETENTION_DAYS), "")
+    )
+    assert "still sent on" not in CLICK_DEFINITION
 
 
 async def test_the_merchant_is_the_keys_and_never_the_request(
@@ -183,20 +187,92 @@ async def test_at_most_a_hundred_offers_are_read_and_the_cut_is_reported(
     assert world.clicks.calls[0][4] == MAX_OFFERS
 
 
-async def test_a_read_is_counted_once_under_the_read_policy(
+READ_HIT = (f"partner_read:key:{KEY_ID}", PARTNER_READ_POLICY)
+CLICKS_HIT = (f"partner_clicks:key:{KEY_ID}", PARTNER_CLICKS_POLICY)
+
+
+async def test_a_read_is_counted_once_under_the_read_policy_and_once_under_the_clicks_policy(
     world: PartnerWorld,
 ) -> None:
-    await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
 
-    assert world.limiter.hits == [(f"partner_read:key:{KEY_ID}", PARTNER_READ_POLICY)]
+    assert world.limiter.hits == [READ_HIT, CLICKS_HIT]
+    assert "x-ratelimit-limit" not in response.header_names()
 
 
-async def test_a_refused_range_is_counted_under_the_read_policy_too(
+async def test_a_refused_range_is_counted_under_both_policies_too(
     world: PartnerWorld,
 ) -> None:
     await get_clicks(world, "from=2026-03-02&to=2026-03-01")
 
-    assert world.limiter.hits == [(f"partner_read:key:{KEY_ID}", PARTNER_READ_POLICY)]
+    assert world.limiter.hits == [READ_HIT, CLICKS_HIT]
+
+
+def test_the_clicks_policy_is_twenty_a_minute_per_key_and_fails_closed() -> None:
+    assert PARTNER_CLICKS_POLICY.scope == "partner_clicks"
+    assert (PARTNER_CLICKS_POLICY.limit, PARTNER_CLICKS_POLICY.window_seconds) == (
+        20,
+        60,
+    )
+    assert PARTNER_CLICKS_POLICY.fail_closed is True
+
+
+async def test_the_twenty_first_read_in_a_minute_is_a_429_and_reads_nothing(
+    world: PartnerWorld,
+) -> None:
+    world.clicks.add(MERCHANT_ID, "soap", {date(2026, 3, 1): 1})
+    for _ in range(PARTNER_CLICKS_POLICY.limit):
+        assert (await get_clicks(world, "from=2026-03-01&to=2026-03-02")).status == 200
+    reads_before = len(world.clicks.calls)
+
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    assert response.status == 429
+    assert response.json() == {"success": False, "error": "Too many requests"}
+    assert response.header("retry-after") is not None
+    assert response.header("cache-control") == "no-store, private"
+    assert len(world.clicks.calls) == reads_before
+
+
+async def test_the_clicks_budget_is_per_key_and_does_not_touch_me(
+    world: PartnerWorld,
+) -> None:
+    second = world.store.add(
+        key_id="secondkey0000000000000a1", merchant_id=OTHER_MERCHANT
+    )
+    for _ in range(PARTNER_CLICKS_POLICY.limit + 1):
+        await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    other = await call_raw(
+        app,
+        "GET",
+        CLICKS,
+        headers=world.headers(second),
+        query_string="from=2026-03-01&to=2026-03-02",
+    )
+    me = await call_raw(app, "GET", "/partner/v1/me", headers=world.headers())
+
+    assert other.status == 200
+    assert me.status == 200
+
+
+async def test_with_the_limiter_down_the_clicks_route_is_a_fixed_503_and_reads_nothing(
+    world: PartnerWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core import rate_limiter_provider
+    from tests.fakes import RaisingRateLimiter
+
+    monkeypatch.setattr(rate_limiter_provider, "_rate_limiter", RaisingRateLimiter())
+
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    assert response.status == 503
+    assert response.json() == {
+        "success": False,
+        "error": "Service temporarily unavailable",
+    }
+    assert response.header("retry-after") is not None
+    assert world.clicks.calls == []
 
 
 async def test_success_and_a_refused_range_are_no_store(world: PartnerWorld) -> None:
@@ -316,3 +392,160 @@ async def test_other_methods_are_not_allowed(world: PartnerWorld) -> None:
 
     assert response.status == 405
     assert json.loads(response.body)["error"] == "Method Not Allowed"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "from=2026-03-01&from=2026-03-01&to=2026-03-02",
+        "from=2026-03-01&to=2026-03-02&to=2026-03-02",
+        "from=2026-03-01&from=2026-03-02&to=2026-03-02",
+        "from=2026-03-01&to=2026-03-02&to=2026-03-03",
+    ],
+)
+async def test_a_repeated_from_or_to_is_refused_not_resolved_to_the_last(
+    world: PartnerWorld, query: str
+) -> None:
+    response = await get_clicks(world, query)
+
+    assert response.status == 422
+    assert response.json()["code"] == INVALID_RANGE_CODE
+    assert world.clicks.calls == []
+
+
+async def test_a_database_that_cannot_answer_is_the_fixed_503_with_retry_after(
+    world: PartnerWorld, caplog: pytest.LogCaptureFixture
+) -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    secret_sql = (
+        f"SELECT offers.id FROM offers WHERE offers.merchant_id = '{MERCHANT_ID}'"
+    )
+    world.clicks.error = DBAPIError(
+        secret_sql, {"merchant_id": MERCHANT_ID}, Exception("canceling statement")
+    )
+    caplog.set_level(logging.INFO)
+
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    assert response.status == 503
+    assert response.json() == {
+        "success": False,
+        "error": "Service temporarily unavailable",
+    }
+    assert response.header("retry-after") is not None
+    assert response.header("cache-control") == "no-store, private"
+    lines = [r for r in caplog.records if "database unavailable" in r.getMessage()]
+    assert [r.getMessage() for r in lines] == [
+        f"partner database unavailable: key_id={KEY_ID} error=DBAPIError"
+    ]
+    assert all(r.exc_info is None for r in lines)
+    assert MERCHANT_ID not in caplog.text
+    assert "SELECT" not in caplog.text
+    assert "canceling statement" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionRefusedError("refused"), TimeoutError("slow"), OSError("reset")],
+)
+async def test_an_operating_system_error_on_the_connection_is_the_same_503(
+    world: PartnerWorld, error: Exception
+) -> None:
+    world.clicks.error = error
+
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    assert response.status == 503
+    assert response.json()["error"] == "Service temporarily unavailable"
+
+
+async def test_the_partner_session_providers_own_refusals_are_the_same_503(
+    world: PartnerWorld,
+) -> None:
+    from app.core.database import PartnerDatabaseUnavailable, PartnerRoleNotRestricted
+
+    for error in (
+        PartnerDatabaseUnavailable("unset"),
+        PartnerRoleNotRestricted("too much"),
+    ):
+        world.clicks.error = error
+
+        response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+        assert response.status == 503
+
+
+async def test_a_bug_that_is_not_a_database_failure_is_still_a_500(
+    world: PartnerWorld,
+) -> None:
+    world.clicks.error = ValueError("a bug")
+
+    response = await get_clicks(world, "from=2026-03-01&to=2026-03-02")
+
+    assert response.status == 500
+    assert response.json() == {"success": False, "error": "Internal server error"}
+
+
+async def test_another_partner_route_with_from_and_to_parameters_keeps_the_shared_422(
+    world: PartnerWorld,
+) -> None:
+    from typing import Annotated
+
+    from fastapi import Query
+
+    from app.partner.app import create_partner_api, create_partner_authenticator
+    from app.partner.surface import PartnerSurface
+
+    api = create_partner_api()
+
+    @api.get("/other")
+    async def other(
+        first: Annotated[int, Query(alias="from")],
+        last: Annotated[int, Query(alias="to")],
+    ) -> dict[str, int]:  # pragma: no cover - never reached
+        return {"x": first + last}
+
+    surface = PartnerSurface(
+        api, enabled=lambda: True, authenticator=create_partner_authenticator()
+    )
+
+    response = await call_raw(
+        surface, "GET", "/other", headers=world.headers(), query_string="from=x&to=y"
+    )
+
+    assert response.status == 422
+    assert response.json() == {"success": False, "error": "Invalid request"}
+
+
+async def test_a_body_error_on_another_partner_route_keeps_the_shared_text(
+    world: PartnerWorld,
+) -> None:
+    from pydantic import BaseModel
+
+    from app.partner.app import create_partner_api, create_partner_authenticator
+    from app.partner.surface import PartnerSurface
+
+    class Item(BaseModel):
+        count: int
+
+    api = create_partner_api()
+
+    @api.post("/things")
+    async def create(item: Item) -> None:  # pragma: no cover - never reached
+        return None
+
+    surface = PartnerSurface(
+        api, enabled=lambda: True, authenticator=create_partner_authenticator()
+    )
+
+    body = await call_raw(
+        surface,
+        "POST",
+        "/things",
+        headers=[*world.headers(), ("content-type", "application/json")],
+        chunks=[b'{"count": "x"}'],
+    )
+
+    assert body.status == 422
+    assert body.json() == {"success": False, "error": "Invalid request"}

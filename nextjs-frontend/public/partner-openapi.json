@@ -8,7 +8,7 @@
     "/partner/v1/me": {
       "get": {
         "summary": "Who this key belongs to",
-        "description": "The merchant the key was issued to and the key's label. It changes nothing; it proves the whole path.",
+        "description": "Returns the name of the merchant your key was issued to and the label the key was given. It changes nothing: use it to check that your key and the address work.",
         "operationId": "partner-me",
         "responses": {
           "200": {
@@ -21,12 +21,32 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Invalid request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
                 }
               }
             }
@@ -36,37 +56,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, unknown, revoked or malformed key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable (the database or a limiter)",
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
                 }
               }
             }
@@ -82,7 +82,7 @@
     "/partner/v1/clicks": {
       "get": {
         "summary": "Clicks on your offers, per offer per day",
-        "description": "Outbound clicks on your merchant's published and ended offers over a range of UTC days, per offer and per day. The range is `from` to `to`, both included, written YYYY-MM-DD, at most 92 days. At most 100 offers are returned, busiest first. A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is limited to 600 clicks for one offer in a minute: past that a visitor is still sent on but the click is not recorded, so a very busy minute is undercounted. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity.",
+        "description": "Outbound clicks on your merchant's published and ended offers over a range of UTC days, per offer and per day. The range is `from` to `to`, both included, written YYYY-MM-DD, at most 92 days. At most 100 offers are returned, busiest first. A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity.",
         "operationId": "partner-clicks",
         "security": [
           {
@@ -132,8 +132,28 @@
               }
             }
           },
+          "401": {
+            "description": "Missing, unknown, revoked or malformed key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Invalid request. A refused range has the code `invalid_range`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerRangeErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Wait the number of seconds in the Retry-After header.",
             "content": {
               "application/json": {
                 "schema": {
@@ -147,37 +167,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, unknown, revoked or malformed key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable (the database or a limiter)",
+            "description": "Service temporarily unavailable. Try again after the number of seconds in the Retry-After header.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/PartnerErrorResponse"
                 }
               }
             }
@@ -311,7 +311,7 @@
             "title": "Definition",
             "description": "What a click is and is not, in plain words.",
             "examples": [
-              "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is limited to 600 clicks for one offer in a minute: past that a visitor is still sent on but the click is not recorded, so a very busy minute is undercounted. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity."
+              "A click is one visitor sent from Freejoy to the offer's destination. It is not a sale, a sign-up or a claim, and it does not count different people: a person who clicks twice counts twice. Clicks from visitors identified as automated are left out and nothing else is filtered. Days are UTC days. Recording is rate limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. Click records are deleted after 395 days, so an earlier day can be incomplete. Counts only: Freejoy keeps no visitor identity."
             ]
           }
         },
@@ -343,26 +343,6 @@
           "data"
         ],
         "title": "ClicksResponse"
-      },
-      "ErrorResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "const": false,
-            "title": "Success",
-            "default": false
-          },
-          "error": {
-            "type": "string",
-            "title": "Error"
-          }
-        },
-        "type": "object",
-        "required": [
-          "error"
-        ],
-        "title": "ErrorResponse",
-        "description": "Body of every error response (documents the runtime envelope in OpenAPI)."
       },
       "MeData": {
         "properties": {
@@ -410,7 +390,29 @@
           },
           "error": {
             "type": "string",
-            "title": "Error"
+            "title": "Error",
+            "description": "A short fixed message. Do not match on it: use the status."
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "PartnerErrorResponse",
+        "description": "The body of an error answer: a fixed message that never repeats anything you sent."
+      },
+      "PartnerRangeErrorResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false,
+            "title": "Success",
+            "default": false
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "A short fixed message. Do not match on it: use the status."
           },
           "code": {
             "anyOf": [
@@ -422,15 +424,16 @@
                 "type": "null"
               }
             ],
-            "title": "Code"
+            "title": "Code",
+            "description": "A code that does not change. Match on it, not on the message."
           }
         },
         "type": "object",
         "required": [
           "error"
         ],
-        "title": "PartnerErrorResponse",
-        "description": "An error body that may carry a stable machine-readable ``code`` (only ``invalid_range`` today)."
+        "title": "PartnerRangeErrorResponse",
+        "description": "The body of a refused date range: the fixed range message and a stable code."
       }
     },
     "securitySchemes": {

@@ -16,15 +16,28 @@ Differences from the admin report, all on purpose:
   exactly ``offers (id, merchant_id, title, slug, status)`` and ``click_events (offer_id, occurred_at,
   user_agent_class)``; ``test_partner_role_script.py`` ties the grants to the definitions below).
 
-Time ranges are half open (``start <= occurred_at < end``) on UTC midnights, served by
-``ix_offers_merchant_id`` and ``ix_click_events_offer_id_occurred_at``. Counts only: nothing here reads a referrer,
-a link or anything about a visitor.
+Time ranges are half open (``start <= occurred_at < end``) on UTC midnights. The offers statement is driven from the
+merchant's offers (``ix_offers_merchant_id``) and reaches the clicks only through
+``ix_click_events_offer_id_occurred_at``, one offer at a time (see ``offers_statement``); the per-day statement is
+bounded to at most 100 offers and the range. Counts only: nothing here reads a referrer, a link or anything about
+a visitor.
 """
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import DateTime, Enum, Text, and_, column, func, select, table
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    Select,
+    Text,
+    and_,
+    column,
+    func,
+    select,
+    table,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -111,6 +124,67 @@ def _listed() -> ColumnElement[bool]:
     return offers.c.status.in_(LISTED_STATUSES)
 
 
+def offers_statement(
+    merchant_id: str, start: datetime, end: datetime, limit: int
+) -> Select[Any]:
+    """The merchant's listed offers with their counted clicks, most clicked first (then title, then id).
+
+    The count is a correlated subquery driven from the merchant's own offers, so the planner can only reach
+    ``click_events`` one offer at a time through ``ix_click_events_offer_id_occurred_at``. It cannot range-scan
+    ``ix_click_events_occurred_at`` across every merchant's clicks and hash-join them, which a join from the
+    offers to the clicks lets it do (the cost of that grows with the whole site's clicks, and anyone can add click
+    rows through the public redirect). ``tests/api/partner/test_partner_clicks_e2e.py`` asserts the plan.
+    """
+    clicks = (
+        select(func.count())
+        .select_from(click_events)
+        .where(
+            click_events.c.offer_id == offers.c.id,
+            _in_range(start, end),
+            _counted(),
+        )
+        .correlate(offers)
+        .scalar_subquery()
+        .label("clicks")
+    )
+    return (
+        select(
+            offers.c.id,
+            offers.c.slug,
+            offers.c.title,
+            clicks,
+            func.count().over().label("total_offers"),
+        )
+        .where(offers.c.merchant_id == merchant_id, _listed())
+        .order_by(clicks.desc(), offers.c.title, offers.c.id)
+        .limit(limit)
+    )
+
+
+def daily_statement(
+    merchant_id: str,
+    offer_ids: list[str],
+    start: datetime,
+    end: datetime,
+) -> Select[Any]:
+    """Counted clicks per offer per UTC day. The merchant and status predicates are in the statement itself."""
+    day = func.date(func.timezone("UTC", click_events.c.occurred_at)).label("day")
+    return (
+        select(click_events.c.offer_id, day, func.count())
+        .select_from(click_events)
+        .join(offers, offers.c.id == click_events.c.offer_id)
+        .where(
+            offers.c.merchant_id == merchant_id,
+            _listed(),
+            click_events.c.offer_id.in_(offer_ids),
+            _in_range(start, end),
+            _counted(),
+        )
+        .group_by(click_events.c.offer_id, day)
+        .order_by(click_events.c.offer_id, day)
+    )
+
+
 class PartnerClickStore:
     """Click counts on the partner role's session. Read only; the caller owns the session."""
 
@@ -121,26 +195,11 @@ class PartnerClickStore:
         self, merchant_id: str, start: datetime, end: datetime, limit: int
     ) -> PartnerOfferPage:
         """The merchant's listed offers, most clicked first (then title, then id), at most ``limit``."""
-        clicks = func.count(click_events.c.offer_id).filter(_counted())
-        statement = (
-            select(
-                offers.c.id,
-                offers.c.slug,
-                offers.c.title,
-                clicks.label("clicks"),
-                func.count().over().label("total_offers"),
+        rows = (
+            await self._session.execute(
+                offers_statement(merchant_id, start, end, limit)
             )
-            .select_from(offers)
-            .outerjoin(
-                click_events,
-                and_(click_events.c.offer_id == offers.c.id, _in_range(start, end)),
-            )
-            .where(offers.c.merchant_id == merchant_id, _listed())
-            .group_by(offers.c.id, offers.c.slug, offers.c.title)
-            .order_by(clicks.desc(), offers.c.title, offers.c.id)
-            .limit(limit)
-        )
-        rows = (await self._session.execute(statement)).all()
+        ).all()
         return PartnerOfferPage(
             offers=[PartnerOffer(r[0], r[1], r[2], r[3]) for r in rows],
             total_offers=rows[0][4] if rows else 0,
@@ -160,21 +219,9 @@ class PartnerClickStore:
         """
         if not offer_ids:
             return []
-        day = func.date(func.timezone("UTC", click_events.c.occurred_at)).label("day")
         rows = (
             await self._session.execute(
-                select(click_events.c.offer_id, day, func.count())
-                .select_from(click_events)
-                .join(offers, offers.c.id == click_events.c.offer_id)
-                .where(
-                    offers.c.merchant_id == merchant_id,
-                    _listed(),
-                    click_events.c.offer_id.in_(offer_ids),
-                    _in_range(start, end),
-                    _counted(),
-                )
-                .group_by(click_events.c.offer_id, day)
-                .order_by(click_events.c.offer_id, day)
+                daily_statement(merchant_id, offer_ids, start, end)
             )
         ).all()
         return [PartnerDayClicks(offer_id, d, n) for offer_id, d, n in rows]

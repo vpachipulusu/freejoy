@@ -11,6 +11,7 @@ import json
 import pytest
 from fastapi import Request
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
 
 from app.core.config import settings
 from app.core.partner_keys import key_digest
@@ -56,6 +57,18 @@ def _surface(max_body_bytes: int = 64) -> PartnerSurface:
     async def boom() -> None:
         raise RuntimeError(f"detail {MARKER}")
 
+    @api.get("/db-down")
+    async def db_down() -> None:
+        raise DBAPIError(
+            f"SELECT secret FROM t WHERE x = '{MARKER}'",
+            {"x": MARKER},
+            Exception(MARKER),
+        )
+
+    @api.get("/connection-refused")
+    async def connection_refused() -> None:
+        raise ConnectionRefusedError(MARKER)
+
     @api.post("/echo")
     async def echo(request: Request) -> dict[str, int]:
         return {"size": len(await request.body())}
@@ -75,9 +88,13 @@ def surface_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def assert_fixed(response: RawResponse, forbidden: list[str]) -> None:
     body = response.json()
-    assert set(body) == {"success", "error", *(["code"] if "code" in body else [])}
     assert body["success"] is False
     assert body["error"] in FIXED_MESSAGES
+    # Exactly the envelope: a code only on the message that has one, and never a null code anywhere.
+    expected_keys = {"success", "error"} | (
+        {"code"} if body["error"] in CODED else set()
+    )
+    assert set(body) == expected_keys
     assert body.get("code") == CODED.get(body["error"])
     text = response.body.decode() + repr(response.headers)
     for item in forbidden:
@@ -150,6 +167,12 @@ async def test_every_partner_error_has_a_fixed_message_and_echoes_nothing(
         ),
         forbidden,
     )
+    # 503 again: the database cannot answer inside a route (a statement error, a refused connection)
+    for route in ("/db-down", "/connection-refused"):
+        db_down = await call_raw(surface, "GET", route, headers=keyed)
+        assert db_down.status == 503
+        assert db_down.header("retry-after") is not None
+        assert_fixed(db_down, forbidden)
     # 500: a handler that fails with request data in its message
     responses[500] = await call_raw(surface, "GET", "/boom", headers=keyed)
     # 429 and 503 from the failure limit and the limiter

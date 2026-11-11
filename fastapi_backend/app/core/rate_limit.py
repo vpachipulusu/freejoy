@@ -330,6 +330,13 @@ PARTNER_READ_POLICY = RateLimitPolicy(
 PARTNER_WRITE_POLICY = RateLimitPolicy(
     "partner_write", limit=30, window_seconds=60, fail_closed=True
 )
+# The partner click report (``GET /partner/v1/clicks``, FREEJ-59), keyed by key id (``rl:partner_clicks:key:<key id>``),
+# counted in addition to the read policy above. It is the one partner read that aggregates over many rows, and the role
+# has 20 connections for every merchant, so one key may run it far less often than it may read ``/me``. Fails closed:
+# an outage must not lift the limit on the expensive read.
+PARTNER_CLICKS_POLICY = RateLimitPolicy(
+    "partner_clicks", limit=20, window_seconds=60, fail_closed=True
+)
 # Failed partner authentications of a well-formed key, counted only on failure (a valid key is never held up by it) and
 # keyed by the presented key id. Nothing keyless is counted. Fail closed: an outage must not lift the limit. It turns repeated
 # failures for one key id into a 429; it does NOT bound database work (every well-formed key costs a connection and a SELECT,

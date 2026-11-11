@@ -774,3 +774,41 @@ async def test_a_provider_built_with_the_owner_url_is_refused_by_the_live_check(
     with pytest.raises(PartnerRoleNotRestricted):
         async with provider.session():
             pass
+
+
+async def test_accepted_residual_any_sql_on_the_partner_session_reads_every_merchants_offers_and_clicks(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    """Documented (ADR-013): column grants cannot limit rows, so tenancy rests on the WHERE clauses of the code.
+
+    Whoever can run SQL on the partner session (a flaw in partner code, not a retailer) can read the granted columns of
+    EVERY merchant's offers, drafts included, and of every click. No visitor data is among them
+    (``test_it_reads_only_the_click_columns_the_query_needs``).
+    """
+    mine, _ = await seed_key(owner)
+    theirs, _ = await seed_key(owner)
+    category = await add_category(owner, "beauty")
+    published = await add_offer(owner, category, mine, "mine")
+    draft = await add_offer(
+        owner, category, theirs, "their-draft", status="DRAFT", last_verified_at=None
+    )
+    await seed_click(owner, published, datetime(2026, 3, 10, 9, 0, tzinfo=UTC))
+    await seed_click(owner, draft, datetime(2026, 3, 10, 9, 0, tzinfo=UTC))
+
+    async with partner.connect() as connection:
+        offers = (
+            await connection.execute(
+                text("SELECT id, merchant_id, title, slug, status FROM offers")
+            )
+        ).all()
+        clicks = (
+            await connection.execute(
+                text("SELECT offer_id, occurred_at, user_agent_class FROM click_events")
+            )
+        ).all()
+
+    assert {(row.merchant_id, row.status) for row in offers} == {
+        (mine, "PUBLISHED"),
+        (theirs, "DRAFT"),
+    }
+    assert {row.offer_id for row in clicks} == {published, draft}

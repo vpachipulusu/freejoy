@@ -24,6 +24,7 @@ from app.core.partner_keys import generate_key
 from app.main import app
 from app.partner import deps
 from app.partner.clicks_report import MAX_OFFERS
+from app.partner.clicks_store import PartnerClickStore
 from app.repositories.merchant_clicks import MerchantClickRepository
 from app.services.merchant_click_report import MerchantClickReportService
 from tests.api.partner.support import call_raw
@@ -110,6 +111,8 @@ async def shop(engine: AsyncEngine, partner_world: None) -> dict[str, Any]:
             engine, category, acme, "balm", title="Balm", status="EXPIRED"
         ),
         "idle": await add_offer(engine, category, acme, "idle", title="Idle"),
+        # Listed, with clicks that are all from bots: 0 in both reports, no days.
+        "bots": await add_offer(engine, category, acme, "bots", title="Bots"),
         "draft": await add_offer(
             engine,
             category,
@@ -150,6 +153,8 @@ async def seed_clicks(engine: AsyncEngine, offers: dict[str, str]) -> None:
         ("soap", 9, 23, "DESKTOP"),  # outside the range
         ("balm", 11, 9, "TABLET"),
         ("balm", 11, 10, "OTHER"),
+        ("bots", 10, 9, "BOT"),
+        ("bots", 11, 9, "BOT"),
         ("draft", 10, 9, "DESKTOP"),
         ("archived", 10, 9, "DESKTOP"),
         ("foreign", 10, 9, "DESKTOP"),
@@ -184,6 +189,22 @@ async def admin_order(
     return [o.slug for o in report.offers if status[o.slug] in LISTED]
 
 
+async def admin_listed_order(
+    engine: AsyncEngine, merchant_id: str, first: date, last: date
+) -> tuple[str, list[str]]:
+    """The admin repository's first offer, and every listed offer in its order (no cap), for the cap comparison."""
+    start = datetime.combine(first, datetime.min.time(), tzinfo=UTC)
+    end = datetime.combine(last + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        status = await _statuses(session)
+        page = await MerchantClickRepository(session).offers(
+            merchant_id, start, end, 1000
+        )
+    return page.offers[0].slug, [
+        o.slug for o in page.offers if status[o.slug] in LISTED
+    ]
+
+
 async def _statuses(session: AsyncSession) -> dict[str, str]:
     rows = await session.execute(text("SELECT slug, status FROM offers"))
     return {slug: status for slug, status in rows.all()}
@@ -213,9 +234,10 @@ async def test_the_partner_query_and_the_admin_report_give_the_same_counts(
     assert admin == {
         "soap": {"2026-03-10": 2, "2026-03-11": 1},
         "balm": {"2026-03-11": 2},
+        "bots": {},
         "idle": {},
     }
-    assert [o["total_clicks"] for o in body["data"]["offers"]] == [3, 2, 0]
+    assert [o["total_clicks"] for o in body["data"]["offers"]] == [3, 2, 0, 0]
 
 
 async def test_a_draft_or_an_archived_offer_is_never_named_even_with_clicks(
@@ -228,7 +250,12 @@ async def test_a_draft_or_an_archived_offer_is_never_named_even_with_clicks(
     text_body = str(body)
     for hidden in ("Secret draft", "Secret archived", "'draft'", "'archived'"):
         assert hidden not in text_body
-    assert {o["slug"] for o in body["data"]["offers"]} == {"soap", "balm", "idle"}
+    assert {o["slug"] for o in body["data"]["offers"]} == {
+        "soap",
+        "balm",
+        "idle",
+        "bots",
+    }
     assert body["data"]["offers_truncated"] is False
 
 
@@ -263,7 +290,7 @@ async def test_no_internal_id_reaches_the_response(
 
 
 async def test_the_day_boundaries_are_midnight_utc_whatever_the_session_time_zone(
-    engine: AsyncEngine, shop: dict[str, Any]
+    engine: AsyncEngine, shop: dict[str, Any], database_url: str
 ) -> None:
     soap = shop["offers"]["soap"]
     for moment in (
@@ -273,10 +300,24 @@ async def test_the_day_boundaries_are_midnight_utc_whatever_the_session_time_zon
         datetime(2026, 3, 12, 0, 0, 0, tzinfo=UTC),
     ):
         await click(engine, soap, moment, "DESKTOP")
+    role = role_name_for(make_url(database_url).database or "")
+    provider = PartnerSessionProvider(
+        role_url(database_url, role, role_password_for(role))
+    )
+    start, end = datetime(2026, 3, 10, tzinfo=UTC), datetime(2026, 3, 12, tzinfo=UTC)
 
-    _, body, _ = await read(shop["acme_key"], "from=2026-03-10&to=2026-03-11")
+    async with provider.session() as session:
+        # A zone far from UTC, where a day cut on local midnight would move every edge click to another day.
+        await session.execute(text("SET TIME ZONE 'Pacific/Auckland'"))
+        store = PartnerClickStore(session)
+        page = await store.offers(shop["acme"], start, end, 100)
+        days = await store.daily(shop["acme"], [soap], start, end)
 
-    assert partner_days(body)["soap"] == {"2026-03-10": 1, "2026-03-11": 1}
+    assert [(d.day.isoformat(), d.clicks) for d in days] == [
+        ("2026-03-10", 1),
+        ("2026-03-11", 1),
+    ]
+    assert {o.slug: o.clicks for o in page.offers}["soap"] == 2
 
 
 async def test_at_most_a_hundred_offers_come_back_busiest_first(
@@ -310,6 +351,10 @@ async def test_at_most_a_hundred_offers_come_back_busiest_first(
                     {"id": new_id(), "offer": offer_id, "at": at(10)},
                 )
 
+    # A draft with more clicks than any listed offer: first in the admin report's list, never in the partner's.
+    for _ in range(10):
+        await click(engine, shop["offers"]["draft"], at(10), "DESKTOP")
+
     _, body, _ = await read(shop["acme_key"], "from=2026-03-10&to=2026-03-11")
 
     offers = body["data"]["offers"]
@@ -317,10 +362,12 @@ async def test_at_most_a_hundred_offers_come_back_busiest_first(
     assert body["data"]["offers_truncated"] is True
     totals = [o["total_clicks"] for o in offers]
     assert totals == sorted(totals, reverse=True)
-    admin = await admin_order(
+    admin_first, listed = await admin_listed_order(
         engine, shop["acme"], date(2026, 3, 10), date(2026, 3, 11)
     )
-    assert [o["slug"] for o in offers] == admin[:100]
+    assert admin_first == "draft"  # the one place the two lists legitimately differ
+    assert [o["slug"] for o in offers] == listed[:100]
+    assert "draft" not in str(body)
 
 
 async def test_equal_counts_are_ordered_by_title_then_internal_id(
@@ -381,8 +428,6 @@ async def test_the_response_is_no_store_and_the_range_is_refused_with_the_same_h
 async def test_a_statement_given_another_merchants_offer_ids_returns_nothing_of_theirs(
     engine: AsyncEngine, shop: dict[str, Any], database_url: str
 ) -> None:
-    from app.partner.clicks_store import PartnerClickStore
-
     await seed_clicks(engine, shop["offers"])
     role = role_name_for(make_url(database_url).database or "")
     provider = PartnerSessionProvider(
@@ -396,3 +441,42 @@ async def test_a_statement_given_another_merchants_offer_ids_returns_nothing_of_
         days = await store.daily(shop["other"], everyone, start, end)
 
     assert {d.offer_id for d in days} == {shop["offers"]["foreign"]}
+
+
+async def test_daily_given_a_draft_and_an_archived_offer_of_the_same_merchant_returns_nothing(
+    engine: AsyncEngine, shop: dict[str, Any], database_url: str
+) -> None:
+    await seed_clicks(engine, shop["offers"])
+    role = role_name_for(make_url(database_url).database or "")
+    provider = PartnerSessionProvider(
+        role_url(database_url, role, role_password_for(role))
+    )
+    ids = [shop["offers"]["draft"], shop["offers"]["archived"]]
+
+    async with provider.session() as session:
+        days = await PartnerClickStore(session).daily(
+            shop["acme"], ids, at(10, 0), at(12, 0)
+        )
+
+    assert days == []
+
+
+async def test_an_offer_moved_to_another_merchant_takes_its_whole_click_history_with_it(
+    engine: AsyncEngine, shop: dict[str, Any]
+) -> None:
+    await seed_clicks(engine, shop["offers"])
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE offers SET merchant_id = :m WHERE id = :o"),
+            {"m": shop["other"], "o": shop["offers"]["soap"]},
+        )
+
+    _, first, _ = await read(shop["acme_key"], "from=2026-03-10&to=2026-03-11")
+    _, second, _ = await read(shop["other_key"], "from=2026-03-10&to=2026-03-11")
+    admin_other = await admin_days(
+        engine, shop["other"], date(2026, 3, 10), date(2026, 3, 11)
+    )
+
+    assert "soap" not in partner_days(first)
+    assert partner_days(second) == admin_other
+    assert partner_days(second)["soap"] == {"2026-03-10": 2, "2026-03-11": 1}
