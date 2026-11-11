@@ -23,6 +23,7 @@ from app.api.rate_limit import (
     RATE_LIMIT_RESPONSES,
     RateLimiterDep,
     client_key,
+    forwarded_client_ip,
     limit_by_client_ip,
 )
 from app.api.v1.catalogue_schemas import ExpiredOfferResponse, expired_response
@@ -130,9 +131,12 @@ async def _hit_or_allow(
 async def _announce_cap_reached(
     request: Request, limiter: RateLimiter, offer_id: str
 ) -> None:
-    """Log that the main per-offer budget is spent, at most once a minute for the offer (the limiter keeps the
-    count). Only for the main bucket. The signal is never worth a failure: if its own hit cannot be answered it
-    stays silent, so an outage cannot become one error line per request. No destination, address or user agent."""
+    """Log that the main per-offer budget is spent, at most once per clock minute for the offer (the limiter keeps
+    the count; with a limit of 1 the sliding window behaves as a fixed window, so two lines can be adjacent across
+    a minute boundary). Only for the main bucket. The signal is never worth a failure: if its own hit cannot be
+    answered there is no traceback, no Sentry report and no route-level line (the limiter adapter still logs its
+    one-line ``rate limiter call failed`` warning), so an outage cannot become an error line per request here.
+    No destination, address or user agent is logged."""
     policy = OUTBOUND_OFFER_CAP_SIGNAL_POLICY
     try:
         decision = await limiter.hit(f"{policy.scope}:offer:{offer_id}", policy)
@@ -149,19 +153,38 @@ async def _announce_cap_reached(
         )
 
 
+def _address_identifier(request: Request, offer_id: str) -> str:
+    scope = OUTBOUND_CLICK_OFFER_POLICY.scope
+    return f"{scope}:ip:{client_key(request, CLICK_IPV6_GROUP_PREFIX)}:offer:{offer_id}"
+
+
+def _address_limit_applies(request: Request, policy: RateLimitPolicy) -> bool:
+    """The address-and-offer limit needs a real forwarded address and a counted class.
+
+    Without a forwarded address (Next.js sent no ``X-Client-IP``) every visitor would share one key and recording
+    would be capped at a few clicks per offer in total, so the limit is skipped: the shared admission key already
+    holds that deployment to 60 requests a minute, which cannot fill the 600. A request classed ``BOT`` spends only
+    its own bot bucket, as before FREEJ-63, so a bot on a shared address never uses up that address's counted share.
+    """
+    return policy is not OUTBOUND_OFFER_BOT_POLICY and (
+        forwarded_client_ip(request) is not None
+    )
+
+
 async def offer_has_room(
     request: Request,
     limiter: RateLimiterDep,
     offer_id: OfferIdPath,
     body: ClickBody = None,
 ) -> bool:
-    """The recording limits: True while this click may be recorded. At most two hits, in this order.
+    """The recording limits: True while this click may be recorded. At most two hits, in this order, plus one
+    signal hit when the main bucket denies.
 
-    1. ``OUTBOUND_CLICK_OFFER_POLICY``, per client address (IPv6 by /56) and offer, for every device class. When
-       it is spent the answer is False and the per-offer bucket is NOT hit, so one address can never use more
-       than its few clicks of an offer's budget.
+    1. ``OUTBOUND_CLICK_OFFER_POLICY``, per client address (IPv6 by /56) and offer, for every counted class
+       (not ``BOT``) and only when a client address was forwarded. When it is spent the answer is False and the
+       per-offer bucket is NOT hit, so one address can never use more than its few clicks of an offer's budget.
     2. The per-offer bucket: ``OUTBOUND_OFFER_BOT_POLICY`` for a request classed ``BOT``, otherwise
-       ``OUTBOUND_OFFER_POLICY``. When the main one is spent, one warning a minute says so.
+       ``OUTBOUND_OFFER_POLICY``. When the main one is spent, one warning per clock minute says so.
 
     The device class is in the body (the route and this dependency share the one body parameter, so both must
     call it ``body``). FastAPI runs the dependency once per request, after the body is validated, so a request
@@ -169,20 +192,15 @@ async def offer_has_room(
     refusing would punish the visitor for a crowd, while the limits only cap how many clicks are recorded. A
     limiter outage records the click as usual, like the other public routes (the policies fail open).
     """
-    address = OUTBOUND_CLICK_OFFER_POLICY
-    address_id = (
-        f"{address.scope}:ip:{client_key(request, CLICK_IPV6_GROUP_PREFIX)}"
-        f":offer:{offer_id}"
-    )
-    if not await _hit_or_allow(
+    policy = offer_policy_for(body.user_agent_class if body else None)
+    if _address_limit_applies(request, policy) and not await _hit_or_allow(
         request,
         limiter,
-        address_id,
-        address,
+        _address_identifier(request, offer_id),
+        OUTBOUND_CLICK_OFFER_POLICY,
         "click address limiter unavailable, recording the click",
     ):
         return False
-    policy = offer_policy_for(body.user_agent_class if body else None)
     allowed = await _hit_or_allow(
         request,
         limiter,

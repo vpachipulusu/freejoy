@@ -89,14 +89,17 @@ OUTBOUND_OFFER_BOT_POLICY = RateLimitPolicy(
     "outbound_offer_bot", limit=60, window_seconds=60, fail_closed=False
 )
 # The same endpoint, keyed by client address AND offer id (FREEJ-63): one address may have at most this many clicks on
-# one offer recorded a minute, whatever its device class, so a flood that does not identify itself as automated cannot
-# fill the offer's whole budget from a few addresses. Past it the visitor is still sent on, the click is not recorded and
-# the per-offer budgets above are not touched. The address part groups IPv6 by /56 (``CLICK_IPV6_GROUP_PREFIX``).
+# one offer recorded a minute, for every class except BOT (which spends only its own bucket above), so a flood that does
+# not identify itself as automated cannot fill the offer's whole budget from a few addresses. Past it the visitor is still
+# sent on, the click is not recorded and the per-offer budgets above are not touched. It is skipped when no client address
+# was forwarded (everyone would share one key). The address part groups IPv6 by /56 (``CLICK_IPV6_GROUP_PREFIX``).
 OUTBOUND_CLICK_OFFER_POLICY = RateLimitPolicy(
     "outbound_click_offer", limit=5, window_seconds=60, fail_closed=False
 )
-# Not a limit on visitors: a once-a-minute gate on the log line that says an offer's main budget is spent (FREEJ-63),
-# keyed by offer id, so a long flood writes one warning a minute for the offer instead of one per request.
+# Not a limit on visitors: a once-per-clock-minute gate on the log line that says an offer's main budget is spent
+# (FREEJ-63), keyed by offer id, so a long flood writes about one warning a minute for the offer instead of one per
+# request (with a limit of 1 the sliding window behaves as a fixed window, so two lines can be adjacent across a
+# minute boundary).
 OUTBOUND_OFFER_CAP_SIGNAL_POLICY = RateLimitPolicy(
     "outbound_offer_cap_signal", limit=1, window_seconds=60, fail_closed=False
 )

@@ -264,7 +264,9 @@ describe('partner API page (FREEJ-59)', () => {
       /Counts can also be overstated by automated traffic that does not identify itself as automated\./
     );
     expect(text).toMatch(/Recording is rate limited for each offer/);
-    expect(text).toMatch(/some clicks are not recorded and the count can be low/);
+    expect(text).toMatch(
+      /in a very busy minute, or when many clicks on one offer come from one network in a minute, some clicks are not recorded and the count can be low/
+    );
     expect(text).toMatch(/deleted after 395 days/);
     expect(text).not.toMatch(/600|still sent on/);
   });

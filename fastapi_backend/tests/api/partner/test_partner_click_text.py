@@ -63,15 +63,15 @@ def test_each_internal_doc_states_the_per_address_limit_the_code_enforces() -> N
         assert f"`OUTBOUND_CLICK_OFFER_POLICY`, {ADDRESS.limit} a minute" in text, (
             doc.name
         )
-        assert f"/{CLICK_IPV6_GROUP_PREFIX}" in text, doc.name
+        assert f"grouped by /{CLICK_IPV6_GROUP_PREFIX}" in text, doc.name
 
 
 def test_the_cap_signal_policy_is_named_in_the_affiliate_doc_and_the_adr() -> None:
-    for doc in (DOCS[1], ADR):
-        text = words(doc)
-        key = f"`rl:{SIGNAL.scope}:offer:{{offer id}}`" if doc == ADR else SIGNAL.scope
-        assert key in text, doc.name
-        assert f"{SIGNAL.limit} per minute" in text, doc.name
+    affiliate = words(DOCS[1])
+    assert f"`OUTBOUND_OFFER_CAP_SIGNAL_POLICY`, {SIGNAL.limit} per minute" in affiliate
+    assert f"`{SIGNAL.scope}:offer:{{offer id}}`" in affiliate
+    adr = f"`rl:{SIGNAL.scope}:offer:{{offer id}}` ({SIGNAL.limit} per minute"
+    assert adr in words(ADR), adr
 
 
 def test_the_adr_states_both_per_offer_keys_with_the_figures_the_code_enforces() -> (
@@ -114,6 +114,7 @@ def test_the_public_schemas_do_not_state_the_cap_or_how_the_limiter_behaves() ->
         for internal in (ADDRESS.scope, SIGNAL.scope, "OUTBOUND_", "/56", "IPv6"):
             assert internal not in schema, (path, internal)
         assert "overstated by automated traffic" in schema, path
+        assert "come from one network in a minute" in schema, path
 
 
 def test_the_public_text_states_no_recording_figure_and_no_limiter_word() -> None:
@@ -122,5 +123,5 @@ def test_the_public_text_states_no_recording_figure_and_no_limiter_word() -> Non
     without_retention = CLICK_DEFINITION.replace("395", "")
     for figure in (MAIN.limit, BOT.limit, ADDRESS.limit):
         assert str(figure) not in without_retention
-    for word in ("bucket", "per address", "address", "—"):
+    for word in ("bucket", "per address", "address", "prefix", "policy", "—"):
         assert word not in CLICK_DEFINITION

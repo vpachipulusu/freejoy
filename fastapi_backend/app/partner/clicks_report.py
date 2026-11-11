@@ -39,7 +39,8 @@ CLICK_DEFINITION = (
     "and it does not count different people: a person who clicks twice counts twice. Clicks from visitors "
     "identified as automated are left out and nothing else is filtered. Counts can also be overstated by "
     "automated traffic that does not identify itself as automated. Days are UTC days. Recording is rate "
-    "limited for each offer, so in a very busy minute some clicks are not recorded and the count can be low. "
+    "limited for each offer, so in a very busy minute, or when many clicks on one offer come from one network "
+    "in a minute, some clicks are not recorded and the count can be low. "
     f"Click records are deleted after {CLICK_RETENTION_DAYS} days, so an earlier day can be incomplete. Counts "
     "only: Freejoy keeps no visitor identity."
 )

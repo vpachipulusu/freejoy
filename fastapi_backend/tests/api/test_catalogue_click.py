@@ -297,7 +297,8 @@ async def test_the_offer_cap_is_per_offer() -> None:
         await http.post("/v1/catalogue/offers/other_offer/click")
 
     assert isinstance(limiter, FakeRateLimiter)
-    assert limiter.hits[2][0] == "outbound_offer:offer:other_offer"
+    # No forwarded address: no address-and-offer hit (FREEJ-63), so the offer bucket is second.
+    assert limiter.hits[1][0] == "outbound_offer:offer:other_offer"
 
 
 async def test_requests_over_the_limit_get_429_and_write_no_click() -> None:
@@ -310,8 +311,8 @@ async def test_requests_over_the_limit_get_429_and_write_no_click() -> None:
 
     assert responses[-1].status_code == 429
     assert "Retry-After" in responses[-1].headers
-    # One address has only its per-offer share recorded (FREEJ-63); the rest are refused with 429 at the per-address limit.
-    assert len(store.clicks) == OUTBOUND_CLICK_OFFER_POLICY.limit
+    # No forwarded address, so no per-address recording limit: every admitted click is recorded.
+    assert len(store.clicks) == OUTBOUND_CLICK_POLICY.limit
 
 
 async def test_a_rate_limiter_outage_fails_open() -> None:

@@ -67,15 +67,18 @@ figure is therefore a **lower bound** on automated traffic, not a full count; th
 `bot_rule` text says so. Bot rows stored before the change shared the 600 budget with every other class.
 
 **Recording limits for every class (FREEJ-63).** One client address (IPv6 grouped by /56) can have 5 clicks a minute for one
-offer recorded, whatever its class (`OUTBOUND_CLICK_OFFER_POLICY`); past that the visitor is still redirected, the click
+offer recorded, for every class except `BOT` and only when a client address was forwarded (`OUTBOUND_CLICK_OFFER_POLICY`; a `BOT` request spends only its
+own bucket); past that the visitor is still redirected, the click
 is not stored and neither per-offer bucket is spent. So a flood that sends an empty or ordinary browser user agent
 (classed `DESKTOP` or `OTHER`, counted as genuine) can no longer fill the 600 from ten addresses. When the main 600 is spent anyway,
-the backend logs one `offer recording cap reached` warning a minute for the offer (see
+the backend logs one `offer recording cap reached` warning per clock minute for the offer (two lines can be adjacent across a minute boundary; see
 [freejoy-affiliate.md](freejoy-affiliate.md#rate-limits)).
 
 **The residual (accepted).** About 120 addresses or /56 blocks (600 divided by 5) can still fill an offer's main budget in a
 minute. The reported count for that minute is then inflated by the flood, genuine clicks in it are not recorded, and the
-rows cannot be told apart afterwards; the log line above is the only trace. Nothing in the report marks such a minute.
+rows cannot be told apart afterwards; the log line above is the only trace. Nothing in the report marks such a minute. The attacker side and the
+genuine-visitor side (many people behind one client key lose their sixth click on an offer in a minute) are written out in
+[freejoy-affiliate.md](freejoy-affiliate.md#rate-limits); the count can be both inflated and, for those visitors, low.
 
 **Days.** A day is a UTC calendar day: a click at 23:59:59 UTC belongs to that day, 00:00:00 to the next, whatever the
 database session time zone (`timezone('UTC', occurred_at)`). `occurred_at` is already truncated to the minute. The query

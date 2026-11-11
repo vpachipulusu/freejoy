@@ -162,7 +162,6 @@ async def test_a_bot_request_spends_only_the_bot_bucket_under_its_own_identifier
     assert response.status_code == 200
     assert limiter.hits == [
         ("outbound_click:ip:10.0.1.1", OUTBOUND_CLICK_POLICY),
-        ("outbound_click_offer:ip:10.0.1.1:offer:offer_1", OUTBOUND_CLICK_OFFER_POLICY),
         ("outbound_offer_bot:offer:offer_1", OUTBOUND_OFFER_BOT_POLICY),
     ]
     assert len(store.clicks) == 1
@@ -177,7 +176,7 @@ async def test_each_offer_has_its_own_bot_bucket() -> None:
             "/v1/catalogue/offers/other_offer/click", json={"user_agent_class": "BOT"}
         )
 
-    assert limiter.hits[2][0] == "outbound_offer_bot:offer:other_offer"
+    assert limiter.hits[1][0] == "outbound_offer_bot:offer:other_offer"
 
 
 @pytest.mark.parametrize(
@@ -244,7 +243,8 @@ async def test_every_body_shape_still_works_with_the_class_read_by_the_dependenc
     http, store, _ = build(limiter)
 
     async with http:
-        response = await http.post(PATH, **request_kwargs)
+        headers = {"X-Client-IP": "203.0.113.5", **request_kwargs.get("headers", {})}
+        response = await http.post(PATH, **{**request_kwargs, "headers": headers})
 
     assert response.status_code == 200
     assert response.json()["data"]["destination_url"] == DESTINATION

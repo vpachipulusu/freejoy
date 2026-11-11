@@ -29,6 +29,7 @@ from app.core.rate_limit import (
     OUTBOUND_OFFER_POLICY,
     PUBLIC_CATALOGUE_POLICY,
 )
+from app.models.platform.click_event import UserAgentClass
 from tests.api.test_catalogue_click_budget import (
     DESTINATION,
     KEY,
@@ -47,10 +48,6 @@ BOT = OUTBOUND_OFFER_BOT_POLICY.scope
 SIGNAL = OUTBOUND_OFFER_CAP_SIGNAL_POLICY.scope
 CAP_MESSAGE = "offer recording cap reached"
 PER_ADDRESS = OUTBOUND_CLICK_OFFER_POLICY.limit
-
-
-def one_address(n: int) -> dict[str, str]:
-    return {"X-Client-IP": f"10.{n // 250}.{n % 250}.1"}
 
 
 async def post_from(
@@ -176,19 +173,63 @@ async def test_the_limit_is_per_offer() -> None:
     ) in limiter.hits
 
 
-async def test_a_bot_past_the_address_limit_does_not_hit_the_bot_bucket() -> None:
+async def test_bot_requests_never_touch_the_address_limit_and_leave_the_addresss_genuine_share() -> (
+    None
+):
+    # The per-address 429 (60 a minute) is off, to send more bot requests than the bot bucket holds.
+    limiter = ScriptedRateLimiter(unlimited_scopes={CLICK})
+    http, store, _ = build(limiter)
+    bot_cap = OUTBOUND_OFFER_BOT_POLICY.limit
+
+    async with http:
+        bots = [
+            await post_from(http, "198.51.100.7", "BOT") for _ in range(bot_cap + 10)
+        ]
+        assert ADDRESS not in scopes(limiter)
+        genuine = [
+            await post_from(http, "198.51.100.7") for _ in range(PER_ADDRESS + 1)
+        ]
+
+    assert [r.status_code for r in bots + genuine] == [200] * (
+        bot_cap + 10 + PER_ADDRESS + 1
+    )
+    classes = [c["user_agent_class"] for c in store.clicks]
+    assert classes.count(UserAgentClass.BOT) == bot_cap
+    assert classes.count(UserAgentClass.DESKTOP) == PER_ADDRESS
+    assert scopes(limiter).count(BOT) == bot_cap + 10
+    assert scopes(limiter).count(ADDRESS) == PER_ADDRESS + 1
+
+
+@pytest.mark.parametrize(
+    "headers", [{}, {"X-Client-IP": "not-an-address"}], ids=["no header", "malformed"]
+)
+async def test_without_a_forwarded_address_there_is_no_address_limit(
+    headers: dict[str, str],
+) -> None:
     limiter = FakeRateLimiter()
     http, store, _ = build(limiter)
 
     async with http:
         responses = [
-            await post_from(http, "198.51.100.7", "BOT") for _ in range(PER_ADDRESS + 2)
+            await http.post(PATH, json={"user_agent_class": "DESKTOP"}, headers=headers)
+            for _ in range(PER_ADDRESS + 1)
         ]
 
-    assert [r.status_code for r in responses] == [200] * (PER_ADDRESS + 2)
-    assert len(store.clicks) == PER_ADDRESS
-    assert scopes(limiter).count(BOT) == PER_ADDRESS
-    assert MAIN not in scopes(limiter)
+    assert [r.status_code for r in responses] == [200] * (PER_ADDRESS + 1)
+    assert len(store.clicks) == PER_ADDRESS + 1
+    assert scopes(limiter) == [CLICK, MAIN] * (PER_ADDRESS + 1)
+
+
+async def test_with_a_forwarded_address_the_sequence_is_admission_address_offer() -> (
+    None
+):
+    limiter = FakeRateLimiter()
+    http, _, _ = build(limiter)
+
+    async with http:
+        await post_from(http, "198.51.100.7")
+
+    assert scopes(limiter) == [CLICK, ADDRESS, MAIN]
 
 
 async def test_a_denied_address_hits_the_click_limit_and_the_address_limit_and_nothing_else() -> (
@@ -221,18 +262,6 @@ async def test_a_request_the_per_address_429_refuses_hits_no_recording_limit() -
         response = await post_from(http, "198.51.100.7")
 
     assert response.status_code == 429
-    assert scopes(limiter) == [CLICK]
-    assert store.clicks == []
-
-
-async def test_a_refused_body_hits_no_recording_limit() -> None:
-    limiter = FakeRateLimiter()
-    http, store, _ = build(limiter)
-
-    async with http:
-        response = await http.post(PATH, json={"user_agent": "curl/8"})
-
-    assert response.status_code == 422
     assert scopes(limiter) == [CLICK]
     assert store.clicks == []
 
