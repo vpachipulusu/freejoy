@@ -69,6 +69,11 @@ export default function PartnersPage() {
         ended. Say what the offer is and where its terms are on your own site.
       </p>
       <p>There is no listing form on this page, and it does not ask you for any details.</p>
+      <p>
+        If your technical team wants to read your click counts, the{' '}
+        <Link href="/developers/partner-api">partner API documentation</Link> explains how. The
+        partner API is not open to every retailer yet.
+      </p>
     </LegalPage>
   );
 }
