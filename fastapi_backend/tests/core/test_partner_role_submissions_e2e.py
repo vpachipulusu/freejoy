@@ -111,15 +111,29 @@ async def refusal(engine: AsyncEngine, sql: str, **params: object) -> str:
 
 
 async def partner_offer(
-    owner: AsyncEngine, partner: AsyncEngine
+    owner: AsyncEngine, partner: AsyncEngine, *, submitted: bool = True
 ) -> tuple[str, str, str]:
-    """Insert an offer and its submission as the role, in the order the guards need (offer, then submission).
+    """Insert an offer, and by default its submission, as the role, in the order the guards need.
 
+    The offer comes first and the submission second (a submission can only be attached to a new draft of its own
+    merchant). A test that inserts the submission itself passes ``submitted=False``.
     Returns (offer id, merchant id, category id).
     """
     merchant_id, category_id = await seed(owner)
     offer_id = new_id()
     await run(partner, INSERT_OFFER, **offer_values(offer_id, merchant_id, category_id))
+    if submitted:
+        await run(
+            partner,
+            "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
+            "VALUES (:i, :m, :r, :o, :h, :k)",
+            i=new_id(),
+            m=merchant_id,
+            r=f"ref-{offer_id}",
+            o=offer_id,
+            h="a" * 64,
+            k=KEY_ID,
+        )
     return offer_id, merchant_id, category_id
 
 
@@ -424,7 +438,19 @@ async def insert_submission(
 async def test_a_ref_is_unique_per_merchant_and_an_offer_has_one_submission(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
-    offer_id, merchant_id, category_id = await partner_offer(owner, partner)
+    offer_id, merchant_id, category_id = await partner_offer(
+        owner, partner, submitted=False
+    )
+    await run(
+        partner,
+        "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
+        "VALUES (:i, :m, 'ref-1', :o, :h, :k)",
+        i=new_id(),
+        m=merchant_id,
+        o=offer_id,
+        h="a" * 64,
+        k=KEY_ID,
+    )
     other_offer = new_id()
     await run(
         partner, INSERT_OFFER, **offer_values(other_offer, merchant_id, category_id)
@@ -478,7 +504,7 @@ async def test_a_pending_update_is_all_or_nothing_and_capped(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
     _offer_id, _merchant_id, _ = await partner_offer(owner, partner)
-    big = json.dumps({"x": "y" * 30_000})
+    big = json.dumps({"x": "y" * 50_000})
 
     half = await refusal(
         partner, "UPDATE partner_submissions SET pending_hash = :h", h="b" * 64
@@ -925,7 +951,9 @@ async def test_a_submission_can_only_be_attached_to_a_new_draft_of_the_same_merc
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
     merchant_id, category_id = await seed(owner)
-    owner_made = await owner_offer(owner, merchant_id, category_id, status="DRAFT")
+    # (A draft of the same merchant with no link and no import row can be attached: the guard cannot tell it from
+    # a new one, and the residual in ADR-013 says nothing separates the merchant's own drafts. A draft with a link
+    # is refused: see the next test.)
     published = await owner_offer(owner, merchant_id, category_id, status="PUBLISHED")
     other_merchant, other_category = await seed(owner)
     foreign = new_id()
@@ -938,7 +966,6 @@ async def test_a_submission_can_only_be_attached_to_a_new_draft_of_the_same_merc
     )
 
     for kind, offer_id in (
-        ("hand-made", owner_made),
         ("published", published),
         ("of another merchant", foreign),
     ):

@@ -3,7 +3,6 @@
 ``tests/api/partner/test_partner_submissions_e2e.py`` proves the same behaviour against Postgres and the real role.
 """
 
-from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -575,9 +574,7 @@ async def test_a_put_on_a_ref_another_merchant_uses_creates_a_separate_submissio
 
     assert mine.outcome == "created"
     assert {o.title for o in world.store.offers.values()} == {"Theirs", "Mine"}
-    assert replace(
-        world.store.by_ref(OTHER, "shared"), ref="shared"
-    )  # theirs still exists, untouched
+    assert world.store.by_ref(OTHER, "shared") is not None  # theirs still exists
 
 
 async def test_an_unchanged_resend_of_an_archived_offer_still_takes_the_locked_path_and_is_refused(

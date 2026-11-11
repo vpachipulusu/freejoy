@@ -237,7 +237,7 @@ class PartnerSubmissionStore:
             await self._session.execute(
                 _offer_select()
                 .where(offers.c.id == offer_id, offers.c.merchant_id == merchant_id)
-                .with_for_update()
+                .with_for_update(key_share=True)
             )
         ).first()
         return None if row is None else _offer_row(row)

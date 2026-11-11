@@ -272,7 +272,7 @@ async def test_a_ref_outside_the_pattern_is_a_422_before_the_service(
 ) -> None:
     response = await call(world, "GET", f"/offers/{ref}")
 
-    assert response.status in (404, 422)
+    assert response.status == 422
     assert service.calls == []
 
 

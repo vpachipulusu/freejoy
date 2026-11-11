@@ -4,6 +4,7 @@ Real database, the real restricted role, the real app. The admin side (an editor
 is the normal internal API, so each rule is shown against the system it has to coexist with.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -69,8 +70,8 @@ async def test_a_new_ref_creates_an_unverified_unfeatured_draft_with_one_direct_
         None,
     )
     assert (
-        offer.commercial_basis == "EDITORIAL"
-    )  # the placeholder; an editor sets the real one
+        offer.commercial_basis == "SPONSORED"
+    )  # the placeholder, the most cautious label; an editor states the real basis at publish
     (link,) = await rows(
         engine, "SELECT provider, destination_url, active FROM affiliate_links"
     )
@@ -455,7 +456,9 @@ async def test_ending_an_offer_whose_start_is_still_ahead_clears_the_start_so_th
         merchant.key,
         "sku-1",
         offer_body(
-            category, start_at="2099-01-01T00:00:00Z", end_at="2099-02-01T00:00:00Z"
+            category,
+            start_at=(datetime.now(UTC) + timedelta(days=30)).isoformat(),
+            end_at=(datetime.now(UTC) + timedelta(days=60)).isoformat(),
         ),
     )
 
@@ -502,6 +505,13 @@ async def test_no_sequence_of_partner_calls_publishes_verifies_or_features_anyth
             await partner_call(merchant.key, "GET", f"{PARTNER_OFFERS}/{ref}")
         await partner_call(merchant.key, "POST", f"{PARTNER_OFFERS}/a/end")
         await put_offer(merchant.key, "a", offer_body(category, title="After end"))
+        # An editor works on the same draft in between (an edit, not a verification or a publication), so the
+        # retailer's later calls meet an edited draft and queue instead of refreshing it.
+        offer_a = await sub.offer_id_of(client, admin, "Offer a")
+        edited = await client.patch(
+            f"{OFFERS}/{offer_a}", json={"title": f"Offer a {step}"}, headers=admin
+        )
+        assert edited.status_code == 200
         # smuggling a status or a flag in the body is refused, and nothing is stored
         for sneaky in (
             {"status": "PUBLISHED"},
@@ -764,7 +774,8 @@ async def test_a_ref_that_is_not_a_plain_identifier_is_refused(
 
     response = await put_offer(merchant.key, ref, offer_body(category))
 
-    assert response.status in (404, 422)
+    # "a/b" is a path with another segment, so no route matches it; every other ref reaches the pattern.
+    assert response.status == (404 if "/" in ref else 422)
 
 
 # ---------------------------------------------------------------------------------------------- caps

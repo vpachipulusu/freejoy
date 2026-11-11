@@ -5,12 +5,13 @@ never see each other's. Another merchant's ref is, to the caller, exactly an unk
 headers, found (or not) by one query that carries the merchant id.
 """
 
+import asyncio
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy import event, text
+from sqlalchemy.exc import DBAPIError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 import tests.api.partner.submissions_support as sub
@@ -221,6 +222,33 @@ async def test_every_store_read_and_write_for_the_wrong_merchant_finds_and_chang
             first.id, submission_id, {"content_hash": "f" * 64}
         )
         assert await store.count_open(first.id) == 0
+        # An insert whose source is the offer finds no row of the wrong merchant, so nothing is inserted.
+        with pytest.raises(NoResultFound):
+            await store.insert_link(first.id, offer_id, f"{SITE}/hijack")
+        with pytest.raises(NoResultFound):
+            await store.insert_import(
+                first.id,
+                offer_id=offer_id,
+                external_id="x",
+                digest="f" * 64,
+                applied_content_hash="f" * 64,
+            )
+        with pytest.raises(NoResultFound):
+            await store.insert_submission(
+                first.id,
+                submission_id="s" * 24,
+                ref="hijack",
+                offer_id=offer_id,
+                content_hash="f" * 64,
+                key_id="k" * 24,
+            )
+        # An audit row is not about a row of another merchant's: it is attributed to the caller, who is named in it.
+        await store.audit(
+            first.id,
+            action="partner.offers.submit",
+            offer_id=offer_id,
+            metadata={"outcome": "refused"},
+        )
         await session.commit()
 
     after = await rows(
@@ -230,6 +258,13 @@ async def test_every_store_read_and_write_for_the_wrong_merchant_finds_and_chang
         "JOIN partner_submissions s ON s.offer_id = o.id",
     )
     assert [tuple(r) for r in after] == [tuple(r) for r in before]
+    (audit,) = await rows(
+        engine, "SELECT metadata FROM audit_logs WHERE metadata->>'outcome' = 'refused'"
+    )
+    assert audit.metadata["merchant_id"] == first.id
+    assert (await rows(engine, "SELECT count(*) FROM affiliate_links"))[0][0] == 1
+    assert (await rows(engine, "SELECT count(*) FROM offer_imports"))[0][0] == 1
+    assert (await rows(engine, "SELECT count(*) FROM partner_submissions"))[0][0] == 1
     # and the right merchant does find it
     async with provider.session() as session:
         right = PartnerSubmissionStore(session)
@@ -250,3 +285,92 @@ async def test_a_deleted_or_inactive_merchant_cannot_submit(
     response = await put_offer(first.key, "b", body_for(category, first))
 
     assert response.status == 401
+
+
+# ----------------------------------------------------------------------------- locks, connections and secrets
+
+
+async def test_the_write_locks_do_not_block_a_visitors_click_on_the_offer(
+    engine: AsyncEngine,
+    store_world: tuple[PartnerSessionProvider, sub.Merchant, sub.Merchant, str],
+) -> None:
+    provider, _first, second, offer_id = store_world
+
+    async with provider.session() as session:
+        store = PartnerSubmissionStore(session)
+        assert await store.lock_offer(second.id, offer_id) is not None
+        assert await store.find_submission(second.id, "theirs", lock=True) is not None
+        # Another connection records a click, which takes a FOR KEY SHARE lock on the offer row for its foreign
+        # key. FOR NO KEY UPDATE does not conflict with it; FOR UPDATE would wait, and time out here.
+        async with engine.begin() as connection:
+            await connection.execute(text("SET LOCAL lock_timeout = '1s'"))
+            await connection.execute(
+                text(
+                    "INSERT INTO click_events (id, offer_id, occurred_at, user_agent_class) "
+                    "VALUES ('click-while-locked', :offer, now(), 'DESKTOP')"
+                ),
+                {"offer": offer_id},
+            )
+        await session.rollback()
+
+    (clicks,) = await rows(engine, "SELECT count(*) FROM click_events")
+    assert clicks[0] == 1
+
+
+async def test_the_same_body_again_is_answered_while_another_transaction_holds_the_offer_locked(
+    client: AsyncClient,
+    engine: AsyncEngine,
+    admin: dict[str, str],
+    partner_world: None,
+) -> None:
+    category, first, _second = await two_merchants(client, admin)
+    body = body_for(category, first)
+    await put_offer(first.key, "a", body)
+
+    async with engine.begin() as holder:
+        await holder.execute(text("SELECT id FROM offers FOR UPDATE"))
+        answered = await asyncio.wait_for(put_offer(first.key, "a", body), timeout=10)
+
+    assert answered.json()["data"]["outcome"] == "unchanged"
+
+
+async def test_a_request_opens_exactly_the_two_connections_it_needs(
+    client: AsyncClient,
+    admin: dict[str, str],
+    partner_world: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    category, first, _second = await two_merchants(client, admin)
+    await put_offer(first.key, "a", body_for(category, first))
+    provider = deps.get_partner_session_provider()
+    assert isinstance(provider, PartnerSessionProvider)
+    engine = provider._session_maker().kw["bind"].sync_engine
+    connects: list[object] = []
+    event.listen(engine, "connect", lambda *_: connects.append(1))
+
+    for _ in range(5):
+        await partner_call(first.key, "GET", f"{PARTNER_OFFERS}/a")
+
+    # The engine does not pool: one connection for the key check and one for the route, per request, and no more.
+    assert len(connects) == 2 * 5
+
+
+async def test_a_database_error_on_the_partner_connection_shows_no_parameter_value(
+    store_world: tuple[PartnerSessionProvider, sub.Merchant, sub.Merchant, str],
+) -> None:
+    provider, _first, _second, _offer_id = store_world
+    marker = "marker-value-that-must-not-appear"
+
+    async with provider.session() as session:
+        with pytest.raises(DBAPIError) as caught:
+            await session.execute(
+                text("UPDATE offers SET title = :title WHERE id = :id"),
+                {"title": marker, "id": marker},
+            )
+            await session.execute(
+                text("DELETE FROM offers WHERE id = :id"), {"id": marker}
+            )
+        await session.rollback()
+
+    assert marker not in str(caught.value)
+    assert "hidden due to hide_parameters=True" in str(caught.value)

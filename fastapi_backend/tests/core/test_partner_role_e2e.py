@@ -617,13 +617,11 @@ async def test_it_reads_only_the_listed_columns_and_changes_nothing_but_last_use
     assert await denied(partner, statement)
 
 
+# (The offer columns the submissions of FREEJ-58 read - summary, description, source_url, publisher_notes and the
+# others of the grant - are no longer refused: only the columns still outside the grant are listed here.)
 @pytest.mark.parametrize(
     "statement",
     [
-        "SELECT source_url FROM offers",
-        "SELECT summary FROM offers",
-        "SELECT description FROM offers",
-        "SELECT publisher_notes FROM offers",
         "SELECT commercial_basis FROM offers",
         "SELECT * FROM offers",
         "SELECT referrer_host FROM click_events",
@@ -631,7 +629,6 @@ async def test_it_reads_only_the_listed_columns_and_changes_nothing_but_last_use
         "SELECT id FROM click_events",
         "SELECT * FROM click_events",
         "SELECT offer_id, referrer_host FROM click_events",
-        "SELECT o.title FROM offers o WHERE o.source_url IS NOT NULL",
     ],
 )
 async def test_it_reads_only_the_click_columns_the_query_needs(

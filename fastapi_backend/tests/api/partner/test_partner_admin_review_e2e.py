@@ -315,22 +315,47 @@ async def test_the_generic_dismissal_of_a_source_change_does_not_clear_a_partner
     assert (await read(client, admin, url))["partner_submission"]["pending"] is not None
 
 
-async def test_an_offer_the_retailer_ended_stays_ended_when_an_old_proposal_is_applied(
+async def test_ending_discards_the_waiting_proposal_so_there_is_nothing_to_apply(
     client: AsyncClient, engine: AsyncEngine, admin: dict[str, str], partner_world: None
 ) -> None:
     category, merchant, url, ref = await waiting_update(client, admin)
-    await put_offer(
-        merchant.key, ref, offer_body(category, title="Retailer title")
-    )  # end_at null
-    await partner_call(merchant.key, "POST", f"{PARTNER_OFFERS}/{ref}/end")
+    await put_offer(merchant.key, ref, offer_body(category, title="Retailer title"))
+    before = await read(client, admin, url)
+    assert before["partner_submission"]["pending"] is not None
 
+    await partner_call(merchant.key, "POST", f"{PARTNER_OFFERS}/{ref}/end")
+    after = await read(client, admin, url)
+    body = {"review_token": after["review_token"], "pending_hash": "a" * 64}
+    applied = await client.post(f"{url}/apply-partner-update", json=body, headers=admin)
+
+    assert after["partner_submission"]["pending"] is None
+    assert applied.status_code == 409
+    (row,) = await rows(engine, "SELECT title, end_at FROM offers")
+    assert row.title == "Editor title" and row.end_at is not None
+    (audit,) = await rows(
+        engine,
+        "SELECT metadata FROM audit_logs WHERE action = 'partner.offers.end'",
+    )
+    assert audit.metadata.get("superseded_pending") is True
+
+
+async def test_a_proposal_sent_after_the_end_keeps_the_offer_ended_when_it_is_applied(
+    client: AsyncClient, engine: AsyncEngine, admin: dict[str, str], partner_world: None
+) -> None:
+    category, merchant, url, ref = await waiting_update(client, admin)
+    await partner_call(merchant.key, "POST", f"{PARTNER_OFFERS}/{ref}/end")
+    (ended,) = await rows(engine, "SELECT end_at FROM offers")
+
+    late = await put_offer(
+        merchant.key, ref, offer_body(category, title="Retailer title")
+    )  # end_at null: it would reopen the offer if applied as sent
+    assert late.json()["data"]["outcome"] == "pending_update"
     applied = await send_update(client, admin, url, "apply-partner-update")
 
     assert applied.status_code == 200
     assert applied.json()["data"]["title"] == "Retailer title"
-    assert applied.json()["data"]["end_at"] is not None
     (row,) = await rows(engine, "SELECT end_at FROM offers")
-    assert row.end_at is not None
+    assert row.end_at == ended.end_at
 
 
 async def test_an_applied_draft_stays_edited_so_a_later_update_waits_again(
