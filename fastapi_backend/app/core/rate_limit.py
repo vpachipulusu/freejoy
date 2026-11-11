@@ -355,6 +355,12 @@ PARTNER_READ_POLICY = RateLimitPolicy(
 PARTNER_WRITE_POLICY = RateLimitPolicy(
     "partner_write", limit=30, window_seconds=60, fail_closed=True
 )
+# Writes (PUT and end) of one merchant per UTC day, across all of its keys: the per-key limit above scales with the
+# number of keys issued, and every accepted write is an audit row, so this bounds the trail (2,000 a day is far
+# above a real sync of a few hundred offers). Keyed by merchant id. Fails closed: an outage must not lift it.
+PARTNER_MERCHANT_WRITE_POLICY = RateLimitPolicy(
+    "partner_merchant_write", limit=2000, window_seconds=24 * 60 * 60, fail_closed=True
+)
 # The partner click report (``GET /partner/v1/clicks``, FREEJ-59), keyed by key id (``rl:partner_clicks:key:<key id>``),
 # counted in addition to the read policy above. It is the one partner read that aggregates over many rows, and the role
 # has 20 connections for every merchant, so one key may run it far less often than it may read ``/me``. Fails closed:

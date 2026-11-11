@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 class PartnerErrorResponse(BaseModel):
     """The body of an error answer: a fixed message that never repeats anything you sent."""
 
-    success: Literal[False] = False
+    success: Literal[False] = Field(default=False, description="Always false.")
     error: str = Field(
         description="A short fixed message. Do not match on it: use the status."
     )

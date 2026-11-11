@@ -37,7 +37,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from app.models.platform.offer import OfferStatus
+from app.core.offer_content import AUDITED_FIELDS
+from app.core.offer_fingerprint import fingerprint, is_untouched_draft
 from app.repositories.admin_categories import CategoryRecord
 from app.repositories.admin_merchants import MerchantRecord
 from app.repositories.admin_offers import AffiliateLinkRecord, OfferRecord
@@ -53,8 +54,6 @@ from app.services.awin_offer_mapping import (
     refresh_values,
 )
 from app.services.awin_promotions import PROVIDER, Promotion, SkipReason, source_hash
-from app.services.offer_fingerprint import fingerprint
-from app.services.offer_rules import AUDITED_FIELDS
 
 SOURCE = "commands.import_awin_offers"
 logger = logging.getLogger("freejoy.awin_import")
@@ -363,9 +362,12 @@ class OfferImporter:
         advertiser is no longer the merchant it was imported under.
         """
         if (
-            offer.status is not OfferStatus.DRAFT
-            or len(links) != 1
-            or fingerprint(offer, links) != known.applied_content_hash
+            not is_untouched_draft(
+                status=offer.status.value,
+                link_count=len(links),
+                current_fingerprint=fingerprint(offer, links),
+                applied_fingerprint=known.applied_content_hash,
+            )
             or links[0].destination_url != promotion.tracking_url
             or offer.source_url != promotion.source_url
         ):

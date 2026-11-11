@@ -14,13 +14,16 @@ import type {
   OfferLinkView,
   OfferProvenanceView,
   OfferRowView,
+  PartnerSubmissionView,
 } from '@/lib/admin-catalogue/offer-view';
 import { ADMIN_OFFERS_PAGE_SIZE } from '@/lib/admin-catalogue/paging';
 import { callBackend, type ApiResult } from './server';
 import {
+  adminApplyPartnerUpdate,
   adminArchiveOffer,
   adminCreateOffer,
   adminDismissOfferSourceChange,
+  adminDismissPartnerUpdate,
   adminExpireOffer,
   adminListOffers,
   adminPublishOffer,
@@ -33,6 +36,7 @@ import {
   type OfferOut,
   type OfferProvenanceOut,
   type OfferSummaryOut,
+  type PartnerSubmissionOut,
   type UpdateOfferRequest,
 } from './generated';
 
@@ -143,6 +147,40 @@ export function dismissAdminOfferSourceChange(
   );
 }
 
+/**
+ * Apply or dismiss the update a retailer sent for an offer an editor has touched. Both send the `review_token` of the
+ * offer the admin loaded and the `pending_hash` of the proposal the page showed; the backend answers 409
+ * `offer_changed` when either moved since and 409 `illegal_transition` when nothing is waiting. Applying writes the
+ * proposal through the normal edit path (it needs `offers.write`, and `offers.publish` too for a live offer).
+ */
+export function applyAdminOfferPartnerUpdate(
+  offerId: string,
+  reviewToken: string,
+  pendingHash: string
+) {
+  return callBackend((client) =>
+    adminApplyPartnerUpdate({
+      client,
+      path: { offer_id: offerId },
+      body: { review_token: reviewToken, pending_hash: pendingHash },
+    })
+  );
+}
+
+export function dismissAdminOfferPartnerUpdate(
+  offerId: string,
+  reviewToken: string,
+  pendingHash: string
+) {
+  return callBackend((client) =>
+    adminDismissPartnerUpdate({
+      client,
+      path: { offer_id: offerId },
+      body: { review_token: reviewToken, pending_hash: pendingHash },
+    })
+  );
+}
+
 export type OfferStatusCounts = Record<OfferStatus | 'TOTAL' | 'NEEDS_REVIEW', number>;
 
 /**
@@ -195,6 +233,7 @@ export function toOfferRow(offer: OfferSummaryOut): OfferRowView {
     updatedAt: offer.updated_at,
     importProvider: offer.import_provider,
     sourceChangedAt: offer.source_changed_at,
+    partnerRef: offer.partner_ref,
   };
 }
 
@@ -205,6 +244,23 @@ function toProvenance(provenance: OfferProvenanceOut | null): OfferProvenanceVie
     externalId: provenance.external_id,
     appliedAt: provenance.applied_at,
     sourceChangedAt: provenance.source_changed_at,
+  };
+}
+
+function toPartnerSubmission(partner: PartnerSubmissionOut | null): PartnerSubmissionView | null {
+  if (!partner) return null;
+  return {
+    ref: partner.ref,
+    merchantId: partner.merchant_id,
+    merchantName: partner.merchant_name,
+    submittedAt: partner.submitted_at,
+    pending: partner.pending
+      ? {
+          hash: partner.pending.hash,
+          submittedAt: partner.pending.submitted_at,
+          payload: partner.pending.payload,
+        }
+      : null,
   };
 }
 
@@ -248,6 +304,8 @@ export function toOfferDetail(offer: OfferOut): OfferDetailView {
     createdAt: offer.created_at,
     links: offer.links.map(toOfferLink),
     needsBasisConfirmation: offer.needs_basis_confirmation,
+    basisIsPlaceholder: Boolean(offer.basis_is_placeholder),
     provenance: toProvenance(offer.provenance),
+    partnerSubmission: toPartnerSubmission(offer.partner_submission),
   };
 }

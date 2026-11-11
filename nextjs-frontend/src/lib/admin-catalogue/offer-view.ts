@@ -24,6 +24,8 @@ export interface OfferRowView {
   importProvider: string | null;
   /** Set while the source has moved on and nobody has reviewed the change (the review queue). */
   sourceChangedAt: string | null;
+  /** The retailer's own ref, for an offer submitted through the partner API; null otherwise. */
+  partnerRef: string | null;
 }
 
 /** Where an imported offer came from (the offer page's read-only Provenance panel). */
@@ -32,6 +34,23 @@ export interface OfferProvenanceView {
   externalId: string;
   appliedAt: string;
   sourceChangedAt: string | null;
+}
+
+/** What a retailer proposed for an offer an editor has touched: sanitised content, as the partner API stored it. */
+export interface PartnerProposalView {
+  /** Sent back to apply or dismiss: it names exactly the proposal the editor was shown. */
+  hash: string;
+  submittedAt: string;
+  payload: Record<string, unknown>;
+}
+
+/** The retailer behind an offer submitted through the partner API. */
+export interface PartnerSubmissionView {
+  ref: string;
+  merchantId: string;
+  merchantName: string;
+  submittedAt: string;
+  pending: PartnerProposalView | null;
 }
 
 export interface OfferLinkView {
@@ -68,8 +87,15 @@ export interface OfferDetailView extends OfferRowView {
    * affiliate network). The API works it out; this page does not hold its own copy of the rule.
    */
   needsBasisConfirmation: boolean;
+  /**
+   * True while a retailer's submission has a commercial basis nobody chose: the stored value is only a placeholder, so
+   * it is never shown as the offer's basis. Publishing then asks the editor to choose one.
+   */
+  basisIsPlaceholder: boolean;
   /** Null for an offer made by hand. */
   provenance: OfferProvenanceView | null;
+  /** Null unless the offer was submitted through the partner API. */
+  partnerSubmission: PartnerSubmissionView | null;
 }
 
 const LOCAL_DATE_TIME_LENGTH = 19;
@@ -96,7 +122,11 @@ export function offerToFormValues(offer: OfferDetailView): OfferFormValues {
     categoryId: offer.categoryId,
     merchantId: offer.merchantId,
     offerType: offer.offerType as OfferFormValues['offerType'],
-    commercialBasis: isCommercialBasis(offer.commercialBasis) ? offer.commercialBasis : '',
+    // A placeholder basis is not a choice: the form starts with nothing selected until an editor picks one.
+    commercialBasis:
+      !offer.basisIsPlaceholder && isCommercialBasis(offer.commercialBasis)
+        ? offer.commercialBasis
+        : '',
     featured: offer.featured,
     imageTint: offer.imageTint as OfferFormValues['imageTint'],
     imageLabel: offer.imageLabel,

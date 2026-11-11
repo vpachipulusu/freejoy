@@ -53,6 +53,7 @@ export function OffersTable({ rows }: { rows: OfferTableRow[] }) {
               <OfferImportBadge
                 importProvider={row.importProvider}
                 sourceChangedAt={row.sourceChangedAt}
+                partnerRef={row.partnerRef}
               />
             </TableCell>
             <TableCell label="Category" className="text-muted-foreground">

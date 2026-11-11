@@ -201,8 +201,9 @@ describe('partner API page (FREEJ-59)', () => {
     expect(text).toContain('GET /partner/v1/me is called as $FREEJOY_PARTNER_URL/me');
     for (const operation of listOperations()) {
       const relative = operation.path.slice('/partner/v1'.length);
+      // A templated path is called with a concrete id: the part before the first `{` is the same.
       expect(OPERATION_CONTENT[operation.operationId].request).toContain(
-        `$FREEJOY_PARTNER_URL${relative}`
+        `$FREEJOY_PARTNER_URL${relative.split('{')[0]}`
       );
     }
   });
@@ -230,13 +231,14 @@ describe('partner API page (FREEJ-59)', () => {
     expect(text).toMatch(/ask the person at Freejoy who gave you the key/);
   });
 
-  it('says nothing is published without an editor, and that today it can only read', () => {
+  it('says nothing is published without an editor, and that what is sent is a draft', () => {
     const { container } = render(<PartnerApiPage />);
 
     const text = pageText(container);
     expect(text).toMatch(/Nothing is published through this API/);
     expect(text).toMatch(/editors check and write every listing before it goes live/);
-    expect(text).toMatch(/Today it can only read: it cannot change anything/);
+    expect(text).toMatch(/What you send is stored as a draft/);
+    expect(text).not.toMatch(/Today it can only read|it cannot change anything/);
     expect(screen.getByRole('link', { name: 'page for retailers' })).toHaveAttribute(
       'href',
       '/partners'
@@ -268,7 +270,8 @@ describe('partner API page (FREEJ-59)', () => {
       /in a very busy minute, or when many clicks on one offer come from one network in a minute, some clicks are not recorded and the count can be low/
     );
     expect(text).toMatch(/deleted after 395 days/);
-    expect(text).not.toMatch(/600|still sent on/);
+    // The recording rate figure must not be on the page (600 as a field length is not that figure).
+    expect(text).not.toMatch(/600 (clicks|times|requests)|a minute for each offer|still sent on/);
   });
 
   it('expands its abbreviations and relates UTC to UK time', () => {
@@ -366,13 +369,13 @@ describe('partner API page (FREEJ-59)', () => {
         listOperations: () =>
           original.listOperations().map((operation) => ({
             ...operation,
-            responses: [...operation.responses, { status: '409' }],
+            responses: [...operation.responses, { status: '418' }],
           })),
       };
     });
     const { default: Page } = await import('@/app/(public)/developers/partner-api/page');
 
-    expect(() => render(<Page />)).toThrow(/Status 409 of partner-me has no row/);
+    expect(() => render(<Page />)).toThrow(/Status 418 of partner-me has no row/);
     vi.doUnmock('@/lib/partner-api/schema');
   });
 });

@@ -105,7 +105,15 @@ def test_the_public_schemas_do_not_state_the_cap_or_how_the_limiter_behaves() ->
     for path in PUBLIC_SCHEMAS:
         schema = path.read_text(encoding="utf-8")
 
-        assert str(MAIN.limit) not in schema, path
+        # The figure must not be stated as a click rate. (The bare number can appear: the offer fields have length
+        # limits of their own, for example maxLength 600 on a paragraph, which has nothing to do with clicks.)
+        for phrasing in (
+            f"{MAIN.limit} clicks",
+            f"{MAIN.limit} a minute",
+            f"{MAIN.limit} per minute",
+            f"{MAIN.limit} times",
+        ):
+            assert phrasing not in schema, (path, phrasing)
         assert "still sent on" not in schema, path
         for internal in ("bucket", "lower bound", "outbound_offer"):
             assert internal not in schema, (path, internal)

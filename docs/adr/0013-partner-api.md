@@ -19,7 +19,7 @@ record manages: a retailer who holds a partner URL and a key must reach partner 
 FREEJ-56 built the **empty, switched-off surface** and the proofs that keep it confined. FREEJ-57 added **per-merchant keys,
 partner authentication, the rate limits and the restricted database role**, with one harmless endpoint, `GET /partner/v1/me`,
 that proves the path. FREEJ-59 added **click counts** (`GET /partner/v1/clicks`, read only, for the key's own merchant) and the public
-documentation page. No offer can be touched yet (FREEJ-58).
+documentation page; FREEJ-58 added **offer submissions** (create, update, status, end) that only ever produce drafts.
 
 ## Decision
 
@@ -87,7 +87,7 @@ middleware, so a 500 would otherwise skip the headers.
 | `require_internal_key` on every main-app route (or an explicit allowlist) | A caller who reaches a main-app route by some other path, because a rewrite was widened or a hostname falls through, and has no internal key. |
 | A distinct credential, checked before routing and at the sub-app (FREEJ-57) | A partner key doing anything on an internal route, and a stolen internal key doing anything as a partner. |
 | The surface wrapper | Cookies, CORS, caching, docs and oversized bodies on the partner surface; a switched-off surface answering anything but 404. |
-| Scoping every partner query to the key's merchant (built for clicks in FREEJ-59, which has no merchant or offer parameter and a merchant predicate in every statement; submissions follow in FREEJ-58) | One merchant reading or changing another's data. This is the second half of the invariant. |
+| Scoping every partner query to the key's merchant (built for clicks in FREEJ-59, which has no merchant or offer parameter and a merchant predicate in every statement, and for submissions in FREEJ-58, whose store methods all take the merchant and put it in their `WHERE` or in the source of an `INSERT ... SELECT`) | One merchant reading or changing another's data. This is the second half of the invariant. |
 | A restricted database role through a separate session provider and `PARTNER_DATABASE_URL` (FREEJ-57) | A bug in a partner handler reading or writing tables a partner never needs (users, sessions, billing). |
 
 ### The proofs that stay in the gate
@@ -155,6 +155,18 @@ which tests pin (the merchant and status predicates are in each statement, and a
 No visitor data is reachable: no referrer, link or user column is granted. This is accepted, like the temporary-table residual; a row-level view or
 policy is a later hardening. `tests/core/test_partner_role_e2e.py` names it as the accepted residual.
 
+**Nothing inside the role separates one merchant from another** (FREEJ-58). The submission grants are column grants, and the database
+guards (migration `0008`) cannot know which merchant a request is for, because the session carries no merchant identity. They make the role
+unable to publish, verify, feature, name a basis, write a provider other than `direct`, touch an offer that has no partner submission, change
+a published offer other than to end it, or forge or flood the audit trail; they do not stop SQL run on the partner session from editing a
+**draft** submitted by another merchant, ending another merchant's **live partner offer**, attaching a submission to a bare (linkless,
+unimported) draft of its own merchant, or reading the columns its `SELECT` grants name for every merchant. Tenancy rests on the `WHERE` of the
+store methods, which tests pin (`test_partner_submission_store.py`, and the wrong-merchant proof in `test_partner_tenancy_e2e.py` that every
+read and write for the wrong merchant finds and changes nothing, including the `INSERT ... SELECT` of a link, a provenance row and a
+submission). The audit guard bounds an audit row's shape and size, not whom it is about. Accepted like the residual above; per-merchant
+database identity (one role or a `SET LOCAL` setting per merchant, with a row-level policy) is the later hardening.
+`tests/core/test_partner_role_submissions_e2e.py::test_the_residual_nothing_separates_one_merchant_from_another_inside_the_role` names it.
+
 **Middleware of the main app wraps the surface from outside.** Anything added to the main app (a CORS or session
 middleware, a response hook) also runs on partner responses and the surface cannot undo it. So the list of main-app
 middleware is pinned by a test; adding to it has to be a decision that also deals with `/partner/v1`.
@@ -176,8 +188,10 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
 4. Create the `freejoy_partner` role from `commands/sql/partner_role.sql` and set `PARTNER_DATABASE_URL` (ending `?sslmode=verify-full`).
    Startup refuses `PARTNER_API_ENABLED=true` without it, and refuses a URL whose user is the owner's. **The Vercel Firewall rate rule in
    step 2 is a condition of `PARTNER_API_ENABLED=true`**, not a nicety: nothing else bounds unauthenticated lookups.
-5. Do not set `PARTNER_API_ENABLED=true` in production until the submissions story (FREEJ-58) is in and reviewed, and re-run
-   `commands/sql/partner_role.sql` after FREEJ-59 (its click grants are new).
+5. Do not set `PARTNER_API_ENABLED=true` in production until the submissions story (FREEJ-58) is in and reviewed. Roll out migration `0008`
+   in the order in [platform-models.md](../developer/platform-models.md#rolling-out-migration-0008-partner_submissions-and-the-partner-guard-triggers)
+   (pause the Awin import, pre-flight, upgrade, deploy, **re-run `commands/sql/partner_role.sql`**, then enable the surface), and re-run it after
+   FREEJ-59 too (its click grants are new). Never downgrade `0008` in production.
 6. Set `PUBLIC_SITE_URL` to the website's public https origin. Every offer in a click report carries a link built from it (it defaults to
    `http://localhost:3000`), so startup refuses `PARTNER_API_ENABLED=true` in production unless it is an https origin that is not localhost.
 
@@ -210,11 +224,40 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   selects the row, the comparison is constant time, and an unknown id costs the same comparison against a dummy.
 - **Restricted database role (built):** `freejoy_partner`, created from `fastapi_backend/commands/sql/partner_role.sql` by the owner, reached through
   `PartnerSessionProvider` and `PARTNER_DATABASE_URL` (ADR-004's session seam; required when the switch is on). `SELECT` and `UPDATE (last_used_at)` on
-  `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants`, `offers` and `click_events` (the last two
-  from FREEJ-59, read only), as column grants; no access to `audit_logs`, nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
-- **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (FREEJ-58).
-- **Submissions create drafts only.** A partner can never publish; the existing review and publish rules stay
-  ours.
+  `partner_api_keys` (`last_used_at` only) and `SELECT` on the columns the code reads of `merchants` and `click_events` (FREEJ-59, read only), plus the submission grants below (FREEJ-58), as column grants; no `SELECT` on `audit_logs` (an `INSERT` of five columns only), nothing else, no DDL in `public`. The script verifies this from the catalog and raises otherwise. The connection limit and the Firewall rule are the only bound on unauthenticated lookups.
+- **Tables:** `partner_api_keys` (built, migration `0007`) and `partner_submissions` (built, migration `0008`, FREEJ-58).
+- **Submissions create drafts only** (built, FREEJ-58). A partner can never publish; the existing review and publish rules stay
+  ours. How it is enforced, in layers: the API only ever inserts a draft; the role has no `INSERT` or `UPDATE` on `offers.status`,
+  `last_verified_at`, `featured` or `commercial_basis` (the column default supplies `DRAFT`); the role may write `affiliate_links` only as
+  a `direct` link (a trigger supplies the provider) whose host, and path under a shared host, the service checks against the merchant's
+  stored website, which the role can never write; an update of anything but an untouched draft is stored as a pending proposal for an editor, applied only through the admin's
+  normal edit path with the review token. The pure rules both sides need moved to `app/core` and are re-exported by their old modules, so
+  `app/partner` still imports only `app.core` and itself.
+- **Guard triggers** (FREEJ-58, migration `0008`). The column grants have no row condition, so eight triggers, each telling the role from every
+  other writer by a privilege it lacks (`has_column_privilege(current_user, ...)`), with invoker rights and a pinned `search_path`, add it:
+  `offers` insert defaults (the placeholder basis; only a sample or a trial) and update guard (only an offer with a submission of the same
+  merchant; once not a DRAFT, only an end: `end_at` set and not after now, `start_at` only cleared), `offers` first-publish note,
+  `affiliate_links` insert defaults and write guard (direct links of a DRAFT with a submission), `offer_imports` write guard (provider `partner`,
+  offer with a submission), `partner_submissions` insert guard (a DRAFT of the same merchant with no link and no provenance row yet) and the audit
+  guard below. The service inserts offer, submission, link, provenance in that order because the guards require it. The role script refuses to
+  finish, and the partner session refuses to serve (503), unless all eight exist on their tables, call their functions and are enabled, and unless the
+  role cannot set `session_replication_role`.
+- **Audit for the partner role** (FREEJ-58). `audit_logs` is not granted bare. The role gets an `INSERT` of five columns (not `user_id`,
+  not `organization_id`, no read, no update, no delete) and the trigger `freejoy_audit_insert_guard` lets a writer that may not name a user
+  append only the three partner actions below, about `offers`, with no user or organisation, an id of at most 64 characters and metadata of at most
+  2,048 bytes, so it cannot forge an `admin.` row or bury the trail. A merchant may also make at most 2,000 writes a day (a rate-limit policy keyed by merchant,
+  fail closed, `daily_write_budget`), which bounds the trail from the other side. Chosen over a separate `partner_audit_logs` table because
+  the admin audit view then shows partner activity unchanged. Actions: `partner.offers.submit`, `partner.offers.update`,
+  `partner.offers.end`; the key id is the actor.
+- **`commercial_basis`** is NOT NULL with no default, and the role may not write it. A trigger gives an insert by a writer that may not set
+  it the placeholder `SPONSORED`, the cautious label (over-disclosure is the safe error, and nobody has chosen it). Publishing a partner offer
+  requires the editor to state the basis in the publish request, which is then stored (the admin form shows nothing preselected for a partner
+  draft), so the placeholder can never reach the public page by default.
+- **Ending supersedes a waiting update.** `POST .../end` discards a proposal that waits for an editor (the audit row says `superseded_pending`),
+  and applying a proposal to an ended offer drops its end date when it would reopen the offer (it is older than the end, or has no end or a past
+  one): reopening takes a new `PUT` with a future `end_at`, approved by an editor.
+- **A retailer's draft is archived, never deleted.** The role has no `DELETE`, and a submission row cascades from its offer, so an editor
+  archives a partner offer rather than deleting it (the ref then answers `offer_closed`).
 
 ## Alternatives considered
 

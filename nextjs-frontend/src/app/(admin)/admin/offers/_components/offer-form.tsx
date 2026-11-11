@@ -9,7 +9,11 @@ import {
   updateOfferAction,
   type OfferWrittenData,
 } from '@/app/actions/admin/offer-actions';
-import { offerFormSchema, type OfferFormValues } from '@/lib/admin-catalogue/offer-schema';
+import {
+  offerEditSchema,
+  offerFormSchema,
+  type OfferFormValues,
+} from '@/lib/admin-catalogue/offer-schema';
 import { settleAction } from '@/lib/admin-catalogue/settle-action';
 import type { OfferRowStatus } from '@/lib/admin-catalogue/offer-status';
 import { useToast } from '@/hooks/use-toast';
@@ -43,6 +47,8 @@ type OfferFormProps = {
   merchants: PickOption[];
   /** An archived offer cannot be edited: the form shows its values and offers no save. */
   readOnly?: boolean;
+  /** The saved basis is only a placeholder (a retailer's submission): the form shows none chosen and may keep it so. */
+  basisIsPlaceholder?: boolean;
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -69,11 +75,12 @@ export function OfferForm({
   categories,
   merchants,
   readOnly = false,
+  basisIsPlaceholder = false,
 }: OfferFormProps) {
   const router = useRouter();
   const { toast } = useToast();
   const form = useForm<OfferFormValues>({
-    resolver: zodResolver(offerFormSchema),
+    resolver: zodResolver(basisIsPlaceholder ? offerEditSchema : offerFormSchema),
     defaultValues: initialValues,
     // The page reloads the offer after a save or when somebody else changed it: the form follows, but never
     // overwrites a field the editor has typed in.
@@ -143,7 +150,7 @@ export function OfferForm({
           <ClassificationFields form={form} categories={categories} merchants={merchants} />
         </Section>
         <Section title="How it is paid for">
-          <CommercialBasisFields form={form} />
+          <CommercialBasisFields form={form} placeholder={basisIsPlaceholder} />
         </Section>
         <Section title="Picture">
           <PictureFields form={form} />

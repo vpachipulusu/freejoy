@@ -32,6 +32,7 @@ from app.models.platform.offer import (
 )
 from app.models.platform.organization import Organization
 from app.models.platform.partner_api_key import PartnerApiKey
+from app.models.platform.partner_submission import PartnerSubmission
 from app.models.platform.seo_meta import SeoMeta
 from app.models.platform.stripe_event import StripeEvent
 from app.models.platform.url_redirect import UrlRedirect
@@ -66,6 +67,7 @@ __all__ = [
     "OfferType",
     "Organization",
     "PartnerApiKey",
+    "PartnerSubmission",
     "PostageKind",
     "SeoMeta",
     "StripeEvent",

@@ -49,6 +49,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.affiliate_hosts import destination_allowed, is_known_provider
 from app.core.config import settings
 from app.core.permissions import AdminContext
+from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import CommercialBasis, OfferStatus
 from app.repositories.admin_offers import (
     AffiliateLinkRecord,
@@ -56,6 +57,7 @@ from app.repositories.admin_offers import (
     OfferPage,
     OfferProvenance,
     OfferRecord,
+    PartnerSubmissionRecord,
     ReviewRefs,
 )
 from app.services.admin_catalogue_common import (
@@ -103,6 +105,7 @@ LINK_FIELDS = frozenset({"provider", "destination_url", "tracking_id", "active"}
 LINK_AUDITED = frozenset({"provider", "active"})
 RESOURCE = "offers"
 DISMISS_ACTION = "dismiss_source_change"
+PARTNER_PROVIDER = "partner"
 LINK_RESOURCE = "affiliate_links"
 
 
@@ -118,6 +121,12 @@ class OfferStore(Protocol):
         self, offer_id: str, *, lock: bool = False
     ) -> OfferProvenance | None: ...
     async def clear_source_change(self, offer_id: str) -> None: ...
+    async def get_partner_submission(
+        self, offer_id: str, *, lock: bool = False
+    ) -> PartnerSubmissionRecord | None: ...
+    async def clear_partner_pending(
+        self, offer_id: str, *, applied_hash: str | None = None
+    ) -> None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
     async def update(self, offer_id: str, values: dict[str, Any]) -> OfferRecord: ...
@@ -145,6 +154,8 @@ class OfferDetail:
     previous_review_token: str | None = None
     # Where an imported offer came from (None for a hand-made offer).
     provenance: OfferProvenance | None = None
+    # The retailer behind an offer submitted through the partner API, and its waiting update (None otherwise).
+    partner: PartnerSubmissionRecord | None = None
 
 
 def _host(url: str) -> str:
@@ -222,11 +233,31 @@ class AdminOfferService:
         review_token: str | None = None,
     ) -> OfferDetail:
         """Edit an offer. ``review_token`` is needed only when the request changes the commercial basis."""
+        detail = await self._stage_update(actor, offer_id, changes, review_token)
+        await self.session.commit()
+        return detail
+
+    async def _stage_update(
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        changes: Mapping[str, Any],
+        review_token: str | None,
+    ) -> OfferDetail:
+        """Every step of an edit up to the audit row, without the commit (``apply_partner_update`` adds to it)."""
         if not changes or not changes.keys() <= EDITABLE_FIELDS:
             raise ValueError("Invalid offer fields")
         current = await self._locked(offer_id)
         previous = await self._stored_token(current)
         require_editable(current.status)
+        wanted_merchant = changes.get("merchant_id")
+        if (
+            wanted_merchant is not None
+            and wanted_merchant != current.merchant_id
+            and await self._is_partner_submission(offer_id)
+        ):
+            # The retailer's submission is keyed by its merchant: moving the offer would orphan it.
+            raise InvalidInput("partner_merchant_fixed")
         self._guard_basis_change(actor, current, changes, review_token, previous)
         values = clean_urls(changes, URL_FIELDS)
         merged = replace(current, **values)
@@ -248,9 +279,7 @@ class AdminOfferService:
             after=after,
             details={"fields": sorted(values)},
         )
-        detail = await self._detail(updated, previous)
-        await self.session.commit()
-        return detail
+        return await self._detail(updated, previous)
 
     async def transition(
         self,
@@ -270,9 +299,18 @@ class AdminOfferService:
         if action is OfferAction.VERIFY:
             raise ValueError("Use verify")
         current = await self._locked(offer_id)
+        partner = False
         if action is OfferAction.PUBLISH:
             previous = await self._require_unchanged(current, review_token)
-            if commercial_basis not in (None, current.commercial_basis):
+            partner = await self._is_partner_submission(offer_id)
+            if partner and commercial_basis is None:
+                # A retailer's draft carries a placeholder basis that nobody chose: the editor states one.
+                raise PublishBlocked([PublishReason.COMMERCIAL_BASIS_REQUIRED.value])
+            if (
+                not partner
+                and commercial_basis is not None
+                and commercial_basis != current.commercial_basis
+            ):
                 raise OfferChanged()
         else:
             previous = await self._stored_token(current)
@@ -281,14 +319,30 @@ class AdminOfferService:
             await self._require_publishable(
                 current, basis_confirmed=commercial_basis is not None
             )
-        updated = await self.store.update(offer_id, {"status": target})
+        changes: dict[str, Any] = {"status": target}
+        if partner and commercial_basis is not None:
+            changes["commercial_basis"] = (
+                commercial_basis  # the editor's statement replaces the placeholder
+            )
+        if partner and action is OfferAction.PUBLISH:
+            fresh = await self._fresh_partner_slug(current)
+            if fresh is not None:
+                changes["slug"] = fresh
+        updated = await self.store.update(offer_id, changes)
         await self.auditor.record(
             actor,
             action=f"admin.offers.{action.value}",
             resource=RESOURCE,
             resource_id=offer_id,
-            before={"status": current.status.value},
-            after=self._transition_after(action, target, current),
+            before=(
+                {
+                    "status": current.status.value,
+                    "commercial_basis": current.commercial_basis.value,
+                }
+                if partner
+                else {"status": current.status.value}
+            ),
+            after=self._transition_after(action, target, updated),
             details=(
                 {"basis_confirmed": commercial_basis is not None}
                 if action is OfferAction.PUBLISH
@@ -380,7 +434,12 @@ class AdminOfferService:
         previous = await self._require_unchanged(current, review_token)
         require_editable(current.status)
         marked = await self.store.get_provenance(offer_id, lock=True)
-        if marked is None or marked.source_changed_at is None:
+        if (
+            marked is None
+            or marked.source_changed_at is None
+            or marked.provider
+            == PARTNER_PROVIDER  # a retailer's update has its own review (dismiss-partner-update)
+        ):
             raise IllegalTransition(current.status.value, DISMISS_ACTION)
         if marked.source_changed_at != seen_marker:
             raise OfferChanged()
@@ -436,6 +495,18 @@ class AdminOfferService:
         link_id: str,
         changes: Mapping[str, Any],
     ) -> AffiliateLinkRecord:
+        updated = await self._stage_link_update(actor, offer_id, link_id, changes)
+        await self.session.commit()
+        return updated
+
+    async def _stage_link_update(
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        link_id: str,
+        changes: Mapping[str, Any],
+    ) -> AffiliateLinkRecord:
+        """Every step of a link edit up to the audit row, without the commit."""
         if not changes or not changes.keys() <= LINK_FIELDS:
             raise ValueError("Invalid link fields")
         offer = await self._locked(offer_id)
@@ -484,7 +555,6 @@ class AdminOfferService:
             after=after,
             details={"offer_id": offer_id, "fields": sorted(values)},
         )
-        await self.session.commit()
         return updated
 
     async def _require_allowed_destination(
@@ -518,12 +588,18 @@ class AdminOfferService:
         links = await self.store.list_links(offer.id)
         refs = await self.store.review_refs(offer.category_id, offer.merchant_id)
         provenance = await self.store.get_provenance(offer.id)
+        partner = (
+            await self.store.get_partner_submission(offer.id)
+            if provenance is not None and provenance.provider == PARTNER_PROVIDER
+            else None
+        )
         return OfferDetail(
             offer,
             links,
             compute_review_token(offer, links, refs),
             previous,
             provenance,
+            partner,
         )
 
     async def _stored_token(self, locked: OfferRecord) -> str:
@@ -583,7 +659,33 @@ class AdminOfferService:
         """True when publishing needs a confirmed basis (see ``needs_basis_confirmation``) and none was sent."""
         if confirmed:
             return False
+        if await self._is_partner_submission(offer_id):
+            # The basis of a retailer's draft is a placeholder (nothing set it), whatever links an editor added.
+            return True
         return needs_basis_confirmation(await self._provider_pairs(offer_id))
+
+    async def _fresh_partner_slug(self, current: OfferRecord) -> str | None:
+        """For a retailer's draft that was never live, the slug rebuilt from the title as it is now (token kept).
+
+        The slug was made from the title the retailer first sent, which an editor may never have seen; a retailer
+        could otherwise keep keywords in the public address after changing the title. Once published it is fixed.
+        """
+        partner = await self.store.get_partner_submission(current.id)
+        if partner is None or partner.first_published_at is not None:
+            return None
+        token = current.slug.rsplit("-", 1)[-1]
+        try:
+            base = slugify(current.title, CATALOGUE_SLUG_MAX_LENGTH - len(token) - 1)
+        except InvalidSlug:
+            base = "offer"
+        slug = f"{base}-{token}"
+        if slug == current.slug or await self.store.slug_exists(slug):
+            return None
+        return slug
+
+    async def _is_partner_submission(self, offer_id: str) -> bool:
+        provenance = await self.store.get_provenance(offer_id)
+        return provenance is not None and provenance.provider == PARTNER_PROVIDER
 
     async def _require_publishable(
         self,

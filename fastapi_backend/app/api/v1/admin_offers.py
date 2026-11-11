@@ -33,6 +33,7 @@ from app.api.v1.admin_offers_schemas import (
     OffersPage,
     OffersPageResponse,
     OfferWriteResponse,
+    PartnerUpdateRequest,
     PublishRequest,
     UpdateLinkRequest,
     UpdateOfferRequest,
@@ -48,6 +49,7 @@ from app.repositories.admin_offers import AdminOfferRepository, OfferFilters
 from app.services.admin_catalogue_common import MAX_PAGE_SIZE
 from app.services.admin_catalogue_errors import CatalogueError
 from app.services.admin_offers import AdminOfferService, OfferDetail
+from app.services.admin_partner_updates import AdminPartnerUpdateService
 from app.services.offer_lifecycle import OfferAction
 
 router = admin_router("/v1/admin/offers", "admin-offers")
@@ -62,6 +64,17 @@ def get_offer_service(session: SessionDep, auditor: AuditorDep) -> AdminOfferSer
 
 
 ServiceDep = Annotated[AdminOfferService, Depends(get_offer_service)]
+
+
+def get_partner_update_service(
+    session: SessionDep, auditor: AuditorDep
+) -> AdminPartnerUpdateService:
+    return AdminPartnerUpdateService(AdminOfferRepository(session), session, auditor)
+
+
+PartnerUpdateServiceDep = Annotated[
+    AdminPartnerUpdateService, Depends(get_partner_update_service)
+]
 
 
 async def _transition(
@@ -102,7 +115,12 @@ async def admin_list_offers(
     return OffersPageResponse(
         data=OffersPage(
             offers=[
-                summary_out(item, page.provenance.get(item.id)) for item in page.offers
+                summary_out(
+                    item,
+                    page.provenance.get(item.id),
+                    page.partner_refs.get(item.id),
+                )
+                for item in page.offers
             ],
             total_count=page.total_count,
             limit=limit,
@@ -223,6 +241,45 @@ async def admin_dismiss_offer_source_change(
     try:
         detail = await service.dismiss_source_change(
             admin, offer_id, body.review_token, body.source_changed_at
+        )
+    except CatalogueError as exc:
+        raise catalogue_http_error(exc) from None
+    return OfferWriteResponse(data=offer_write_out(detail))
+
+
+@router.post("/{offer_id}/apply-partner-update", response_model=OfferWriteResponse)
+async def admin_apply_partner_update(
+    offer_id: ResourceId,
+    response: Response,
+    body: PartnerUpdateRequest,
+    admin: WriteAdmin,
+    service: PartnerUpdateServiceDep,
+) -> OfferWriteResponse:
+    """Write the update a retailer proposed through the normal edit path (``offers.write``; ``offers.publish`` too
+    when the offer is live). Needs the ``review_token`` and the ``pending_hash`` the editor was shown."""
+    no_store(response)
+    try:
+        detail = await service.apply_partner_update(
+            admin, offer_id, body.review_token, body.pending_hash
+        )
+    except CatalogueError as exc:
+        raise catalogue_http_error(exc) from None
+    return OfferWriteResponse(data=offer_write_out(detail))
+
+
+@router.post("/{offer_id}/dismiss-partner-update", response_model=OfferWriteResponse)
+async def admin_dismiss_partner_update(
+    offer_id: ResourceId,
+    response: Response,
+    body: PartnerUpdateRequest,
+    admin: PublishAdmin,
+    service: PartnerUpdateServiceDep,
+) -> OfferWriteResponse:
+    """Forget the update a retailer proposed and clear the "source changed" marker; changes nothing else."""
+    no_store(response)
+    try:
+        detail = await service.dismiss_partner_update(
+            admin, offer_id, body.review_token, body.pending_hash
         )
     except CatalogueError as exc:
         raise catalogue_http_error(exc) from None

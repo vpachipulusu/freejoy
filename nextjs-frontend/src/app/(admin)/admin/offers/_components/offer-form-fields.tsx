@@ -15,6 +15,7 @@ import {
   COMMERCIAL_BASIS_HELP,
   COMMERCIAL_BASIS_LABELS,
   freshnessLabel,
+  OFFER_FIELD_LABELS,
   offerTypeLabel,
   POSTAGE_KIND_LABELS,
   tintLabel,
@@ -147,28 +148,49 @@ export function ClassificationFields({
 
 const BASIS_LABEL_ID = 'offer-basis-label';
 const BASIS_ERROR_ID = 'offer-basis-error';
+const BASIS_PLACEHOLDER_ID = 'offer-basis-placeholder';
+const PLACEHOLDER_NOTE =
+  'Not chosen by an editor yet. This listing came from a retailer. You can pick one now, or leave it and choose when you publish.';
 
 /**
  * The commercial basis: a required choice with nothing selected to start with and one line of help under each
  * option. Radios, so every option and its help is on screen at once; the group is named and carries the error.
+ * For a retailer's submission whose basis is only a placeholder the group stays unselected and says so, and
+ * leaving it that way is allowed (it is then not sent).
  */
-export function CommercialBasisFields({ form }: SectionProps) {
+export function CommercialBasisFields({
+  form,
+  placeholder = false,
+}: SectionProps & { placeholder?: boolean }) {
   const { register, formState } = form;
   const error = formState.errors.commercialBasis?.message;
+  const groupDescription = [
+    placeholder ? BASIS_PLACEHOLDER_ID : null,
+    error ? BASIS_ERROR_ID : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
     <div className="space-y-3">
       <p id={BASIS_LABEL_ID} className="text-sm font-medium leading-none">
         Commercial basis
-        <span className="ms-1 text-destructive" aria-hidden="true">
-          *
-        </span>
+        {placeholder ? null : (
+          <span className="ms-1 text-destructive" aria-hidden="true">
+            *
+          </span>
+        )}
       </p>
+      {placeholder ? (
+        <p id={BASIS_PLACEHOLDER_ID} className="text-sm text-muted-foreground">
+          {PLACEHOLDER_NOTE}
+        </p>
+      ) : null}
       <div
         role="radiogroup"
         aria-labelledby={BASIS_LABEL_ID}
-        aria-required="true"
+        aria-required={placeholder ? undefined : 'true'}
         aria-invalid={error ? true : undefined}
-        aria-describedby={error ? BASIS_ERROR_ID : undefined}
+        aria-describedby={groupDescription || undefined}
         className="space-y-2"
       >
         {COMMERCIAL_BASIS_VALUES.map((value) => (
@@ -285,7 +307,7 @@ export function TermsFields({ form }: SectionProps) {
       </div>
       <label className={CHECK_ROW}>
         <input type="checkbox" className={CHECK_BOX} {...register('requiresCard')} />
-        Needs a payment card to claim
+        {OFFER_FIELD_LABELS.requiresCard}
       </label>
       <Field
         id="offer-subscription"
@@ -299,7 +321,7 @@ export function TermsFields({ form }: SectionProps) {
       </Field>
       <Field
         id="offer-eligibility"
-        label="Who can claim"
+        label={OFFER_FIELD_LABELS.eligibility}
         required
         error={errors.eligibility?.message}
       >
@@ -348,7 +370,7 @@ export function ScheduleFields({ form }: SectionProps) {
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           id="offer-start"
-          label="Starts (UTC)"
+          label={OFFER_FIELD_LABELS.startAt}
           error={errors.startAt?.message}
           hint="Optional. Date and time in UTC."
         >
@@ -358,7 +380,7 @@ export function ScheduleFields({ form }: SectionProps) {
         </Field>
         <Field
           id="offer-end"
-          label="Ends (UTC)"
+          label={OFFER_FIELD_LABELS.endAt}
           error={errors.endAt?.message}
           hint="Optional. Date and time in UTC."
         >

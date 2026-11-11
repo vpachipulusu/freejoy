@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.core.errors import register_error_handlers
@@ -11,11 +12,13 @@ from app.core.partner_keys import running_environment
 from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
+from app.partner.body_errors import partner_http_exception_handler
 from app.partner.clicks_routes import partner_validation_handler
 from app.partner.clicks_routes import router as clicks_router
 from app.partner.error_models import PartnerErrorResponse
 from app.partner.failures import register_failure_handlers
 from app.partner.mount import PartnerMount
+from app.partner.offer_routes import router as offers_router
 from app.partner.routes import router
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
 
@@ -62,16 +65,23 @@ def create_partner_api() -> FastAPI:
         dependencies=[Depends(require_partner_key)],
     )
     register_error_handlers(api)
-    # The shared 422, except that a refused from or to (clicks) gets its own fixed text and code. Any other partner
-    # route that takes a query parameter named from or to would get that text too: give it other names, or scope this.
+    # The shared 422, except that a refused ``from`` or ``to`` of the clicks route (and only that route: the handler
+    # checks the matched path) gets its own fixed text and code. Every other route, the offer routes included, keeps
+    # the shared plain "Invalid request" (``tests/api/partner/test_partner_offer_routes.py`` pins it).
     api.add_exception_handler(
         RequestValidationError,
         partner_validation_handler,  # type: ignore[arg-type]  # Starlette types handlers on Exception; as in register_error_handlers
     )
     # A database that cannot answer inside any partner route is the same fixed 503 as in authentication.
     register_failure_handlers(api)
+    # A body the parser rejects (invalid UTF-8, nesting, a huge integer) is the plain 422, not FastAPI's own 400.
+    api.add_exception_handler(
+        StarletteHTTPException,
+        partner_http_exception_handler,  # type: ignore[arg-type]
+    )
     api.include_router(router)
     api.include_router(clicks_router)
+    api.include_router(offers_router)
     return api
 
 

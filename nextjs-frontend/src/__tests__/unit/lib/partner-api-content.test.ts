@@ -42,6 +42,8 @@ const SOURCES = {
   enforcement: ['fastapi_backend', 'app', 'core', 'rate_limit_enforcement.py'],
   errors: ['fastapi_backend', 'app', 'core', 'errors.py'],
   retention: ['fastapi_backend', 'app', 'core', 'click_retention.py'],
+  caps: ['fastapi_backend', 'app', 'partner', 'caps.py'],
+  refusals: ['fastapi_backend', 'app', 'partner', 'errors.py'],
   schema: ['docs', 'partner', 'openapi.json'],
 } as const;
 
@@ -141,7 +143,7 @@ describe('the prose and examples keyed by operation id', () => {
     expect(contentProblems([...operations, extra], OPERATION_CONTENT)).toEqual([
       'partner-new-thing has no prose and example',
     ]);
-    expect(contentProblems([withBody, operations[1]], OPERATION_CONTENT)).toEqual([
+    expect(contentProblems([withBody, ...operations.slice(1)], OPERATION_CONTENT)).toEqual([
       `${withBody.operationId} has a request body and no body example`,
     ]);
     expect(
@@ -309,13 +311,13 @@ describe('the status table', () => {
   });
 
   it('says a status of an operation it does not know is an error, not "None"', () => {
-    expect(() => describeStatus('partner-me', '409')).toThrow(
-      /Status 409 of partner-me has no row/
+    expect(() => describeStatus('partner-me', '418')).toThrow(
+      /Status 418 of partner-me has no row/
     );
     expect(
-      describeStatus('partner-me', '409', {
+      describeStatus('partner-me', '418', {
         ...emptyContent(),
-        statuses: { '409': { meaning: 'A clash.' } },
+        statuses: { '418': { meaning: 'A clash.' } },
       })
     ).toEqual({
       message: '',
@@ -337,6 +339,7 @@ describe('the status table', () => {
       read(...SOURCES.surface),
       read(...SOURCES.enforcement),
       read(...SOURCES.errors),
+      read(...SOURCES.refusals),
     ].join('\n');
 
     // 405 is Starlette's own text, so it is not in these files; every other message is.
@@ -348,10 +351,15 @@ describe('the status table', () => {
         schemas: Record<string, { properties: { code: { anyOf: { const?: string }[] } } }>;
       };
     };
-    const codes = schema.components.schemas.PartnerRangeErrorResponse.properties.code.anyOf
+    const rangeCodes = schema.components.schemas.PartnerRangeErrorResponse.properties.code.anyOf
       .map((branch) => branch.const)
       .filter((code): code is string => typeof code === 'string');
-    expect(ERROR_CODE_ROWS.map((row) => row.code).sort()).toEqual(codes.sort());
+    const refusalCodes = (
+      schema.components.schemas.CodedErrorResponse.properties.code.anyOf as { enum?: string[] }[]
+    ).flatMap((branch) => branch.enum ?? []);
+    expect(ERROR_CODE_ROWS.map((row) => row.code).sort()).toEqual(
+      [...rangeCodes, ...refusalCodes].sort()
+    );
     expect(read(...SOURCES.routes)).toContain('INVALID_RANGE_CODE = "invalid_range"');
   });
 });
@@ -367,6 +375,7 @@ describe('the limits stated on the page', () => {
     const report = read(...SOURCES.report);
     const retention = read(...SOURCES.retention);
     const surface = read(...SOURCES.surface);
+    const caps = read(...SOURCES.caps);
 
     const days = number(report, /^MAX_RANGE_DAYS = (\d+)/m);
     const offers = number(report, /^MAX_OFFERS = (\d+)/m);
@@ -382,6 +391,16 @@ describe('the limits stated on the page', () => {
       `${policy('PARTNER_CLICKS_POLICY', limits)} requests a minute`
     );
     expect(value('Clicks reads')).toContain(`the ${policy('PARTNER_READ_POLICY', limits)} above`);
+    expect(value('Writes')).toContain(`${policy('PARTNER_WRITE_POLICY', limits)} requests a minute`);
+    expect(value('Writes')).toContain(
+      `${number(limits, /PARTNER_MERCHANT_WRITE_POLICY = RateLimitPolicy\(\s*"[a-z_]+", limit=(\d+)/).toLocaleString('en-GB')} a day`
+    );
+    expect(value('Offers waiting for review')).toContain(
+      `At most ${number(caps, /^MAX_OPEN_SUBMISSIONS: Final = (\d+)/m)}`
+    );
+    expect(value('Offers waiting for review')).toContain(
+      `${number(caps, /^MAX_NEW_SUBMISSIONS_PER_DAY: Final = (\d+)/m)} new offers a day`
+    );
     expect(value('Clicks date range')).toContain(`At most ${days} days`);
     expect(value('Clicks date range')).toContain(`between the years ${first} and ${last}`);
     expect(ERROR_CODE_ROWS[0].meaning).toContain(

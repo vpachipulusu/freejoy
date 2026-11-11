@@ -4,7 +4,7 @@ from sqlalchemy import CheckConstraint, Table, UniqueConstraint
 
 import app.models.platform  # noqa: F401  (registers the tables)
 from app.core.base import Base
-from app.core.platform_schema import PLATFORM_HEAD, PLATFORM_REVISIONS
+from app.core.platform_schema import PLATFORM_REVISIONS
 
 COLUMNS = {
     "id",
@@ -65,5 +65,5 @@ def test_the_check_constraints_are_named() -> None:
 
 
 def test_the_revision_is_registered_as_the_head() -> None:
-    assert PLATFORM_HEAD == "0007"
-    assert PLATFORM_REVISIONS[-2:] == ("0006", "0007")
+    assert "0007" in PLATFORM_REVISIONS
+    assert PLATFORM_REVISIONS.index("0007") == PLATFORM_REVISIONS.index("0006") + 1

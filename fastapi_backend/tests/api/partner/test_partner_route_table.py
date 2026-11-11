@@ -13,7 +13,14 @@ from app.partner.app import create_partner_api
 from app.partner.schema import partner_openapi_schema
 from app.partner.surface import PARTNER_PREFIX
 
-EXPECTED_ROUTES = [("/clicks", ["GET"]), ("/me", ["GET"])]
+EXPECTED_ROUTES = [
+    ("/clicks", ["GET"]),
+    ("/me", ["GET"]),
+    ("/offers", ["GET"]),
+    ("/offers/{ref}", ["GET"]),
+    ("/offers/{ref}", ["PUT"]),
+    ("/offers/{ref}/end", ["POST"]),
+]
 
 
 def route_table(api: FastAPI) -> list[tuple[str | None, list[str]]]:

@@ -169,8 +169,12 @@ export function minorToPounds(minor: number): string {
   return `${whole}.${pence}`;
 }
 
-function checkCrossFields(values: OfferFormValues, ctx: z.RefinementCtx): void {
-  if (values.commercialBasis === '') {
+function checkCrossFields(
+  values: OfferFormValues,
+  ctx: z.RefinementCtx,
+  basisRequired: boolean
+): void {
+  if (basisRequired && values.commercialBasis === '') {
     ctx.addIssue({
       code: 'custom',
       path: ['commercialBasis'],
@@ -213,7 +217,18 @@ function checkCrossFields(values: OfferFormValues, ctx: z.RefinementCtx): void {
   }
 }
 
-export const offerFormSchema = offerFieldsSchema.superRefine(checkCrossFields);
+/** A new offer, or any form that must choose a basis: an empty choice is refused. */
+export const offerFormSchema = offerFieldsSchema.superRefine((values, ctx) =>
+  checkCrossFields(values, ctx, true)
+);
+
+/**
+ * Editing a saved offer. A retailer's submission has a basis nobody chose yet (only a placeholder is stored), and
+ * the form shows it as not chosen: it may stay that way, and is then left out of the update.
+ */
+export const offerEditSchema = offerFieldsSchema.superRefine((values, ctx) =>
+  checkCrossFields(values, ctx, false)
+);
 
 export function emptyOfferFormValues(): OfferFormValues {
   return {

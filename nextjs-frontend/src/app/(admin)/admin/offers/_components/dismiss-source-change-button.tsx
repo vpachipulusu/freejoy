@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { useFormBusy, useFormDirty } from '../../_components/dirty-form-context';
 import { ARIA_DISABLED_STYLE } from './disabled-style';
+import { useOfferReview } from './offer-review-context';
 import { useDismissSourceChange } from './use-dismiss-source-change';
 
 type DismissSourceChangeButtonProps = {
@@ -49,6 +50,7 @@ export function DismissSourceChangeButton({
   const { run, isPending } = useDismissSourceChange();
   const dirty = useFormDirty();
   const reloading = useFormBusy();
+  const { writing } = useOfferReview();
   const [confirming, setConfirming] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +59,7 @@ export function DismissSourceChangeButton({
   const keepFocusHere = useRef(false);
   const marked = sourceChangedAt !== null;
   const canDismiss = marked && actionable;
-  const blocked = isPending || dirty || reloading;
+  const blocked = isPending || dirty || reloading || writing;
 
   useEffect(() => {
     if (!keepFocusHere.current) return;

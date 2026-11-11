@@ -38,6 +38,9 @@ export const reviewTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
  */
 export const sourceChangedAtSchema = z.string().max(40).datetime({ offset: true });
 
+/** The hash of the retailer update the page showed (a SHA-256 in hex), sent back when it is applied or dismissed. */
+export const pendingHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 const SLUG_FOR_PATH = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Runs `action` only for a confirmed admin; everyone else gets the curated refusal and nothing is called. */
@@ -59,6 +62,10 @@ export function failed(
   // A slug refusal belongs to the slug field (offers, categories and merchants all have one).
   if (result.code === 'slug_taken' || result.code === 'invalid_slug') {
     return { success: false, error, fieldErrors: { slug: error } };
+  }
+  // A retailer's submission staying with its merchant belongs to the merchant field of the edit form.
+  if (result.code === 'partner_merchant_fixed') {
+    return { success: false, error, fieldErrors: { merchantId: error } };
   }
   return { success: false, error };
 }

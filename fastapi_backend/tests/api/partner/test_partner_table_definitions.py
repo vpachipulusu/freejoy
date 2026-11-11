@@ -28,12 +28,45 @@ EXPECTED_NULLABLE = {
     ("partner_api_keys", "last_used_at"): True,
     ("merchants", "id"): False,
     ("merchants", "name"): False,
+    ("merchants", "website"): True,
     ("merchants", "active"): False,
-    ("offers", "id"): False,
-    ("offers", "merchant_id"): False,
-    ("offers", "title"): False,
-    ("offers", "slug"): False,
-    ("offers", "status"): False,
+    **{
+        (table, name): nullable
+        for table, (nullable_names, required_names) in {
+            "offers": (
+                (
+                    "source_url subscription_terms postage_amount_minor postage_currency start_at end_at "
+                    "last_verified_at freshness publisher_notes"
+                ),
+                (
+                    "id title slug summary description category_id merchant_id offer_type status featured "
+                    "image_tint image_label image_alt postage_kind requires_card eligibility availability "
+                    "steps updated_at"
+                ),
+            ),
+            "affiliate_links": (
+                "tracking_id",
+                "id offer_id provider destination_url active updated_at",
+            ),
+            "offer_imports": (
+                "source_changed_at",
+                (
+                    "id provider external_id offer_id source_hash applied_source_hash applied_content_hash "
+                    "applied_at updated_at"
+                ),
+            ),
+            "categories": ("", "id slug enabled"),
+            "partner_submissions": (
+                "pending_payload pending_hash pending_at first_published_at",
+                (
+                    "id merchant_id ref offer_id content_hash submitted_at key_id created_at updated_at"
+                ),
+            ),
+            "audit_logs": ("resource_id metadata", "id action resource"),
+        }.items()
+        for nullable, names in ((True, nullable_names), (False, required_names))
+        for name in names.split()
+    },
     ("click_events", "offer_id"): False,
     ("click_events", "occurred_at"): False,
     ("click_events", "user_agent_class"): True,
@@ -108,7 +141,17 @@ def test_every_discovered_column_has_a_pinned_nullability() -> None:
 def test_the_partner_package_reads_exactly_these_tables() -> None:
     names = sorted(t.name for t in discovered_core_tables())
 
-    assert names == ["click_events", "merchants", "offers", "partner_api_keys"]
+    assert names == [
+        "affiliate_links",
+        "audit_logs",
+        "categories",
+        "click_events",
+        "merchants",
+        "offer_imports",
+        "offers",
+        "partner_api_keys",
+        "partner_submissions",
+    ]
 
 
 def test_the_check_notices_a_table_a_column_or_a_type_that_is_not_there() -> None:
@@ -143,13 +186,13 @@ def test_a_table_added_to_a_partner_module_is_found_without_editing_this_test(
 
     monkeypatch.setattr(
         keys,
-        "partner_submissions",
-        table("partner_submissions", column("id", Text)),
+        "partner_scratch_table",
+        table("partner_scratch_table", column("id", Text)),
         raising=False,
     )
 
-    assert "partner_submissions" in {t.name for t in discovered_core_tables()}
+    assert "partner_scratch_table" in {t.name for t in discovered_core_tables()}
     assert (
-        "table partner_submissions is not in the ORM metadata"
+        "table partner_scratch_table is not in the ORM metadata"
         in definition_problems(discovered_core_tables(), dict(Base.metadata.tables))
     )

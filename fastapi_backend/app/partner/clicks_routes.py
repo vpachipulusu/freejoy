@@ -67,7 +67,7 @@ class ClickDay(BaseModel):
 
 
 class ClickOffer(BaseModel):
-    title: str
+    title: str = Field(description="The offer's title as it is published.")
     slug: str = Field(description="The offer's public slug.")
     url: str = Field(description="The offer's public page on the Freejoy website.")
     total_clicks: int = Field(description="The sum of days.")
@@ -95,7 +95,9 @@ class ClicksData(BaseModel):
     offers_truncated: bool = Field(
         description="True when you have more offers than were returned."
     )
-    retention: ClickRetention
+    retention: ClickRetention = Field(
+        description="How far back click records are kept, so you can tell a quiet day from a missing one."
+    )
     definition: str = Field(
         description="What a click is and is not, in plain words.",
         examples=[CLICK_DEFINITION],
@@ -103,8 +105,8 @@ class ClicksData(BaseModel):
 
 
 class ClicksResponse(BaseModel):
-    success: Literal[True] = True
-    data: ClicksData
+    success: Literal[True] = Field(default=True, description="Always true.")
+    data: ClicksData = Field(description="The click counts you asked for.")
 
 
 def offer_url(slug: str) -> str:
