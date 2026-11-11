@@ -1,5 +1,4 @@
 import userEvent from '@testing-library/user-event';
-import { setupUser } from '@/__tests__/unit/helpers/user';
 
 type SetupOptions = NonNullable<Parameters<typeof userEvent.setup>[0]>;
 
