@@ -76,6 +76,52 @@ describe('recordOutboundClick', () => {
     expect(fetchMock.mock.calls[0][0].headers.get('X-Client-IP')).toBeNull();
   });
 
+  it('sends commission_disclosed false only when the link was not disclosed', async () => {
+    fetchMock.mockResolvedValue(json(OK_BODY));
+
+    await recordOutboundClick('offer_1', { ...DETAILS, commissionDisclosed: false });
+    await recordOutboundClick('offer_1', DETAILS);
+
+    expect(await fetchMock.mock.calls[0][0].json()).toEqual({
+      referrer_host: 'news.example',
+      user_agent_class: 'MOBILE',
+      commission_disclosed: false,
+    });
+    expect(await fetchMock.mock.calls[1][0].json()).not.toHaveProperty('commission_disclosed');
+  });
+
+  it('maps the coded 409 to disclosure_required with the slug, and never a destination', async () => {
+    fetchMock.mockResolvedValue(
+      json(
+        {
+          success: false,
+          error: 'Disclosure required',
+          code: 'disclosure_required',
+          data: { slug: 'free-shampoo' },
+        },
+        409
+      )
+    );
+
+    await expect(recordOutboundClick('offer_1', DETAILS)).resolves.toEqual({
+      kind: 'disclosure_required',
+      slug: 'free-shampoo',
+    });
+  });
+
+  it.each([
+    ['another code', { success: false, code: 'other', data: { slug: 'x' } }],
+    ['no slug', { success: false, code: 'disclosure_required', data: {} }],
+    ['a non-string slug', { success: false, code: 'disclosure_required', data: { slug: 4 } }],
+    ['no body', null],
+  ])('maps a 409 with %s to unavailable', async (_name, body) => {
+    fetchMock.mockResolvedValue(json(body, 409));
+
+    await expect(recordOutboundClick('offer_1', DETAILS)).resolves.toEqual({
+      kind: 'unavailable',
+    });
+  });
+
   it('maps 404 to not_found', async () => {
     fetchMock.mockResolvedValue(json({ success: false, error: 'Offer not found' }, 404));
 

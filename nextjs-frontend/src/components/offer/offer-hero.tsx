@@ -52,6 +52,7 @@ export function OfferHero({ offer, merchant, category, ended }: OfferHeroProps) 
             offerType={offer.offerType}
             demo={offer.demo}
             sponsored={offer.sponsored}
+            earnsCommission={offer.earnsCommission !== false}
             offerId={offer.demo ? null : offer.id}
             conditions={ctaConditions(offer)}
           />

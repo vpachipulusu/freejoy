@@ -323,3 +323,66 @@ async def test_a_database_error_is_a_500_envelope_with_no_destination() -> None:
     assert response.status_code == 500
     assert response.json() == {"success": False, "error": "Internal server error"}
     assert store.clicks == []
+
+
+# --- the disclosure guard (FREEJ-60) -----------------------------------------------
+
+
+async def test_an_undisclosed_click_on_a_commission_link_is_a_coded_409_with_the_slug_only() -> (
+    None
+):
+    http, store, committer, _ = build(make_offer())
+
+    async with http:
+        response = await http.post(PATH, json={"commission_disclosed": False})
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "success": False,
+        "error": "Disclosure required",
+        "code": "disclosure_required",
+        "data": {"slug": "free-shampoo"},
+    }
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "set-cookie" not in response.headers
+    assert "awin" not in response.text and "destination" not in response.text
+    assert store.clicks == [] and committer.commits == 0
+
+
+async def test_an_undisclosed_click_on_a_non_commission_link_redirects_as_usual() -> (
+    None
+):
+    link = make_link(
+        provider="direct", destination_url="https://www.acme.example/free-sample"
+    )
+    http, store, _, _ = build(make_offer(), [link])
+
+    async with http:
+        response = await http.post(PATH, json={"commission_disclosed": False})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["destination_url"].startswith("https://www.acme")
+    assert len(store.clicks) == 1
+
+
+@pytest.mark.parametrize("body", [None, {}, {"commission_disclosed": True}])
+async def test_a_disclosed_or_absent_flag_is_the_ordinary_click(
+    body: dict[str, Any] | None,
+) -> None:
+    http, store, _, _ = build(make_offer())
+
+    async with http:
+        response = await http.post(PATH, json=body)
+
+    assert response.status_code == 200
+    assert len(store.clicks) == 1
+
+
+async def test_a_non_boolean_flag_is_a_422_and_nothing_is_written() -> None:
+    http, store, _, _ = build(make_offer())
+
+    async with http:
+        response = await http.post(PATH, json={"commission_disclosed": "maybe"})
+
+    assert response.status_code == 422
+    assert store.clicks == []

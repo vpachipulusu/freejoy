@@ -112,13 +112,29 @@ describe('offer trust panel date', () => {
 
 describe('call to action conditions line', () => {
   it('shows the generated line after a demo button', () => {
-    render(<OfferCta offerType="free_sample" demo conditions="Postage: £2.99." />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo
+        conditions="Postage: £2.99."
+      />
+    );
 
     expect(screen.getByText('Postage: £2.99.')).toBeInTheDocument();
   });
 
   it('ties the line to the demo button as its accessible description, without renaming the button', () => {
-    render(<OfferCta offerType="free_sample" demo conditions="Postage: £2.99." />);
+    render(
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo
+        conditions="Postage: £2.99."
+      />
+    );
 
     const button = screen.getByRole('button', { name: 'Request this sample' });
     expect(button).toHaveAccessibleDescription('Postage: £2.99.');
@@ -127,16 +143,24 @@ describe('call to action conditions line', () => {
 
   it('ties the line to the real offer link as its accessible description, without renaming the link', () => {
     render(
-      <OfferCta offerType="free_sample" demo={false} offerId="api-1" conditions="Postage: £2.99." />
+      <OfferCta
+        sponsored={false}
+        earnsCommission
+        offerType="free_sample"
+        demo={false}
+        offerId="api-1"
+        conditions="Postage: £2.99."
+      />
     );
 
     const link = screen.getByRole('link', { name: 'Request this sample' });
-    expect(link).toHaveAccessibleDescription('Postage: £2.99.');
+    // The commission sentence of an offer that earns is described too (FREEJ-60), after the conditions line.
+    expect(link).toHaveAccessibleDescription(/^Postage: £2\.99\. Freejoy is paid a commission/);
     expect(link).not.toHaveAttribute('aria-label');
   });
 
   it('sets no description when there is no line', () => {
-    render(<OfferCta offerType="cashback" demo />);
+    render(<OfferCta sponsored={false} earnsCommission offerType="cashback" demo />);
 
     expect(screen.getByRole('button', { name: 'Get this cashback' })).not.toHaveAttribute(
       'aria-describedby'
@@ -146,6 +170,8 @@ describe('call to action conditions line', () => {
   it('shows the generated line after a real offer button, before the commission sentence', () => {
     const { container } = render(
       <OfferCta
+        sponsored={false}
+        earnsCommission
         offerType="free_trial"
         demo={false}
         offerId="api-1"
@@ -163,13 +189,17 @@ describe('call to action conditions line', () => {
   });
 
   it('adds nothing when there is no line', () => {
-    const { container } = render(<OfferCta offerType="cashback" demo />);
+    const { container } = render(
+      <OfferCta sponsored={false} earnsCommission offerType="cashback" demo />
+    );
 
     expect(container.textContent).not.toMatch(/postage:|payment card/i);
   });
 
   it('the demo disclosure line no longer hedges about earning commission "if you qualify"', () => {
-    const { container } = render(<OfferCta offerType="voucher" demo />);
+    const { container } = render(
+      <OfferCta sponsored={false} earnsCommission offerType="voucher" demo />
+    );
 
     expect(container.textContent).not.toMatch(/may earn|if you qualify/i);
     expect(container.textContent).toMatch(/marked "Ad"/);

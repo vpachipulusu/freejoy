@@ -3,7 +3,7 @@
  * logging a dropped record. This is the facade boundary: nothing the API sends reaches a page or a URL
  * before it has passed here.
  */
-import type { ApiCategory, ApiEndedOffer, ApiOffer } from '@/lib/api/catalogue';
+import type { ApiCategory, ApiEndedOffer, ApiOffer, ApiOfferDetail } from '@/lib/api/catalogue';
 import { logger } from '@/lib/logger';
 import { CatalogueUnavailableError } from './errors';
 import { isValidSlug } from './slug';
@@ -166,6 +166,7 @@ export function mapOffer(api: ApiOffer): Offer | null {
     offerType: api.offer_type,
     status: 'published',
     sponsored: api.sponsored,
+    earnsCommission: null,
     featured: api.featured,
     image: toImage(api.image),
     postage: toPostage(api.postage),
@@ -182,6 +183,23 @@ export function mapOffer(api: ApiOffer): Offer | null {
     source: 'api',
     destinationUrl: null,
   };
+}
+
+/**
+ * One API offer DETAIL as an `Offer`: `mapOffer` plus `earns_commission`. A boolean is carried as sent. When it is
+ * absent or not a boolean (an older backend) the offer is still shown, the flag stays unknown (null), and a
+ * warning with the slug is logged: unlike `sponsored` it never drops the record, because the page treats
+ * "unknown" as "disclose" (`OfferHero`), which is the safe side under UK ASA rules.
+ */
+export function mapOfferDetail(api: ApiOfferDetail): Offer | null {
+  const offer = mapOffer(api);
+  if (offer === null) return null;
+  const flag: unknown = api.earns_commission;
+  if (typeof flag === 'boolean') return { ...offer, earnsCommission: flag };
+  logger.warn('Catalogue: offer detail has no readable earns_commission flag', {
+    slug: offer.slug,
+  });
+  return offer;
 }
 
 export function mapOffers(items: readonly ApiOffer[]): Offer[] {

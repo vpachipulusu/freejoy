@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { recordOutboundClick, type OutboundClickResult } from '@/lib/api/outbound';
 import { logger } from '@/lib/logger';
+import { disclosureBouncePath, isExactMarker, UNDISCLOSED_PARAM } from './disclosure';
 import {
   classifyUserAgent,
   isOfferId,
@@ -14,7 +15,11 @@ import {
  * in coverage.
  *
  * Rules this module enforces:
- * - Only the path id is read. No query parameter, body or custom header can influence the destination.
+ * - Only the path id and one query parameter are read: exactly `nd=1` ("not disclosed": the link was rendered
+ *   on a page that showed no "Ad" label). It is forwarded to the backend as `commission_disclosed: false` and
+ *   can only make the answer stricter: if the offer earns commission the visitor is sent back to the offer
+ *   page instead of to the brand. Any other value, a repeated `nd` and every other parameter are ignored. No
+ *   query parameter, body or custom header can influence the destination.
  * - The Location is built from a `URL` object that passed `parseHttpsDestination` (https only, no user
  *   info), never by string concatenation.
  * - Every response is `Cache-Control: no-store` and sets no cookie.
@@ -25,6 +30,7 @@ export const REFERRER_POLICY = 'strict-origin-when-cross-origin';
 const NO_STORE = 'no-store';
 const UNAVAILABLE_RETRY_SECONDS = '30';
 const ENDED_REDIRECT_STATUS = 302;
+const DISCLOSURE_REDIRECT_STATUS = 303;
 const REDIRECT_STATUS = 307;
 
 function textResponse(status: number, body: string | null, headers: Record<string, string> = {}) {
@@ -74,6 +80,28 @@ function endedRedirect(slug: string): NextResponse {
   });
 }
 
+/** True only for exactly one `nd` parameter with the exact value `1`. */
+function pageShowedNoDisclosure(request: NextRequest): boolean {
+  return isExactMarker(request.nextUrl.searchParams.getAll(UNDISCLOSED_PARAM));
+}
+
+/**
+ * The page the visitor came from showed no commission disclosure but this offer earns one (its cached copy was
+ * stale). No click was recorded and no destination reached this server. The visitor is sent back to the offer page
+ * with a RELATIVE Location built from a checked slug and `?ad=1`, which makes that page show the disclosure and a
+ * plain `/go/<id>` link whatever its cached flag says (see `./disclosure`), so this cannot loop. This route never
+ * touches the catalogue cache: an anonymous request must not be able to expire it. The stale entry ages out on its
+ * own within the revalidate window (`fetchOffer`).
+ */
+function disclosureRedirect(offerId: string, slug: string): NextResponse {
+  if (!isOfferSlug(slug)) return notFound();
+  logger.info('Outbound click sent back for a commission disclosure', { offerId });
+  return new NextResponse(null, {
+    status: DISCLOSURE_REDIRECT_STATUS,
+    headers: { Location: disclosureBouncePath(slug), 'Cache-Control': NO_STORE },
+  });
+}
+
 function destinationRedirect(offerId: string, destination: string): NextResponse {
   const target = parseHttpsDestination(destination);
   if (target === null) {
@@ -97,6 +125,8 @@ function respondTo(
       return destinationRedirect(offerId, result.destination);
     case 'ended':
       return endedRedirect(result.slug);
+    case 'disclosure_required':
+      return disclosureRedirect(offerId, result.slug);
     case 'not_found':
       return notFound();
     case 'rate_limited':
@@ -119,6 +149,7 @@ export async function handleOutboundRequest(
   const result = await recordOutboundClick(offerId, {
     referrerHost: referrerHost(request.headers.get('referer')),
     userAgentClass: classifyUserAgent(request.headers.get('user-agent')),
+    ...(pageShowedNoDisclosure(request) ? { commissionDisclosed: false as const } : {}),
   });
   return respondTo(request, offerId, result);
 }

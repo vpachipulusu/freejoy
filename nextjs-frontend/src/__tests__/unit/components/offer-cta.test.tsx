@@ -8,7 +8,7 @@ import { CATEGORIES, OFFERS } from '@/lib/catalogue/fixtures';
 describe('OfferCta', () => {
   it('opens the demo offer dialog when the call to action is clicked', async () => {
     const user = userEvent.setup();
-    render(<OfferCta offerType="free_sample" demo />);
+    render(<OfferCta sponsored={false} earnsCommission offerType="free_sample" demo />);
 
     await user.click(screen.getByRole('button', { name: /request this sample/i }));
 
@@ -19,7 +19,7 @@ describe('OfferCta', () => {
 
   it('closes on Escape and returns focus to the call to action', async () => {
     const user = userEvent.setup();
-    render(<OfferCta offerType="free_trial" demo />);
+    render(<OfferCta sponsored={false} earnsCommission offerType="free_trial" demo />);
     const trigger = screen.getByRole('button', { name: /start the trial/i });
 
     await user.click(trigger);
@@ -31,7 +31,7 @@ describe('OfferCta', () => {
   });
 
   it('labels the button by offer type and never links to an external site', () => {
-    render(<OfferCta offerType="competition" demo />);
+    render(<OfferCta sponsored={false} earnsCommission offerType="competition" demo />);
 
     expect(screen.getByRole('button', { name: /enter this competition/i })).toBeInTheDocument();
     expect(screen.getByText(/to request your entry/i)).toBeInTheDocument();

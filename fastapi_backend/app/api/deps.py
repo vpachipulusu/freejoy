@@ -42,6 +42,15 @@ async def get_session(
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def allow_sample_provider() -> bool:
+    """Whether the ``sample`` affiliate provider may be followed (local, test, preview only).
+
+    The offer page flag and the outbound click must read the same value, so both services are built
+    from this one function.
+    """
+    return settings.relaxed_environment
+
+
 def get_health_service(session: SessionDep) -> HealthService:
     return HealthService(HealthRepository(session))
 

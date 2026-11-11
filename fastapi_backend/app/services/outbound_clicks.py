@@ -6,10 +6,10 @@ Rules, in order:
    unknown, draft, archived, never-live, hidden-category or inactive-merchant offer is ``None``
    (the caller answers 404); an offer that was public and has ended is an ``ExpiredOffer`` (410).
    Neither writes a click.
-2. The offer needs an active affiliate link whose stored destination is a clean https URL
-   (``validate_https_url``, re-checked here because rows can be written outside the admin API)
-   on a host its provider is allowed to use (``affiliate_hosts``). Links that fail are skipped;
-   if none is left the answer is ``None`` and no click is written.
+2. The offer needs a usable active affiliate link, chosen by ``app.core.followed_link`` (the same
+   function the public offer page uses for its "earns commission" flag): the first whose stored
+   destination is a clean https URL on a host its provider is allowed to use (``affiliate_hosts``).
+   Links that fail are skipped; if none is left the answer is ``None`` and no click is written.
 3. Exactly one click event is written and committed, then the destination is returned.
 
 Nothing here logs a destination URL: logs carry link ids and a reason code only.
@@ -20,11 +20,10 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
-from urllib.parse import urlsplit
 
-from app.core.affiliate_hosts import destination_allowed
-from app.core.catalogue_urls import InvalidUrl, validate_https_url
+from app.core.followed_link import first_usable_link, offer_earns_commission
 from app.models.platform.click_event import UserAgentClass
+from app.models.platform.offer import CommercialBasis
 from app.repositories.catalogue import OfferRecord
 from app.repositories.outbound_clicks import LinkRecord
 from app.services.catalogue import ExpiredOffer
@@ -36,6 +35,10 @@ _HOST = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*"
 )
 _NUMERIC_LABEL = re.compile(r"\d+")
+
+
+def _log_refused(link_id: str, reason: str) -> None:
+    logger.warning("affiliate link %s refused: %s", link_id, reason)
 
 
 class OfferResolver(Protocol):
@@ -68,7 +71,18 @@ class ClickRedirect:
     destination_url: str
 
 
-ClickOutcome = ClickRedirect | ExpiredOffer | None
+@dataclass(frozen=True)
+class DisclosureNeeded:
+    """The page the visitor clicked on did not disclose a commission this offer earns.
+
+    Nothing is written and no destination is returned: the caller sends the visitor back to the offer
+    page (``slug``), which discloses it.
+    """
+
+    slug: str
+
+
+ClickOutcome = ClickRedirect | ExpiredOffer | DisclosureNeeded | None
 
 
 def clean_referrer_host(raw: str | None) -> str | None:
@@ -106,18 +120,30 @@ class OutboundClickService:
         user_agent_class: UserAgentClass | None,
         *,
         record: bool = True,
+        commission_disclosed: bool = True,
     ) -> ClickOutcome:
         """Resolve the destination and write one click event, or write nothing.
 
         ``record=False`` (the per-offer cap is spent) still returns the destination but writes no click.
+        ``commission_disclosed=False`` says the page the visitor clicked on showed no "Ad" label; if the
+        offer earns commission by the shared rule the answer is ``DisclosureNeeded``, with no click and
+        no destination. The flag can only make the answer stricter.
         """
         offer = await self._offers.get_offer_by_id(offer_id)
         if offer is None or isinstance(offer, ExpiredOffer):
             return offer
-        found = await self._first_usable_link(offer.id)
+        links = await self._store.list_active_links(offer.id)
+        found = self._first_usable_link(offer.id, links)
         if found is None:
             return None
         link, destination = found
+        if not commission_disclosed and offer_earns_commission(
+            links,
+            allow_sample=self._allow_sample,
+            basis_is_affiliate=offer.commercial_basis is CommercialBasis.AFFILIATE,
+        ):
+            logger.info("offer %s: page did not disclose a commission", offer.id)
+            return DisclosureNeeded(offer.slug)
         if record:
             await self._store.add_click(
                 offer_id=offer.id,
@@ -128,27 +154,13 @@ class OutboundClickService:
             await self._session.commit()
         return ClickRedirect(destination)
 
-    async def _first_usable_link(self, offer_id: str) -> tuple[LinkRecord, str] | None:
-        for link in await self._store.list_active_links(offer_id):
-            destination = self._usable_destination(link)
-            if destination is not None:
-                return link, destination
-        logger.warning("offer %s has no usable affiliate link", offer_id)
-        return None
-
-    def _usable_destination(self, link: LinkRecord) -> str | None:
-        try:
-            destination = validate_https_url(link.destination_url)
-        except InvalidUrl:
-            logger.warning("affiliate link %s refused: not a clean https URL", link.id)
-            return None
-        host = urlsplit(destination).hostname or ""
-        if not destination_allowed(
-            link.provider,
-            host,
-            merchant_website=link.merchant_website,
-            allow_sample=self._allow_sample,
-        ):
-            logger.warning("affiliate link %s refused: host not allowed", link.id)
-            return None
-        return destination
+    def _first_usable_link(
+        self, offer_id: str, links: Sequence[LinkRecord]
+    ) -> tuple[LinkRecord, str] | None:
+        """The shared choice (``app.core.followed_link``), with a log line per skipped link."""
+        found = first_usable_link(
+            links, allow_sample=self._allow_sample, on_refused=_log_refused
+        )
+        if found is None:
+            logger.warning("offer %s has no usable affiliate link", offer_id)
+        return found

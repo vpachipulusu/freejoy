@@ -14,6 +14,7 @@ import {
   type ExpiredOfferData,
   type ListOffersData,
   type OfferData,
+  type OfferDetailData,
   type OfferListData,
 } from './generated';
 
@@ -35,6 +36,7 @@ export type {
   CategoryData as ApiCategory,
   ExpiredOfferData as ApiEndedOffer,
   OfferData as ApiOffer,
+  OfferDetailData as ApiOfferDetail,
 };
 
 export const CATALOGUE_CACHE_TAG = 'catalogue';
@@ -56,7 +58,7 @@ export interface OfferListParams {
 }
 
 export type OfferReadResult =
-  | { kind: 'found'; offer: OfferData }
+  | { kind: 'found'; offer: OfferDetailData }
   | { kind: 'gone'; ended: ExpiredOfferData | null }
   | { kind: 'not_found' };
 
@@ -176,7 +178,18 @@ async function loadOffer(slug: string): Promise<OfferReadResult> {
 const cacheOptions = { tags: [CATALOGUE_CACHE_TAG], revalidate: CATALOGUE_REVALIDATE_SECONDS };
 const cachedOffers = unstable_cache(loadOffers, ['catalogue', 'offers'], cacheOptions);
 const cachedCategories = unstable_cache(loadCategories, ['catalogue', 'categories'], cacheOptions);
-const cachedOffer = unstable_cache(loadOffer, ['catalogue', 'offer'], cacheOptions);
+
+/** A cached offer read with the time it was read, so a stale entry can be told from a fresh one. */
+interface StampedOfferRead {
+  at: number;
+  result: OfferReadResult;
+}
+
+async function loadStampedOffer(slug: string): Promise<StampedOfferRead> {
+  return { at: Date.now(), result: await loadOffer(slug) };
+}
+
+const cachedOffer = unstable_cache(loadStampedOffer, ['catalogue', 'offer'], cacheOptions);
 
 /** A page of published, live offers plus the total before paging. */
 export function fetchOffers(params: OfferListParams = {}): Promise<OfferListData> {
@@ -188,7 +201,14 @@ export function fetchOffers(params: OfferListParams = {}): Promise<OfferListData
 export function fetchOffer(slug: string): Promise<OfferReadResult> {
   // A slug that is not a plain slug cannot name an offer: no round trip, no path injection.
   if (!isValidSlug(slug)) return Promise.resolve({ kind: 'not_found' });
-  return withVisitorIp(() => cachedOffer(slug));
+  return withVisitorIp(async () => {
+    const cached = await cachedOffer(slug);
+    // `unstable_cache` serves a stale entry of any age while it refreshes in the background. The offer page says
+    // whether a link earns commission, so a stale entry is not served: past the revalidate age the read goes
+    // to the backend directly, bounding how old that disclosure can be.
+    if (Date.now() - cached.at > CATALOGUE_REVALIDATE_SECONDS * 1000) return loadOffer(slug);
+    return cached.result;
+  });
 }
 
 /** Enabled categories in display order, each with its live offer count. */

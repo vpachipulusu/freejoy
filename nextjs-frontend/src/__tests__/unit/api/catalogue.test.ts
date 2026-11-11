@@ -1,6 +1,6 @@
 // @vitest-environment node
 /** The catalogue wrapper: cache wiring, status mapping, timeout and the typed outage error. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listOffers: vi.fn(),
@@ -245,6 +245,68 @@ describe('slugs that are not slugs', () => {
   });
 });
 
+describe('fetchOffer cache age bound', () => {
+  const NOW = new Date('2026-11-11T12:00:00Z');
+  const STALE_OFFER = { id: 'old', slug: 'free-tea' };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const cachedAt = (ageSeconds: number) => ({
+    at: NOW.getTime() - ageSeconds * 1000,
+    result: { kind: 'found', offer: STALE_OFFER },
+  });
+
+  it('serves a fresh cache entry without asking the backend', async () => {
+    offerCache.mockResolvedValueOnce(cachedAt(30));
+
+    await expect(fetchOffer('free-tea')).resolves.toEqual({ kind: 'found', offer: STALE_OFFER });
+    expect(mocks.readOffer).not.toHaveBeenCalled();
+  });
+
+  it('still serves an entry exactly as old as the revalidate window', async () => {
+    offerCache.mockResolvedValueOnce(cachedAt(CATALOGUE_REVALIDATE_SECONDS));
+
+    await expect(fetchOffer('free-tea')).resolves.toEqual({ kind: 'found', offer: STALE_OFFER });
+    expect(mocks.readOffer).not.toHaveBeenCalled();
+  });
+
+  it('bypasses an entry older than the window and reads the backend directly', async () => {
+    offerCache.mockResolvedValueOnce(cachedAt(CATALOGUE_REVALIDATE_SECONDS + 1));
+    mocks.readOffer.mockResolvedValue(ok(OFFER));
+
+    await expect(fetchOffer('free-tea')).resolves.toEqual({ kind: 'found', offer: OFFER });
+    expect(mocks.readOffer).toHaveBeenCalledOnce();
+  });
+
+  it('stamps a new entry with the time it was read, and keeps the result inside', async () => {
+    mocks.readOffer.mockResolvedValue(ok(OFFER));
+
+    await fetchOffer('free-tea');
+
+    // The cached function is the stamping loader: its value is { at, result }.
+    const loader = mocks.cacheCalls.findIndex(
+      (call) => call.keyParts.join('/') === 'catalogue/offer'
+    );
+    expect(loader).toBeGreaterThanOrEqual(0);
+    await expect(offerCache.mock.results[0].value).resolves.toEqual({
+      at: NOW.getTime(),
+      result: { kind: 'found', offer: OFFER },
+    });
+  });
+
+  it('a backend failure on the bypass is the usual typed outage', async () => {
+    offerCache.mockResolvedValueOnce(cachedAt(CATALOGUE_REVALIDATE_SECONDS + 5));
+    mocks.readOffer.mockResolvedValue(failed(500));
+
+    await expect(fetchOffer('free-tea')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+  });
+});
+
 describe('fetchOffer', () => {
   it('returns a found offer and asks the API for that slug', async () => {
     mocks.readOffer.mockResolvedValue(ok(OFFER));
@@ -326,7 +388,10 @@ describe('fetchOffer', () => {
 
   it.each([
     ['no data', { success: false, expired: true }],
-    ['no title', { success: false, expired: true, data: { slug: 'x', category: { slug: 'a', name: 'A' } } }],
+    [
+      'no title',
+      { success: false, expired: true, data: { slug: 'x', category: { slug: 'a', name: 'A' } } },
+    ],
     ['no category', { success: false, expired: true, data: { slug: 'x', title: 'X' } }],
     [
       'a category without a name',
@@ -346,12 +411,18 @@ describe('fetchOffer', () => {
     ['an envelope that does not say expired', { success: false, error: 'Gone' }],
     ['expired: false', { success: false, expired: false }],
     ['an expired flag without the envelope', { expired: true }],
-  ])('throws for a 410 with %s: only the backend ended envelope is an ended offer', async (_name, body) => {
-    mocks.readOffer.mockResolvedValue({ error: body ?? '', response: { ok: false, status: 410 } });
+  ])(
+    'throws for a 410 with %s: only the backend ended envelope is an ended offer',
+    async (_name, body) => {
+      mocks.readOffer.mockResolvedValue({
+        error: body ?? '',
+        response: { ok: false, status: 410 },
+      });
 
-    await expect(fetchOffer('x')).rejects.toBeInstanceOf(CatalogueUnavailableError);
-    expect(mocks.warn).toHaveBeenCalledTimes(1);
-  });
+      await expect(fetchOffer('x')).rejects.toBeInstanceOf(CatalogueUnavailableError);
+      expect(mocks.warn).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it.each([
     ['a 500', failed(500)],

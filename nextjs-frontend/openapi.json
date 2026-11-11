@@ -9768,7 +9768,7 @@
           "catalogue"
         ],
         "summary": "Read one published offer",
-        "description": "A live offer. An ended offer answers 410 with ``expired: true`` and its title.",
+        "description": "A live offer, with ``earns_commission``. An ended offer answers 410 with ``expired: true`` and its title.",
         "operationId": "read_offer",
         "parameters": [
           {
@@ -10115,6 +10115,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExpiredOfferResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The page did not disclose a commission this offer earns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisclosureRequiredResponse"
                 }
               }
             }
@@ -14405,6 +14415,12 @@
               }
             ],
             "description": "Coarse device class; the raw user agent is never sent"
+          },
+          "commission_disclosed": {
+            "type": "boolean",
+            "title": "Commission Disclosed",
+            "description": "False when the page the visitor clicked on showed no commission disclosure. If the offer earns commission the answer is 409 disclosure_required and nothing is recorded. It can only make the answer stricter.",
+            "default": true
           }
         },
         "additionalProperties": false,
@@ -15033,6 +15049,49 @@
           "id_token"
         ],
         "title": "DisableRequest"
+      },
+      "DisclosureRequiredData": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug"
+        ],
+        "title": "DisclosureRequiredData"
+      },
+      "DisclosureRequiredResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false,
+            "title": "Success",
+            "default": false
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": "Disclosure required"
+          },
+          "code": {
+            "type": "string",
+            "const": "disclosure_required",
+            "title": "Code",
+            "default": "disclosure_required"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DisclosureRequiredData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "DisclosureRequiredResponse",
+        "description": "The 409 body: the page did not disclose a commission, so send the visitor back to ``slug``."
       },
       "DismissSourceChangeRequest": {
         "properties": {
@@ -16702,6 +16761,172 @@
           "steps"
         ],
         "title": "OfferData"
+      },
+      "OfferDetailData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "description": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Description"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategoryRef"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/MerchantData"
+          },
+          "offer_type": {
+            "type": "string",
+            "enum": [
+              "free_sample",
+              "free_trial",
+              "cashback",
+              "voucher",
+              "competition"
+            ],
+            "title": "Offer Type"
+          },
+          "sponsored": {
+            "type": "boolean",
+            "title": "Sponsored"
+          },
+          "featured": {
+            "type": "boolean",
+            "title": "Featured"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageData"
+          },
+          "postage": {
+            "$ref": "#/components/schemas/PostageData"
+          },
+          "requires_card": {
+            "type": "boolean",
+            "title": "Requires Card"
+          },
+          "subscription_terms": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Terms"
+          },
+          "eligibility": {
+            "type": "string",
+            "title": "Eligibility"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start At"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new_today",
+                  "just_added",
+                  "popular",
+                  "ends_soon",
+                  "limited"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "earns_commission": {
+            "type": "boolean",
+            "title": "Earns Commission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "summary",
+          "description",
+          "category",
+          "merchant",
+          "offer_type",
+          "sponsored",
+          "featured",
+          "image",
+          "postage",
+          "requires_card",
+          "subscription_terms",
+          "eligibility",
+          "availability",
+          "start_at",
+          "end_at",
+          "last_verified_at",
+          "freshness",
+          "steps",
+          "earns_commission"
+        ],
+        "title": "OfferDetailData",
+        "description": "The offer page: everything in a list item plus whether its outbound link earns commission.\n\nA list card links to this page, never to the provider, so only the page needs the flag."
       },
       "OfferFreshness": {
         "type": "string",
@@ -20321,7 +20546,7 @@
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/OfferData"
+            "$ref": "#/components/schemas/OfferDetailData"
           }
         },
         "type": "object",
