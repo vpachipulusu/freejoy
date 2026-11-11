@@ -43,7 +43,8 @@ HASH_PATTERN = "^[0-9a-f]{64}$"
 MAX_PENDING_BYTES = 24576
 
 OFFER_DEFAULTS_FUNCTION = """
-CREATE FUNCTION freejoy_offer_insert_defaults() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION freejoy_offer_insert_defaults() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public AS $fn$
 BEGIN
   IF NEW.commercial_basis IS NULL
      AND NOT has_column_privilege(current_user, TG_RELID, 'commercial_basis', 'INSERT') THEN
@@ -54,7 +55,8 @@ END
 $fn$
 """
 LINK_DEFAULTS_FUNCTION = """
-CREATE FUNCTION freejoy_link_insert_defaults() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION freejoy_link_insert_defaults() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public AS $fn$
 BEGIN
   IF NEW.provider IS NULL
      AND NOT has_column_privilege(current_user, TG_RELID, 'provider', 'INSERT') THEN
@@ -65,7 +67,8 @@ END
 $fn$
 """
 AUDIT_GUARD_FUNCTION = """
-CREATE FUNCTION freejoy_audit_insert_guard() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION freejoy_audit_insert_guard() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public AS $fn$
 BEGIN
   IF NOT has_column_privilege(current_user, TG_RELID, 'user_id', 'INSERT') THEN
     IF NEW.user_id IS NOT NULL OR NEW.organization_id IS NOT NULL
@@ -78,9 +81,10 @@ END
 $fn$
 """
 FIRST_PUBLISH_FUNCTION = """
-CREATE FUNCTION freejoy_note_first_publish() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION freejoy_note_first_publish() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public AS $fn$
 BEGIN
-  UPDATE partner_submissions SET first_published_at = now()
+  UPDATE public.partner_submissions SET first_published_at = now()
    WHERE offer_id = NEW.id AND first_published_at IS NULL;
   RETURN NULL;
 END

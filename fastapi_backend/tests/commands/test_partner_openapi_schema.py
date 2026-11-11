@@ -97,6 +97,10 @@ def test_the_internal_schema_file_does_not_mention_the_partner_surface() -> None
         "PartnerKeyOut",
         "PartnerKeyResponse",
         "PartnerKeysResponse",
+        # FREEJ-58: the editor's review of a retailer's submission (admin routes, not the partner surface).
+        "PartnerPendingOut",
+        "PartnerSubmissionOut",
+        "PartnerUpdateRequest",
     }
     assert "x-freejoy-surface" not in text.lower()
     assert "Freejoy Partner API" not in text
@@ -104,6 +108,11 @@ def test_the_internal_schema_file_does_not_mention_the_partner_surface() -> None
     assert partner_paths
     assert all(
         p.startswith("/v1/admin/merchants/{merchant_id}/partner-keys")
+        or p
+        in {
+            "/v1/admin/offers/{offer_id}/apply-partner-update",
+            "/v1/admin/offers/{offer_id}/dismiss-partner-update",
+        }
         for p in partner_paths
     )
 

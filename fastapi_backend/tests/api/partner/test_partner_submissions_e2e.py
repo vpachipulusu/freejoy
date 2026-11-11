@@ -375,6 +375,31 @@ async def test_a_direct_only_draft_still_needs_the_editors_confirmation_of_the_b
     assert confirmed.status_code == 200
 
 
+async def test_a_partner_draft_still_needs_the_basis_confirmed_after_an_editor_adds_a_network_link(
+    client: AsyncClient, admin: dict[str, str], partner_world: None
+) -> None:
+    category, merchant = await setup(client, admin)
+    await put_offer(merchant.key, "sku-1", offer_body(category))
+    offer_id = await sub.offer_id_of(client, admin, "Free")
+    url = f"{OFFERS}/{offer_id}"
+    added = await client.post(
+        f"{url}/links",
+        json={
+            "provider": "awin",
+            "destination_url": "https://www.awin1.com/cread.php?x=1",
+        },
+        headers=admin,
+    )
+    await approve(client, admin, url, "verify")
+
+    refused = await approve(client, admin, url, "publish")
+    detail = (await client.get(url, headers=admin)).json()["data"]
+
+    assert added.status_code == 201
+    assert refused.status_code == 422 and "commercial basis" in refused.text
+    assert detail["needs_basis_confirmation"] is True
+
+
 # ------------------------------------------------------------------------------------------------- end
 
 

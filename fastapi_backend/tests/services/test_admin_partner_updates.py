@@ -19,6 +19,7 @@ from app.services.admin_partner_updates import (
     keep_an_ended_offer_ended,
     proposed_changes,
 )
+from app.services.offer_lifecycle import OfferAction
 from tests.fakes_admin_catalogue import (
     EARLIER,
     NOW,
@@ -244,3 +245,65 @@ def test_an_ended_offer_keeps_its_end_unless_the_proposal_gives_a_future_one(
     result = keep_an_ended_offer_ended(current, changes, NOW)
 
     assert ("end_at" not in result) is kept
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"title": "<b>Bold</b>"},
+        {"title": ""},
+        {"title": "x" * 201},
+        {"title": 5},
+        {"description": "not a list"},
+        {"description": ["<script>x</script>"]},
+        {"steps": [{"title": "t"}]},
+        {"steps": [{"title": "<i>t</i>", "detail": "d"}]},
+        {"offer_type": "CASHBACK_NOPE"},
+        {"postage_kind": "SOMETIMES"},
+        {"requires_card": "yes"},
+        {"postage_amount_minor": "5"},
+        {"start_at": "not a date"},
+        {"end_at": "2099-01-01T00:00:00"},
+        {"end_at": 5},
+        {"category_id": None},
+        {"destination_url": 5},
+    ],
+)
+async def test_a_stored_proposal_that_is_not_valid_content_is_refused_and_nothing_is_written(
+    bad,
+):
+    service, store, auditor, session = build(payload={**PAYLOAD, **bad})
+
+    with pytest.raises(InvalidInput) as refused:
+        await service.apply_partner_update(
+            PUBLISHER, "off1", await token(service), HASH
+        )
+
+    assert refused.value.code == "invalid_pending_payload"
+    assert store.offers["off1"].title != "Retailer title"
+    assert auditor.rows == [] and session.commits == 0
+
+
+async def test_a_proposal_missing_a_field_is_refused_not_a_crash():
+    payload = {k: v for k, v in PAYLOAD.items() if k != "eligibility"}
+    service, *_ = build(payload=payload)
+
+    with pytest.raises(InvalidInput):
+        await service.apply_partner_update(
+            PUBLISHER, "off1", await token(service), HASH
+        )
+
+
+async def test_a_partner_draft_always_needs_the_basis_confirmed_to_publish_even_with_a_network_link():
+    from app.services.admin_catalogue_errors import PublishBlocked
+
+    service, store, *_ = build(last_verified_at=EARLIER, payload=None)
+    store.links["l2"] = link("l2", provider="awin")
+    store.links.pop("l1")
+
+    with pytest.raises(PublishBlocked) as blocked:
+        await service.transition(
+            PUBLISHER, "off1", OfferAction.PUBLISH, await token(service)
+        )
+
+    assert "commercial_basis_required" in blocked.value.reasons

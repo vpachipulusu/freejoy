@@ -23,10 +23,12 @@ from datetime import datetime
 from typing import Any
 
 from app.core.permissions import AdminContext
+from app.core.plain_text import TextTooLong, plain_line
 from app.models.platform.offer import OfferStatus, OfferType, PostageKind
 from app.repositories.admin_offers import OfferRecord, PartnerSubmissionRecord
 from app.services.admin_catalogue_errors import (
     IllegalTransition,
+    InvalidInput,
     OfferChanged,
     PermissionDenied,
 )
@@ -60,17 +62,118 @@ CONTENT_FIELDS = (
 )
 
 
-def _date(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
+# Caps of the proposal's texts as the admin edit form takes them: a stored proposal is checked again here, so a
+# payload that did not come from the partner API's own cleaning (a tampered row) cannot put markup or oversized text on an offer.
+LINE_CAPS = {
+    "title": 200,
+    "summary": 300,
+    "eligibility": 500,
+    "availability": 500,
+    "subscription_terms": 1000,
+}
+PARAGRAPH_CAP = 2000
+STEP_TITLE_CAP = 120
+STEP_DETAIL_CAP = 1000
+MAX_PARAGRAPHS = 20
+MAX_STEPS = 20
+BAD_PROPOSAL = "invalid_pending_payload"
+
+
+def _bad() -> InvalidInput:
+    return InvalidInput(BAD_PROPOSAL)
+
+
+def _date(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _bad()
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise _bad() from None
+    if parsed.utcoffset() is None:
+        raise _bad()
+    return parsed
+
+
+def _clean_line(value: Any, cap: int, *, optional: bool = False) -> str | None:
+    """A text that is already plain: cleaning it again must change nothing (and it must not be empty)."""
+    if value is None and optional:
+        return None
+    if not isinstance(value, str):
+        raise _bad()
+    try:
+        cleaned = plain_line(value, cap)
+    except TextTooLong:
+        raise _bad() from None
+    if cleaned != value or not cleaned:
+        raise _bad()
+    return cleaned
+
+
+def _paragraphs(value: Any) -> list[str]:
+    if not isinstance(value, list) or len(value) > MAX_PARAGRAPHS:
+        raise _bad()
+    return [str(_clean_line(item, PARAGRAPH_CAP)) for item in value]
+
+
+def _steps(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list) or len(value) > MAX_STEPS:
+        raise _bad()
+    steps: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"title", "detail"}:
+            raise _bad()
+        steps.append(
+            {
+                "title": str(_clean_line(item["title"], STEP_TITLE_CAP)),
+                "detail": str(_clean_line(item["detail"], STEP_DETAIL_CAP)),
+            }
+        )
+    return steps
+
+
+def _enum(kind: type[OfferType] | type[PostageKind], value: Any) -> Any:
+    try:
+        return kind(value)
+    except ValueError:
+        raise _bad() from None
 
 
 def proposed_changes(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """The offer columns a stored proposal would write, typed as the edit path expects them."""
-    changes = {name: payload[name] for name in CONTENT_FIELDS}
-    changes["offer_type"] = OfferType(changes["offer_type"])
-    changes["postage_kind"] = PostageKind(changes["postage_kind"])
-    changes["start_at"] = _date(changes["start_at"])
-    changes["end_at"] = _date(changes["end_at"])
+    """The offer columns a stored proposal would write, checked again and typed as the edit path expects them.
+
+    A proposal that is missing a field, has a wrong type, text that is not plain or an unknown vocabulary value is
+    refused with ``InvalidInput("invalid_pending_payload")`` (a 422), never a crash and never written.
+    """
+    missing = [name for name in CONTENT_FIELDS if name not in payload]
+    if missing:
+        raise _bad()
+    changes: dict[str, Any] = {
+        name: _clean_line(payload[name], cap, optional=name == "subscription_terms")
+        for name, cap in LINE_CAPS.items()
+    }
+    category_id, requires_card = payload["category_id"], payload["requires_card"]
+    amount, currency = payload["postage_amount_minor"], payload["postage_currency"]
+    if not isinstance(category_id, str) or not isinstance(requires_card, bool):
+        raise _bad()
+    if amount is not None and (not isinstance(amount, int) or isinstance(amount, bool)):
+        raise _bad()
+    if currency is not None and not isinstance(currency, str):
+        raise _bad()
+    changes.update(
+        description=_paragraphs(payload["description"]),
+        steps=_steps(payload["steps"]),
+        category_id=category_id,
+        requires_card=requires_card,
+        postage_amount_minor=amount,
+        postage_currency=currency,
+        offer_type=_enum(OfferType, payload["offer_type"]),
+        postage_kind=_enum(PostageKind, payload["postage_kind"]),
+        start_at=_date(payload["start_at"]),
+        end_at=_date(payload["end_at"]),
+    )
     return changes
 
 
@@ -105,10 +208,11 @@ class AdminPartnerUpdateService(AdminOfferService):
         changes = keep_an_ended_offer_ended(
             current, proposed_changes(payload), self.clock()
         )
+        destination = payload.get("destination_url")
+        if not isinstance(destination, str):
+            raise _bad()
         await self._stage_update(actor, offer_id, changes, None)
-        link_updated = await self._apply_destination(
-            actor, offer_id, str(payload["destination_url"])
-        )
+        link_updated = await self._apply_destination(actor, offer_id, destination)
         await self.store.clear_partner_pending(offer_id, applied_hash=pending_hash)
         await self._record(actor, offer_id, APPLY_ACTION, submission, link_updated)
         stored = await self._locked(offer_id)

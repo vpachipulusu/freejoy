@@ -260,3 +260,14 @@ def test_the_offer_values_are_the_columns_without_the_link_and_with_real_dates()
         and "featured" not in values
         and "commercial_basis" not in values
     )
+
+
+@pytest.mark.parametrize(
+    "when",
+    ["0001-01-01T00:00:00+05:00", "2101-01-01T00:00:00Z", "9999-12-31T23:59:59Z"],
+)
+def test_a_date_that_cannot_be_stored_or_is_absurdly_far_off_is_refused_not_a_crash(
+    when: str,
+) -> None:
+    assert refusal(end_at=when) == "invalid_window"
+    assert refusal(start_at=when, end_at="2099-01-01T00:00:00Z") == "invalid_window"

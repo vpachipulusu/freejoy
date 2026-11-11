@@ -412,7 +412,8 @@ def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
         **_import_fields(provenance, detail.partner.ref if detail.partner else None),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
-        "needs_basis_confirmation": needs_basis_confirmation(
+        "needs_basis_confirmation": detail.partner is not None
+        or needs_basis_confirmation(
             (link.provider, link.active) for link in detail.links
         ),
         "provenance": OfferProvenanceOut(**provenance.__dict__) if provenance else None,

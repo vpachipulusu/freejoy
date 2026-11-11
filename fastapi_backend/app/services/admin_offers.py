@@ -625,7 +625,14 @@ class AdminOfferService:
         """True when publishing needs a confirmed basis (see ``needs_basis_confirmation``) and none was sent."""
         if confirmed:
             return False
+        if await self._is_partner_submission(offer_id):
+            # The basis of a retailer's draft is a placeholder (nothing set it), whatever links an editor added.
+            return True
         return needs_basis_confirmation(await self._provider_pairs(offer_id))
+
+    async def _is_partner_submission(self, offer_id: str) -> bool:
+        provenance = await self.store.get_provenance(offer_id)
+        return provenance is not None and provenance.provider == PARTNER_PROVIDER
 
     async def _require_publishable(
         self,

@@ -36,6 +36,7 @@ from app.partner.schemas import (
 )
 
 FREE_TRIAL = "FREE_TRIAL"
+MAX_YEAR = 2100
 
 
 @dataclass(frozen=True)
@@ -152,7 +153,16 @@ def clean_destination(raw: str, merchant_website: str | None) -> str:
 
 
 def _normalised(value: datetime | None) -> datetime | None:
-    return value.astimezone(UTC) if value is not None else None
+    """The date in UTC; one that cannot be written in UTC (year 1 with an offset) or is past ``MAX_YEAR`` is refused."""
+    if value is None:
+        return None
+    try:
+        moved = value.astimezone(UTC)
+    except OverflowError:
+        raise SubmissionRefused("invalid_window") from None
+    if moved.year > MAX_YEAR:
+        raise SubmissionRefused("invalid_window")
+    return moved
 
 
 def _check_money_and_window(

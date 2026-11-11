@@ -187,7 +187,7 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger
        WHERE NOT tgisinternal AND tgenabled = 'O'
          AND tgname IN ('trg_offers_insert_defaults', 'trg_affiliate_links_insert_defaults',
-                        'trg_audit_logs_insert_guard')) <> 3 THEN
+                        'trg_audit_logs_insert_guard', 'trg_offers_note_first_publish')) <> 4 THEN
     RAISE EXCEPTION 'the partner guard triggers of migration 0008 are missing or disabled; run alembic upgrade head first';
   END IF;
 

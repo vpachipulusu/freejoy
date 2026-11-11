@@ -263,6 +263,7 @@ def test_the_script_refuses_to_grant_anything_without_the_guard_triggers() -> No
         "trg_offers_insert_defaults",
         "trg_affiliate_links_insert_defaults",
         "trg_audit_logs_insert_guard",
+        "trg_offers_note_first_publish",
     ):
         assert trigger in SQL
     assert "run alembic upgrade head first" in SQL
