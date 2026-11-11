@@ -8039,6 +8039,282 @@
         }
       }
     },
+    "/v1/admin/offers/{offer_id}/apply-partner-update": {
+      "post": {
+        "tags": [
+          "admin-offers"
+        ],
+        "summary": "Admin Apply Partner Update",
+        "description": "Write the update a retailer proposed through the normal edit path (``offers.write``; ``offers.publish`` too\nwhen the offer is live). Needs the ``review_token`` and the ``pending_hash`` the editor was shown.",
+        "operationId": "admin_apply_partner_update",
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Offer Id"
+            }
+          },
+          {
+            "name": "X-Internal-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartnerUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/v1/admin/offers/{offer_id}/dismiss-partner-update": {
+      "post": {
+        "tags": [
+          "admin-offers"
+        ],
+        "summary": "Admin Dismiss Partner Update",
+        "description": "Forget the update a retailer proposed and clear the \"source changed\" marker; changes nothing else.",
+        "operationId": "admin_dismiss_partner_update",
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Offer Id"
+            }
+          },
+          {
+            "name": "X-Internal-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartnerUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/v1/admin/offers/{offer_id}/links": {
       "post": {
         "tags": [
@@ -16869,6 +17145,16 @@
               }
             ]
           },
+          "partner_submission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PartnerSubmissionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "summary": {
             "type": "string",
             "title": "Summary"
@@ -17024,6 +17310,7 @@
           "review_token",
           "needs_basis_confirmation",
           "provenance",
+          "partner_submission",
           "summary",
           "description",
           "image_tint",
@@ -17317,6 +17604,16 @@
               }
             ]
           },
+          "partner_submission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PartnerSubmissionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "summary": {
             "type": "string",
             "title": "Summary"
@@ -17476,6 +17773,7 @@
           "review_token",
           "needs_basis_confirmation",
           "provenance",
+          "partner_submission",
           "summary",
           "description",
           "image_tint",
@@ -17820,6 +18118,99 @@
           "data"
         ],
         "title": "PartnerKeysResponse"
+      },
+      "PartnerPendingOut": {
+        "properties": {
+          "hash": {
+            "type": "string",
+            "title": "Hash"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hash",
+          "submitted_at",
+          "payload"
+        ],
+        "title": "PartnerPendingOut",
+        "description": "What a retailer proposed for an offer an editor has touched: the sanitised content and its hash.\n\n``payload`` has the keys of ``app.partner.content.CleanContent.payload`` (dates as ISO strings)."
+      },
+      "PartnerSubmissionOut": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "merchant_id": {
+            "type": "string",
+            "title": "Merchant Id"
+          },
+          "merchant_name": {
+            "type": "string",
+            "title": "Merchant Name"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PartnerPendingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "merchant_id",
+          "merchant_name",
+          "submitted_at",
+          "pending"
+        ],
+        "title": "PartnerSubmissionOut",
+        "description": "The retailer behind an offer submitted through the partner API."
+      },
+      "PartnerUpdateRequest": {
+        "properties": {
+          "review_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Review Token"
+          },
+          "pending_hash": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]+$",
+            "title": "Pending Hash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "review_token",
+          "pending_hash"
+        ],
+        "title": "PartnerUpdateRequest",
+        "description": "Apply or dismiss the update a retailer sent for this offer.\n\nNeeds the ``review_token`` of the offer the editor loaded and the ``pending_hash`` of the proposal the editor was\nshown (409 ``offer_changed`` when either is stale, so nothing is applied or dismissed blind)."
       },
       "PasswordChangedResponse": {
         "properties": {
