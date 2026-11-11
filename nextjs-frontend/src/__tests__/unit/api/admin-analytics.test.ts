@@ -15,6 +15,7 @@ import {
   fetchAdminOverview,
   fetchAdminRevenue,
   fetchAdminSystemStats,
+  fetchMerchantClicks,
   syncAdminSubscriptions,
 } from '@/lib/api/admin-analytics';
 
@@ -70,5 +71,29 @@ describe('admin analytics wrappers', () => {
     const result = await fetchAdminRevenue();
 
     expect(result).toMatchObject({ success: false, status: 403 });
+  });
+
+  it('asks for one merchant and a date range and carries the stable code of a 404', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ success: false, error: 'Merchant not found', code: 'not_found' }, 404)
+    );
+
+    const result = await fetchMerchantClicks({
+      merchantId: 'm1',
+      from: '2026-03-10',
+      to: '2026-03-31',
+    });
+
+    expect(result).toMatchObject({ success: false, status: 404, code: 'not_found' });
+    const request = fetchMock.mock.calls[0][0];
+    const url = new URL(request.url);
+    expect(request.method).toBe('GET');
+    expect(url.pathname).toBe('/v1/admin/analytics/clicks');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      merchant_id: 'm1',
+      from: '2026-03-10',
+      to: '2026-03-31',
+    });
+    expect(request.headers.get('X-Session-Token')).toBe('firebase-session-cookie');
   });
 });

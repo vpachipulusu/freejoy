@@ -21,7 +21,7 @@ import {
   type AuditLogsQuery,
 } from './audit-logs-query';
 import { AuditLogsTable } from './audit-logs-table';
-import { ResultsFocus } from './results-focus';
+import { ResultsFocus } from '../_components/results-focus';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 

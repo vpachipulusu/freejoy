@@ -4746,6 +4746,164 @@
         }
       }
     },
+    "/v1/admin/analytics/clicks": {
+      "get": {
+        "tags": [
+          "admin-analytics"
+        ],
+        "summary": "Clicks per offer per day for one merchant",
+        "description": "Outbound clicks on one merchant's offers over a range of UTC days (inclusive, from <= to, at most 366 days), per offer and per day, for sending to a retailer. A click is a visitor sent to the destination: not a sale, not a unique person. Bot-classed clicks are left out and counted apart. At most 100 offers are returned (offers_truncated says when more exist). Click records are kept for 395 days; the answer says when a range reaches past them.",
+        "operationId": "admin_merchant_clicks",
+        "parameters": [
+          {
+            "name": "merchant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Merchant Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "To"
+            }
+          },
+          {
+            "name": "X-Internal-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          },
+          {
+            "name": "X-Session-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantClicksResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rate limiter unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
     "/v1/admin/analytics/subscription-sync": {
       "post": {
         "tags": [
@@ -13701,6 +13859,24 @@
         ],
         "title": "ClaimStep"
       },
+      "ClickBasis": {
+        "properties": {
+          "definition": {
+            "type": "string",
+            "title": "Definition"
+          },
+          "bot_rule": {
+            "type": "string",
+            "title": "Bot Rule"
+          }
+        },
+        "type": "object",
+        "required": [
+          "definition",
+          "bot_rule"
+        ],
+        "title": "ClickBasis"
+      },
       "ClickData": {
         "properties": {
           "destination_url": {
@@ -13714,6 +13890,84 @@
           "destination_url"
         ],
         "title": "ClickData"
+      },
+      "ClickDayData": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "clicks": {
+            "type": "integer",
+            "title": "Clicks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "clicks"
+        ],
+        "title": "ClickDayData"
+      },
+      "ClickMerchant": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "title": "ClickMerchant"
+      },
+      "ClickOfferData": {
+        "properties": {
+          "offer_id": {
+            "type": "string",
+            "title": "Offer Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "total_clicks": {
+            "type": "integer",
+            "title": "Total Clicks"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/ClickDayData"
+            },
+            "type": "array",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "offer_id",
+          "slug",
+          "title",
+          "total_clicks",
+          "days"
+        ],
+        "title": "ClickOfferData"
       },
       "ClickRequest": {
         "properties": {
@@ -13764,6 +14018,30 @@
           "data"
         ],
         "title": "ClickResponse"
+      },
+      "ClickRetention": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "earliest_complete_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Earliest Complete Date"
+          },
+          "starts_before_retention": {
+            "type": "boolean",
+            "title": "Starts Before Retention"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "earliest_complete_date",
+          "starts_before_retention"
+        ],
+        "title": "ClickRetention"
       },
       "CommercialBasis": {
         "type": "string",
@@ -15400,6 +15678,89 @@
           "STAFF"
         ],
         "title": "MembershipRole"
+      },
+      "MerchantClicksData": {
+        "properties": {
+          "merchant": {
+            "$ref": "#/components/schemas/ClickMerchant"
+          },
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date"
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date"
+          },
+          "total_clicks": {
+            "type": "integer",
+            "title": "Total Clicks"
+          },
+          "excluded_bot_clicks": {
+            "type": "integer",
+            "title": "Excluded Bot Clicks"
+          },
+          "offers_total": {
+            "type": "integer",
+            "title": "Offers Total"
+          },
+          "max_offers": {
+            "type": "integer",
+            "title": "Max Offers"
+          },
+          "offers_truncated": {
+            "type": "boolean",
+            "title": "Offers Truncated"
+          },
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/ClickOfferData"
+            },
+            "type": "array",
+            "title": "Offers"
+          },
+          "retention": {
+            "$ref": "#/components/schemas/ClickRetention"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/ClickBasis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merchant",
+          "from_date",
+          "to_date",
+          "total_clicks",
+          "excluded_bot_clicks",
+          "offers_total",
+          "max_offers",
+          "offers_truncated",
+          "offers",
+          "retention",
+          "basis"
+        ],
+        "title": "MerchantClicksData"
+      },
+      "MerchantClicksResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/MerchantClicksData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "MerchantClicksResponse"
       },
       "MerchantData": {
         "properties": {

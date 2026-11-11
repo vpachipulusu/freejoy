@@ -10,6 +10,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableRowHeader,
   SortableTableHead,
 } from '@/components/ui/table';
 
@@ -136,6 +137,76 @@ describe('Table roles when stacked', () => {
     expect(screen.getAllByRole('rowgroup')).toHaveLength(3);
     expect(screen.getByRole('columnheader', { name: 'H' })).toBeInTheDocument();
     expect(screen.getAllByRole('cell')).toHaveLength(2);
+  });
+});
+
+describe('Table stacked footer', () => {
+  it('lays the footer rows out like the body rows below 640px', () => {
+    render(
+      <Table stacked>
+        <TableBody>
+          <TableRow>
+            <TableCell label="Offer">v</TableCell>
+          </TableRow>
+        </TableBody>
+        <TableFooter>
+          <TableRow>
+            <TableRowHeader label="Offer">Total</TableRowHeader>
+            <TableCell label="Clicks" colSpan={2}>
+              9
+            </TableCell>
+          </TableRow>
+        </TableFooter>
+      </Table>
+    );
+    const classes = screen.getByRole('table').className;
+
+    for (const utility of [
+      'flex',
+      'flex-wrap',
+      'items-baseline',
+      'justify-between',
+      'gap-x-4',
+      'py-3',
+    ]) {
+      expect(classes).toContain(`max-sm:[&>tbody>tr]:${utility}`);
+      expect(classes).toContain(`max-sm:[&>tfoot>tr]:${utility}`);
+    }
+    expect(screen.getByRole('cell', { name: /9/ })).toHaveAttribute('colspan', '2');
+  });
+});
+
+describe('TableRowHeader', () => {
+  it('is a row header with scope row, and an explicit role when stacked', () => {
+    render(
+      <Table stacked>
+        <TableBody>
+          <TableRow>
+            <TableRowHeader label="Offer">Soap</TableRowHeader>
+            <TableCell label="Clicks">3</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    );
+
+    const header = screen.getByRole('rowheader', { name: 'Soap' });
+    expect(header.tagName).toBe('TH');
+    expect(header).toHaveAttribute('scope', 'row');
+    expect(header).toHaveAttribute('data-label', 'Offer');
+  });
+
+  it('is a plain th scope row in a table that does not stack', () => {
+    render(
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableRowHeader>Soap</TableRowHeader>
+          </TableRow>
+        </TableBody>
+      </Table>
+    );
+
+    expect(screen.getByRole('rowheader', { name: 'Soap' })).not.toHaveAttribute('role');
   });
 });
 

@@ -99,7 +99,8 @@ after a click. A visitor's own cookies are not forwarded to the backend (`withSe
 
 A `click_events` row means "a visitor was sent to a provider through Freejoy". It is not a sale, a sign-up, a
 claim, an approved commission or proof the visitor qualified. Bots, double clicks and visitors who abandon the
-provider page all count as clicks, and nothing here deduplicates them. The provider's network reports are the only
+provider page are all stored as clicks, and nothing here deduplicates them (the admin merchant report leaves out rows
+classed `BOT`, and only those: see [backend-admin-analytics.md](backend-admin-analytics.md#merchant-click-report)). The provider's network reports are the only
 source for conversions and commission. Do not present click counts as "claimed" or "redeemed" numbers anywhere.
 
 **Revenue comes from the network's reports, never from clicks.** `commands/import_awin_reports.py` reads Awin's own
@@ -176,6 +177,22 @@ merchant's website can change after a `direct` link was saved. A link that fails
 - The proxy keys IPv6 clients by their full address, while the backend groups them by /64. This pre-existing gap
   is not specific to `/go/`: one IPv6 subscriber can spread requests over many addresses to get more proxy
   buckets, though the backend limits above still apply.
+
+## What to tell a retailer about clicks
+
+The admin report (`/admin/analytics`, "Clicks by merchant", with a CSV download) is the evidence for a retailer listed
+directly. Send the CSV and say plainly:
+
+- A click is one visitor sent from Freejoy to your page. It is **not** a sale, a sign-up or a claim, and it is not a
+  count of different people: someone who clicked twice counts twice.
+- We leave out clicks from visitors identified as automated (bots). We filter nothing else, so some automated or
+  accidental traffic can remain.
+- Days are UTC days. We record the time of a click to the minute and keep **no** visitor identity (no IP address, no
+  cookie, no account), so we cannot say who clicked or how many were new.
+- We keep click records for 13 months. A report that starts earlier than that is missing its oldest days.
+- Your own figures (orders, visits from our referrer) are the only measure of what the clicks became; we never claim
+  sales from clicks or call them redemptions.
+- Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
 
 ## Retention
 
