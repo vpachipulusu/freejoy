@@ -551,6 +551,9 @@ def test_the_surface_exposes_its_routes_for_the_confinement_walk() -> None:
 
     assert {c.path for c in iter_route_contexts(surface.routes)} == {
         "/me",
+        "/offers",
+        "/offers/{ref}",
+        "/offers/{ref}/end",
         "/echo",
         "/boom",
         "/typed",

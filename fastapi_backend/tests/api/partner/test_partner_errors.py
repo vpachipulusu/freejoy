@@ -32,6 +32,7 @@ FIXED_MESSAGES = frozenset(
         "Too many requests",
         "Internal server error",
         "Service temporarily unavailable",
+        "Conflict",
     }
 )
 MARKER = "zz-request-marker-9f3"

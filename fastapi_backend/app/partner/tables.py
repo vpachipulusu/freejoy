@@ -96,7 +96,7 @@ partner_submissions = table(
     column("ref", Text),
     column("offer_id", Text),
     column("content_hash", Text),
-    column("pending_payload", JSONB),
+    column("pending_payload", JSONB(none_as_null=True)),
     column("pending_hash", Text),
     column("pending_at", DateTime(timezone=True)),
     column("submitted_at", DateTime(timezone=True)),

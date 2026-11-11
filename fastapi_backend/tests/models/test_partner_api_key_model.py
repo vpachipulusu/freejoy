@@ -4,7 +4,7 @@ from sqlalchemy import CheckConstraint, Table, UniqueConstraint
 
 import app.models.platform  # noqa: F401  (registers the tables)
 from app.core.base import Base
-from app.core.platform_schema import PLATFORM_HEAD, PLATFORM_REVISIONS
+from app.core.platform_schema import PLATFORM_REVISIONS
 
 COLUMNS = {
     "id",

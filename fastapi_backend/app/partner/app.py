@@ -12,6 +12,7 @@ from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
 from app.partner.limits import PARTNER_LIMIT_RESPONSES
 from app.partner.mount import PartnerMount
+from app.partner.offer_routes import router as offers_router
 from app.partner.routes import router
 from app.partner.surface import PARTNER_PREFIX, PartnerSurface
 
@@ -54,6 +55,7 @@ def create_partner_api() -> FastAPI:
     )
     register_error_handlers(api)
     api.include_router(router)
+    api.include_router(offers_router)
     return api
 
 

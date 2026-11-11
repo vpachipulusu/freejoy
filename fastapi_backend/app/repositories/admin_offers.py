@@ -20,6 +20,7 @@ from app.models.platform.offer import (
     OfferType,
     PostageKind,
 )
+from app.models.platform.partner_submission import PartnerSubmission
 from app.repositories.base import BaseRepository
 from app.repositories.catalogue import escape_like
 
@@ -91,6 +92,25 @@ class OfferProvenance:
     external_id: str
     applied_at: datetime
     source_changed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class PartnerSubmissionRecord:
+    """The retailer behind a partner-submitted offer and the update of it that waits for an editor, if any.
+
+    ``pending_payload`` is the sanitised content the partner API stored (never raw request text), see
+    ``app/partner/content.py``; ``pending_hash`` identifies it.
+    """
+
+    id: str
+    ref: str
+    merchant_id: str
+    merchant_name: str
+    key_id: str
+    submitted_at: datetime
+    pending_payload: dict[str, Any] | None
+    pending_hash: str | None
+    pending_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -213,6 +233,51 @@ class AdminOfferRepository(BaseRepository):
             )
         ).first()
         return OfferProvenance(*row) if row else None
+
+    async def get_partner_submission(
+        self, offer_id: str, *, lock: bool = False
+    ) -> PartnerSubmissionRecord | None:
+        """The partner submission of this offer (None when it did not come through the partner API)."""
+        statement = (
+            select(
+                PartnerSubmission.id,
+                PartnerSubmission.ref,
+                PartnerSubmission.merchant_id,
+                Merchant.name.label("merchant_name"),
+                PartnerSubmission.key_id,
+                PartnerSubmission.submitted_at,
+                PartnerSubmission.pending_payload,
+                PartnerSubmission.pending_hash,
+                PartnerSubmission.pending_at,
+            )
+            .join(Merchant, Merchant.id == PartnerSubmission.merchant_id)
+            .where(PartnerSubmission.offer_id == offer_id)
+        )
+        if lock:
+            statement = statement.with_for_update(of=PartnerSubmission)
+        row = (await self._session.execute(statement)).first()
+        return PartnerSubmissionRecord(**row._mapping) if row else None
+
+    async def clear_partner_pending(
+        self, offer_id: str, *, applied_hash: str | None = None
+    ) -> None:
+        """Forget the waiting update and clear the "source changed" marker, in one place.
+
+        ``applied_hash`` is given when an editor applied the update: the offer now reflects that content, so the
+        provenance row says so. A dismissal leaves the hashes alone. The importer-style content fingerprint is
+        never touched: an applied offer stays "edited by a person", so a later retailer update waits too.
+        """
+        await self._session.execute(
+            update(PartnerSubmission)
+            .where(PartnerSubmission.offer_id == offer_id)
+            .values(pending_payload=None, pending_hash=None, pending_at=None)
+        )
+        values: dict[str, Any] = {"source_changed_at": None}
+        if applied_hash is not None:
+            values["applied_source_hash"] = applied_hash
+        await self._session.execute(
+            update(OfferImport).where(OfferImport.offer_id == offer_id).values(**values)
+        )
 
     async def clear_source_change(self, offer_id: str) -> None:
         """Clear the marker only: the importer's hashes are left exactly as they are."""

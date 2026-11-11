@@ -59,7 +59,9 @@ class PartnerSubmission(IdMixin, TimestampMixin, Base):
         ForeignKey("offers.id", ondelete="CASCADE"), unique=True
     )
     content_hash: Mapped[str]
-    pending_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    pending_payload: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     pending_hash: Mapped[str | None]
     pending_at: Mapped[datetime | None]
     submitted_at: Mapped[datetime] = mapped_column(server_default=func.now())

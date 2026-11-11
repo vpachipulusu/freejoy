@@ -22,6 +22,10 @@ PARTNER_SCHEMA = REPO_ROOT / "docs" / "partner" / "openapi.json"
 INTERNAL_SCHEMA = REPO_ROOT / "nextjs-frontend" / "openapi.json"
 
 
+# The routes of the partner API itself, relative to the mount (FREEJ-57 added ``/me``, FREEJ-58 the offer routes).
+REAL_PATHS = {"/me", "/offers", "/offers/{ref}", "/offers/{ref}/end"}
+
+
 def _api_with_a_route():
     api = create_partner_api()
 
@@ -49,10 +53,10 @@ def test_paths_are_written_as_a_retailer_calls_them() -> None:
 
     schema = partner_openapi_schema(api)
 
-    assert list(schema["paths"]) == [
-        "/partner/v1/me",
+    assert set(schema["paths"]) == {
+        *(f"/partner/v1{path}" for path in REAL_PATHS),
         "/partner/v1/things/{thing_id}",
-    ]
+    }
     assert all(path.startswith(f"{PARTNER_PREFIX}/") for path in schema["paths"])
 
 
@@ -63,7 +67,7 @@ def test_asking_twice_does_not_prefix_twice_or_change_the_cached_schema() -> Non
     second = partner_openapi_schema(api)
 
     assert first == second
-    assert list(api.openapi()["paths"]) == ["/me", "/things/{thing_id}"]
+    assert set(api.openapi()["paths"]) == {*REAL_PATHS, "/things/{thing_id}"}
 
 
 def test_the_internal_schema_has_no_partner_path() -> None:
@@ -112,7 +116,9 @@ def test_the_generator_writes_lf_json_that_ends_with_a_newline(tmp_path: Path) -
     raw = target.read_bytes()
     assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert list(json.loads(raw)["paths"]) == ["/partner/v1/me"]
+    assert set(json.loads(raw)["paths"]) == {
+        f"/partner/v1{path}" for path in REAL_PATHS
+    }
 
 
 def test_the_committed_partner_schema_is_what_the_generator_writes(

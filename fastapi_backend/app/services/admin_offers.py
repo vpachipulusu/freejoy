@@ -56,6 +56,7 @@ from app.repositories.admin_offers import (
     OfferPage,
     OfferProvenance,
     OfferRecord,
+    PartnerSubmissionRecord,
     ReviewRefs,
 )
 from app.services.admin_catalogue_common import (
@@ -103,6 +104,7 @@ LINK_FIELDS = frozenset({"provider", "destination_url", "tracking_id", "active"}
 LINK_AUDITED = frozenset({"provider", "active"})
 RESOURCE = "offers"
 DISMISS_ACTION = "dismiss_source_change"
+PARTNER_PROVIDER = "partner"
 LINK_RESOURCE = "affiliate_links"
 
 
@@ -118,6 +120,12 @@ class OfferStore(Protocol):
         self, offer_id: str, *, lock: bool = False
     ) -> OfferProvenance | None: ...
     async def clear_source_change(self, offer_id: str) -> None: ...
+    async def get_partner_submission(
+        self, offer_id: str, *, lock: bool = False
+    ) -> PartnerSubmissionRecord | None: ...
+    async def clear_partner_pending(
+        self, offer_id: str, *, applied_hash: str | None = None
+    ) -> None: ...
     async def slug_exists(self, slug: str) -> bool: ...
     async def insert(self, values: dict[str, Any]) -> OfferRecord: ...
     async def update(self, offer_id: str, values: dict[str, Any]) -> OfferRecord: ...
@@ -145,6 +153,8 @@ class OfferDetail:
     previous_review_token: str | None = None
     # Where an imported offer came from (None for a hand-made offer).
     provenance: OfferProvenance | None = None
+    # The retailer behind an offer submitted through the partner API, and its waiting update (None otherwise).
+    partner: PartnerSubmissionRecord | None = None
 
 
 def _host(url: str) -> str:
@@ -222,6 +232,18 @@ class AdminOfferService:
         review_token: str | None = None,
     ) -> OfferDetail:
         """Edit an offer. ``review_token`` is needed only when the request changes the commercial basis."""
+        detail = await self._stage_update(actor, offer_id, changes, review_token)
+        await self.session.commit()
+        return detail
+
+    async def _stage_update(
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        changes: Mapping[str, Any],
+        review_token: str | None,
+    ) -> OfferDetail:
+        """Every step of an edit up to the audit row, without the commit (``apply_partner_update`` adds to it)."""
         if not changes or not changes.keys() <= EDITABLE_FIELDS:
             raise ValueError("Invalid offer fields")
         current = await self._locked(offer_id)
@@ -248,9 +270,7 @@ class AdminOfferService:
             after=after,
             details={"fields": sorted(values)},
         )
-        detail = await self._detail(updated, previous)
-        await self.session.commit()
-        return detail
+        return await self._detail(updated, previous)
 
     async def transition(
         self,
@@ -380,7 +400,12 @@ class AdminOfferService:
         previous = await self._require_unchanged(current, review_token)
         require_editable(current.status)
         marked = await self.store.get_provenance(offer_id, lock=True)
-        if marked is None or marked.source_changed_at is None:
+        if (
+            marked is None
+            or marked.source_changed_at is None
+            or marked.provider
+            == PARTNER_PROVIDER  # a retailer's update has its own review (dismiss-partner-update)
+        ):
             raise IllegalTransition(current.status.value, DISMISS_ACTION)
         if marked.source_changed_at != seen_marker:
             raise OfferChanged()
@@ -436,6 +461,18 @@ class AdminOfferService:
         link_id: str,
         changes: Mapping[str, Any],
     ) -> AffiliateLinkRecord:
+        updated = await self._stage_link_update(actor, offer_id, link_id, changes)
+        await self.session.commit()
+        return updated
+
+    async def _stage_link_update(
+        self,
+        actor: AdminContext,
+        offer_id: str,
+        link_id: str,
+        changes: Mapping[str, Any],
+    ) -> AffiliateLinkRecord:
+        """Every step of a link edit up to the audit row, without the commit."""
         if not changes or not changes.keys() <= LINK_FIELDS:
             raise ValueError("Invalid link fields")
         offer = await self._locked(offer_id)
@@ -484,7 +521,6 @@ class AdminOfferService:
             after=after,
             details={"offer_id": offer_id, "fields": sorted(values)},
         )
-        await self.session.commit()
         return updated
 
     async def _require_allowed_destination(
@@ -518,12 +554,18 @@ class AdminOfferService:
         links = await self.store.list_links(offer.id)
         refs = await self.store.review_refs(offer.category_id, offer.merchant_id)
         provenance = await self.store.get_provenance(offer.id)
+        partner = (
+            await self.store.get_partner_submission(offer.id)
+            if provenance is not None and provenance.provider == PARTNER_PROVIDER
+            else None
+        )
         return OfferDetail(
             offer,
             links,
             compute_review_token(offer, links, refs),
             previous,
             provenance,
+            partner,
         )
 
     async def _stored_token(self, locked: OfferRecord) -> str:
