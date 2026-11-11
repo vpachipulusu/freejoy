@@ -16,7 +16,7 @@ DRAFT, not past its end date       pending_review   waiting for, or back with, a
 =================================  ==============  ===========================================================
 """
 
-from typing import Final
+from typing import Final, Literal
 
 from app.core.offer_vocabulary import (
     STATUS_ARCHIVED,
@@ -25,6 +25,7 @@ from app.core.offer_vocabulary import (
     STATUS_PUBLISHED,
 )
 
+PartnerStatus = Literal["pending_review", "live", "ended", "declined"]
 PENDING_REVIEW: Final = "pending_review"
 LIVE: Final = "live"
 ENDED: Final = "ended"
@@ -32,7 +33,9 @@ DECLINED: Final = "declined"
 PARTNER_STATUSES: Final = (PENDING_REVIEW, LIVE, ENDED, DECLINED)
 
 
-def partner_status(*, offer_status: str, past_end: bool, ever_published: bool) -> str:
+def partner_status(
+    *, offer_status: str, past_end: bool, ever_published: bool
+) -> PartnerStatus:
     """The partner-facing status of an offer. An unknown ``offer_status`` is a bug and raises."""
     if offer_status == STATUS_ARCHIVED:
         return ENDED if ever_published else DECLINED

@@ -8,10 +8,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.base import Base
 from app.models.platform.mixins import IdMixin, TimestampMixin
 
-REF_PATTERN = "^[A-Za-z0-9._-]{1,64}$"
+REF_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+KEY_ID_PATTERN = "^[a-z0-9]{24}$"
 HASH_PATTERN = "^[0-9a-f]{64}$"
-# The largest sanitised proposal that may wait for an editor (the API's caps keep real ones far below it).
-MAX_PENDING_BYTES = 24_576
+# The largest sanitised proposal that may wait for an editor. The API's caps allow 6,900 characters of text and a
+# 2,048 character link; in 4-byte characters that is about 30 KB as ``jsonb::text``, so the limit leaves room above it
+# (``tests/api/partner/test_partner_content.py`` pins the worst case).
+MAX_PENDING_BYTES = 49_152
 
 
 class PartnerSubmission(IdMixin, TimestampMixin, Base):
@@ -41,10 +44,12 @@ class PartnerSubmission(IdMixin, TimestampMixin, Base):
             "ix_partner_submissions_merchant_id_created_at", "merchant_id", "created_at"
         ),
         CheckConstraint(f"ref ~ '{REF_PATTERN}'", name="ref_valid"),
+        CheckConstraint(f"key_id ~ '{KEY_ID_PATTERN}'", name="key_id_valid"),
         CheckConstraint(f"content_hash ~ '{HASH_PATTERN}'", name="content_hash_valid"),
         CheckConstraint(
             "(pending_payload IS NULL AND pending_hash IS NULL AND pending_at IS NULL)"
             " OR (pending_payload IS NOT NULL AND pending_hash IS NOT NULL AND pending_at IS NOT NULL"
+            " AND jsonb_typeof(pending_payload) = 'object'"
             f" AND pending_hash ~ '{HASH_PATTERN}'"
             f" AND octet_length(pending_payload::text) <= {MAX_PENDING_BYTES})",
             name="pending_complete",

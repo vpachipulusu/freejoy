@@ -5,6 +5,8 @@ and ``app/services`` apply one definition. ``app/services/offer_rules.py`` re-ex
 ``InvalidInput`` from the codes returned here.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Final
@@ -67,6 +69,19 @@ IMAGE_LABEL_LENGTH: Final = 40
 
 INVALID_POSTAGE: Final = "invalid_postage"
 INVALID_WINDOW: Final = "invalid_window"
+
+
+def payload_hash(payload: Mapping[str, Any]) -> str:
+    """SHA-256 (hex) of a sanitised submission payload, over its canonical JSON.
+
+    Shared by the partner API (which stores it with the proposal) and the admin apply path (which recomputes it
+    under the lock, so a payload that was changed under its hash is refused). The bytes are a contract: stored hashes
+    depend on them (``tests/api/partner/test_partner_content.py`` pins one).
+    """
+    text = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def postage_problem(values: Mapping[str, Any]) -> str | None:

@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from app.core.offer_content import payload_hash
 from app.core.permissions import AdminContext
 from app.core.plain_text import TextTooLong, plain_line
 from app.models.platform.offer import OfferStatus, OfferType, PostageKind
@@ -43,6 +44,8 @@ APPLY_ACTION = "partner_update_applied"
 DISMISS_ACTION = "partner_update_dismissed"
 DIRECT = "direct"
 # What a proposal carries that is a column of ``offers`` (the link destination is applied through the link edit).
+# The version of the payload shape this code reads (app/partner/content.py writes it).
+PAYLOAD_VERSION = 1
 CONTENT_FIELDS = (
     "title",
     "summary",
@@ -178,12 +181,23 @@ def proposed_changes(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def keep_an_ended_offer_ended(
-    current: OfferRecord, changes: dict[str, Any], now: datetime
+    current: OfferRecord,
+    changes: dict[str, Any],
+    now: datetime,
+    pending_at: datetime | None,
 ) -> dict[str, Any]:
-    """Drop the proposed ``end_at`` when the offer has already ended and the proposal would not give it a future one."""
+    """Drop the proposed ``end_at`` when the offer has ended and the proposal predates the end or gives no future one.
+
+    A proposal sent before the retailer ended the offer must not reopen it, whatever end date it carries (the partner
+    API also discards a waiting proposal when it ends an offer; this covers an end an editor or the clock made).
+    A proposal sent after the end with a future ``end_at`` is a deliberate new window and is applied.
+    """
     ended = current.end_at is not None and current.end_at <= now
+    if not ended or current.end_at is None:
+        return changes
     proposed = changes["end_at"]
-    if ended and (proposed is None or proposed <= now):
+    older_than_the_end = pending_at is None or pending_at <= current.end_at
+    if proposed is None or proposed <= now or older_than_the_end:
         return {name: value for name, value in changes.items() if name != "end_at"}
     return changes
 
@@ -205,8 +219,10 @@ class AdminPartnerUpdateService(AdminOfferService):
         ):
             raise PermissionDenied()
         payload = submission.pending_payload or {}
+        if payload_hash(payload) != pending_hash or payload.get("v") != PAYLOAD_VERSION:
+            raise _bad()  # the stored payload is not the one whose hash the editor was shown
         changes = keep_an_ended_offer_ended(
-            current, proposed_changes(payload), self.clock()
+            current, proposed_changes(payload), self.clock(), submission.pending_at
         )
         destination = payload.get("destination_url")
         if not isinstance(destination, str):

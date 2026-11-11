@@ -25,7 +25,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -40,11 +40,16 @@ from app.core.plain_text import fit_line
 from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.partner.auth import PartnerContext
 from app.partner.caps import MAX_NEW_SUBMISSIONS_PER_DAY, MAX_OPEN_SUBMISSIONS
-from app.partner.content import CleanContent, clean_submission
+from app.partner.content import (
+    CleanContent,
+    clean_submission,
+    require_current_window,
+)
 from app.partner.errors import SubmissionBusy, SubmissionNotFound, SubmissionRefused
 from app.partner.schemas import (
     EndResult,
     OfferSubmission,
+    Outcome,
     SubmissionResult,
     SubmissionsPage,
     SubmissionView,
@@ -72,6 +77,7 @@ SLUG_TOKEN_LENGTH = 8
 SLUG_ATTEMPTS = 3
 
 Clock = Callable[[], datetime]
+UpdateOutcome = Literal["refreshed", "pending_update", "cleared"]
 
 
 def utc_now() -> datetime:
@@ -109,9 +115,12 @@ def view_of(row: ViewRow) -> SubmissionView:
     )
     return SubmissionView(
         ref=row.ref,
-        status=status,  # type: ignore[arg-type]  # one of the four literals by construction
+        status=status,
         title=row.title,
-        public_url=public_url(row.slug) if status == LIVE else None,
+        # A disabled category hides its offers from the public site, so a link to the page would be a 404.
+        public_url=(
+            public_url(row.slug) if status == LIVE and row.category_enabled else None
+        ),
         update_pending=row.update_pending,
         submitted_at=row.submitted_at,
         ends_at=row.end_at,
@@ -158,19 +167,39 @@ class SubmissionService:
             submission,
             category_id=category_id,
             merchant_website=merchant.website,
-            now=self._clock(),
         )
-        if await self._store.find_submission(self._merchant_id, ref) is None:
+        found = await self._store.find_submission(self._merchant_id, ref)
+        if found is not None and found.content_hash == content.hash:
+            unchanged = await self._unchanged_without_locks(ref)
+            if unchanged is not None:
+                return unchanged
+        if found is None:
             created = await self._create(ref, content, merchant)
             if created is not None:
                 return created
         return await self._update(ref, content)
+
+    async def _unchanged_without_locks(self, ref: str) -> SubmissionResult | None:
+        """The commonest call of a sync job, the same body again, answered with no row lock at all.
+
+        A concurrent change just orders this request before it. An archived offer still gets the locked path
+        (and its ``offer_closed``), so this only answers for an offer an editor has not closed.
+        """
+        row = await self._store.view(self._merchant_id, ref)
+        if row is None or row.offer_status == STATUS_ARCHIVED:
+            return None
+        return self._result_of(row, "unchanged")
+
+    def _require_future_end(self, content: CleanContent) -> None:
+        """A new or changed submission must not already have ended (a resend of what is stored is judged before this)."""
+        require_current_window(content.start_at, content.end_at, self._clock())
 
     async def _create(
         self, ref: str, content: CleanContent, merchant: MerchantFacts
     ) -> SubmissionResult | None:
         """The new submission, or ``None`` when another request created this ref first (the caller then updates)."""
         store, merchant_id = self._store, self._merchant_id
+        self._require_future_end(content)
         await store.lock_creation(merchant_id)
         if await store.find_submission(merchant_id, ref) is not None:
             return None
@@ -190,8 +219,9 @@ class SubmissionService:
                     raise
                 continue
             await self._audit(ACTION_SUBMIT, offer.id, ref, "created", content.hash)
+            result = await self._result(ref, "created")
             await self._session.commit()
-            return await self._result(ref, "created")
+            return result
         raise SubmissionBusy
 
     async def _require_room(self) -> None:
@@ -210,6 +240,7 @@ class SubmissionService:
         content: CleanContent,
         merchant: MerchantFacts,
     ) -> OfferRow:
+        """Offer, submission, link, provenance: the order the database guards need (each checks the one before)."""
         store, merchant_id = self._store, self._merchant_id
         offer = await store.insert_offer(
             merchant_id,
@@ -221,14 +252,6 @@ class SubmissionService:
                 "image_alt": IMAGE_ALT,
             },
         )
-        link = await store.insert_link(merchant_id, offer.id, content.destination_url)
-        await store.insert_import(
-            merchant_id,
-            offer_id=offer.id,
-            external_id=submission_id,
-            digest=content.hash,
-            applied_content_hash=fingerprint(offer, [link]),
-        )
         await store.insert_submission(
             merchant_id,
             submission_id=submission_id,
@@ -236,6 +259,14 @@ class SubmissionService:
             offer_id=offer.id,
             content_hash=content.hash,
             key_id=self._context.key_id,
+        )
+        link = await store.insert_link(merchant_id, offer.id, content.destination_url)
+        await store.insert_import(
+            merchant_id,
+            offer_id=offer.id,
+            external_id=submission_id,
+            digest=content.hash,
+            applied_content_hash=fingerprint(offer, [link]),
         )
         return offer
 
@@ -245,8 +276,10 @@ class SubmissionService:
             raise SubmissionRefused("offer_closed")
         digest = content.hash
         if digest == locked.submission.content_hash:
+            result = await self._result(ref, "unchanged")
             await self._session.rollback()  # nothing changed: release the locks
-            return await self._result(ref, "unchanged")
+            return result
+        self._require_future_end(content)
         links = await self._store.links(self._merchant_id, locked.offer.id)
         untouched = is_untouched_draft(
             status=locked.offer.status,
@@ -259,10 +292,15 @@ class SubmissionService:
         else:
             outcome = await self._queue(locked, content)
         await self._audit(ACTION_UPDATE, locked.offer.id, ref, outcome, digest)
+        result = await self._result(
+            ref, "unchanged" if outcome == "cleared" else outcome
+        )
         await self._session.commit()
-        return await self._result(ref, "unchanged" if outcome == "cleared" else outcome)
+        return result
 
     async def _lock(self, ref: str) -> _Locked:
+        """Offer, provenance and submission, in the admin's order, with ``FOR NO KEY UPDATE`` (it excludes every
+        writer but does not block a click's foreign-key check on the offer)."""
         store, merchant_id = self._store, self._merchant_id
         found = await store.find_submission(merchant_id, ref)
         if found is None:
@@ -277,7 +315,7 @@ class SubmissionService:
 
     async def _refresh(
         self, locked: _Locked, link_id: str, content: CleanContent
-    ) -> str:
+    ) -> UpdateOutcome:
         """An untouched draft takes the new content as it stands, and the hashes follow it."""
         store, merchant_id = self._store, self._merchant_id
         offer_id, digest = locked.offer.id, content.hash
@@ -303,7 +341,7 @@ class SubmissionService:
         )
         return "refreshed"
 
-    async def _queue(self, locked: _Locked, content: CleanContent) -> str:
+    async def _queue(self, locked: _Locked, content: CleanContent) -> UpdateOutcome:
         """Anything that is not an untouched draft keeps its content: the proposal waits for an editor."""
         store, merchant_id = self._store, self._merchant_id
         digest = content.hash
@@ -348,18 +386,46 @@ class SubmissionService:
     # --- end ---------------------------------------------------------------------------------
 
     async def end(self, ref: str) -> EndResult:
-        """Set ``end_at`` to now, on the database clock, unless the offer has ended already. Never touches ``status``."""
+        """Set ``end_at`` to now, on the database clock, unless the offer has ended already. Never touches ``status``.
+
+        A proposal still waiting for an editor was sent before the retailer said the offer was over, so ending
+        supersedes it: the proposal and the marker are cleared and the stored hash goes back to the content the offer
+        reflects (a later update then queues normally, and an editor cannot apply an old proposal over the end).
+        """
         locked = await self._lock(ref)
         changed = False
+        superseded = False
         if locked.offer.status != STATUS_ARCHIVED:
             changed = await self._store.end_offer(self._merchant_id, locked.offer.id)
         if changed:
-            await self._audit(ACTION_END, locked.offer.id, ref, "ended", None)
+            superseded = locked.submission.pending_hash is not None
+            if superseded:
+                await self._supersede_pending(locked)
+            await self._audit(
+                ACTION_END,
+                locked.offer.id,
+                ref,
+                "ended",
+                None,
+                {"superseded_pending": True} if superseded else None,
+            )
+        view = await self._require_view(ref)
+        if changed:
             await self._session.commit()
         else:
             await self._session.rollback()
-        view = await self._require_view(ref)
         return EndResult(**view_of(view).model_dump(), changed=changed)
+
+    async def _supersede_pending(self, locked: _Locked) -> None:
+        applied = locked.provenance.applied_source_hash
+        await self._store.update_import(
+            self._merchant_id,
+            locked.offer.id,
+            {"source_hash": applied, "source_changed_at": None},
+        )
+        await self._store.update_submission(
+            self._merchant_id, locked.submission.id, self._submission_values(applied)
+        )
 
     # --- reads -------------------------------------------------------------------------------
 
@@ -381,12 +447,21 @@ class SubmissionService:
             raise SubmissionNotFound
         return row
 
-    async def _result(self, ref: str, outcome: str) -> SubmissionResult:
-        view = view_of(await self._require_view(ref))
-        return SubmissionResult(**view.model_dump(), outcome=outcome)  # type: ignore[arg-type]
+    def _result_of(self, row: ViewRow, outcome: Outcome) -> SubmissionResult:
+        return SubmissionResult(**view_of(row).model_dump(), outcome=outcome)
+
+    async def _result(self, ref: str, outcome: Outcome) -> SubmissionResult:
+        """Read inside the write's own transaction (before its commit), so the answer costs no extra connection."""
+        return self._result_of(await self._require_view(ref), outcome)
 
     async def _audit(
-        self, action: str, offer_id: str, ref: str, outcome: str, digest: str | None
+        self,
+        action: str,
+        offer_id: str,
+        ref: str,
+        outcome: str,
+        digest: str | None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         """Ids, the ref the retailer chose (a plain identifier), the outcome and a hash: never any copy."""
         metadata: dict[str, Any] = {
@@ -394,6 +469,7 @@ class SubmissionService:
             "key_id": self._context.key_id,
             "ref": ref,
             "outcome": outcome,
+            **(extra or {}),
         }
         if digest is not None:
             metadata["content_hash"] = digest

@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastapi import Depends, FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.core.errors import ERROR_RESPONSES, ErrorResponse, register_error_handlers
@@ -10,6 +11,7 @@ from app.core.partner_keys import running_environment
 from app.core.rate_limiter_provider import get_rate_limiter
 from app.partner import deps
 from app.partner.auth import PartnerAuthenticator, require_partner_key
+from app.partner.body_errors import partner_http_exception_handler
 from app.partner.limits import PARTNER_LIMIT_RESPONSES
 from app.partner.mount import PartnerMount
 from app.partner.offer_routes import router as offers_router
@@ -32,7 +34,7 @@ PARTNER_RESPONSES: dict[int | str, dict[str, Any]] = {
     **PARTNER_LIMIT_RESPONSES,
     503: {
         "model": ErrorResponse,
-        "description": "Service temporarily unavailable (the database or a limiter)",
+        "description": "Service temporarily unavailable: try again shortly",
     },
 }
 
@@ -54,6 +56,10 @@ def create_partner_api() -> FastAPI:
         dependencies=[Depends(require_partner_key)],
     )
     register_error_handlers(api)
+    api.add_exception_handler(
+        StarletteHTTPException,
+        partner_http_exception_handler,  # type: ignore[arg-type]
+    )
     api.include_router(router)
     api.include_router(offers_router)
     return api

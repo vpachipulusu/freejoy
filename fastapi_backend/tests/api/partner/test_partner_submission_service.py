@@ -4,6 +4,7 @@
 """
 
 from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -144,13 +145,14 @@ async def test_the_same_content_twice_changes_nothing_and_writes_no_audit_row(
 ) -> None:
     await world.service().submit("sku-1", body())
     commits = world.session.commits
+    world.store.locks.clear()
 
     second = await world.service().submit("sku-1", body())
 
     assert second.outcome == "unchanged"
     assert len(world.store.offers) == 1 and len(world.store.audits) == 1
     assert world.session.commits == commits
-    assert world.session.rollbacks == 1
+    assert world.store.locks == []  # the fast path takes no row lock at all
 
 
 async def test_an_untouched_draft_is_refreshed_with_the_hashes_following(
@@ -200,8 +202,8 @@ async def test_an_edited_draft_keeps_its_content_and_the_proposal_waits(
     (submission,) = world.store.submissions.values()
     assert result.outcome == "pending_update" and result.update_pending is True
     assert stored.title == "Editor title"
-    assert submission.pending_payload is not None
-    assert submission.pending_payload["title"] == "Retailer title"
+    assert world.store.pending_payload_of(submission) is not None
+    assert world.store.pending_payload_of(submission)["title"] == "Retailer title"
     assert submission.pending_hash == submission.content_hash
     assert imported.source_changed_at is not None
     assert imported.applied_source_hash != imported.source_hash
@@ -243,10 +245,10 @@ async def test_the_pending_payload_is_the_cleaned_content_never_the_raw_request(
     )
 
     (submission,) = world.store.submissions.values()
-    assert submission.pending_payload is not None
-    assert submission.pending_payload["title"] == "Bold title"
-    assert "<script" not in str(submission.pending_payload)
-    assert "x()" not in str(submission.pending_payload)
+    assert world.store.pending_payload_of(submission) is not None
+    assert world.store.pending_payload_of(submission)["title"] == "Bold title"
+    assert "<script" not in str(world.store.pending_payload_of(submission))
+    assert "x()" not in str(world.store.pending_payload_of(submission))
 
 
 async def test_sending_back_what_the_offer_reflects_clears_the_proposal(
@@ -262,7 +264,10 @@ async def test_sending_back_what_the_offer_reflects_clears_the_proposal(
     (submission,) = world.store.submissions.values()
     (imported,) = world.store.imports.values()
     assert result.outcome == "unchanged" and result.update_pending is False
-    assert submission.pending_payload is None and imported.source_changed_at is None
+    assert (
+        world.store.pending_payload_of(submission) is None
+        and imported.source_changed_at is None
+    )
 
 
 async def test_the_same_pending_content_twice_is_unchanged(world: World) -> None:
@@ -473,7 +478,7 @@ async def test_end_sets_the_end_date_once_and_audits_once(world: World) -> None:
 
 async def test_end_clears_a_start_date_that_is_still_ahead(world: World) -> None:
     await world.service().submit(
-        "sku-1", body(start_at="2099-01-01T00:00:00Z", end_at="2099-02-01T00:00:00Z")
+        "sku-1", body(start_at="2026-06-20T00:00:00Z", end_at="2026-07-20T00:00:00Z")
     )
 
     await world.service().end("sku-1")
@@ -573,3 +578,136 @@ async def test_a_put_on_a_ref_another_merchant_uses_creates_a_separate_submissio
     assert replace(
         world.store.by_ref(OTHER, "shared"), ref="shared"
     )  # theirs still exists, untouched
+
+
+async def test_an_unchanged_resend_of_an_archived_offer_still_takes_the_locked_path_and_is_refused(
+    world: World,
+) -> None:
+    await world.service().submit("sku-1", body())
+    (offer,) = world.store.offers.values()
+    world.store.edit_offer(offer.id, status="ARCHIVED")
+
+    with pytest.raises(SubmissionRefused) as refused:
+        await world.service().submit("sku-1", body())
+
+    assert refused.value.code == "offer_closed"
+
+
+async def test_a_resend_of_stored_content_is_unchanged_after_its_end_date_but_changed_content_is_refused(
+    world: World,
+) -> None:
+    ending = body(end_at="2026-06-10T00:00:00Z")
+    await world.service().submit("sku-1", ending)
+    later = SubmissionService(
+        world.session,  # type: ignore[arg-type]
+        PartnerContext(KEY, MERCHANT),
+        clock=lambda: NOW + timedelta(days=30),
+        store=world.store,  # type: ignore[arg-type]
+        categories=FakeCategories(),  # type: ignore[arg-type]
+    )
+
+    resent = await later.submit("sku-1", ending)
+    with pytest.raises(SubmissionRefused) as refused:
+        await later.submit(
+            "sku-1", body(title="Changed", end_at="2026-06-10T00:00:00Z")
+        )
+    with pytest.raises(SubmissionRefused) as new_ref:
+        await later.submit("sku-2", ending)
+
+    assert resent.outcome == "unchanged"
+    assert refused.value.code == new_ref.value.code == "invalid_window"
+
+
+async def test_a_start_date_more_than_ninety_days_ahead_is_refused_on_a_new_ref(
+    world: World,
+) -> None:
+    with pytest.raises(SubmissionRefused) as refused:
+        await world.service().submit("sku-1", body(start_at="2027-01-01T00:00:00Z"))
+
+    assert refused.value.code == "invalid_window"
+    assert world.store.offers == {}
+
+
+async def test_ending_discards_a_waiting_proposal_and_goes_back_to_the_applied_hash(
+    world: World,
+) -> None:
+    await world.service().submit("sku-1", body())
+    (offer,) = world.store.offers.values()
+    world.store.edit_offer(offer.id, status="PUBLISHED")
+    first = next(iter(world.store.submissions.values())).content_hash
+    queued = await world.service().submit(
+        "sku-1", body(title="Retailer title", end_at="2026-12-01T00:00:00Z")
+    )
+
+    ended = await world.service().end("sku-1")
+
+    (submission,) = world.store.submissions.values()
+    (imported,) = world.store.imports.values()
+    assert queued.outcome == "pending_update" and queued.update_pending is True
+    assert ended.changed is True and ended.update_pending is False
+    assert (
+        submission.pending_hash is None
+        and world.store.pending_payload_of(submission) is None
+    )
+    assert submission.content_hash == first == imported.applied_source_hash
+    assert imported.source_changed_at is None
+    assert world.store.audits[-1]["superseded_pending"] is True
+    again = await world.service().submit(
+        "sku-1", body(title="Retailer title", end_at="2026-12-01T00:00:00Z")
+    )
+    assert again.outcome == "pending_update"  # a proposal after the end queues normally
+
+
+async def test_the_view_is_read_before_the_commit_so_a_write_needs_no_extra_connection(
+    world: World,
+) -> None:
+    order: list[str] = []
+    original_view = world.store.view
+
+    async def view(merchant_id: str, ref: str):  # type: ignore[no-untyped-def]
+        order.append(f"view@commits={world.session.commits}")
+        return await original_view(merchant_id, ref)
+
+    world.store.view = view  # type: ignore[method-assign]
+
+    await world.service().submit("sku-1", body())
+    await world.service().submit("sku-1", body(title="Two"))
+    await world.service().end("sku-1")
+
+    assert order == ["view@commits=0", "view@commits=1", "view@commits=2"]
+
+
+async def test_the_inserts_of_a_new_draft_come_in_the_order_the_database_guards_need(
+    world: World,
+) -> None:
+    calls: list[str] = []
+    for name in ("insert_offer", "insert_submission", "insert_link", "insert_import"):
+        original = getattr(world.store, name)
+
+        async def wrapped(*args, __o=original, __n=name, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(__n)
+            return await __o(*args, **kwargs)
+
+        setattr(world.store, name, wrapped)
+
+    await world.service().submit("sku-1", body())
+
+    assert calls == [
+        "insert_offer",
+        "insert_submission",
+        "insert_link",
+        "insert_import",
+    ]
+
+
+async def test_a_view_has_no_public_url_while_the_category_is_disabled(
+    world: World,
+) -> None:
+    await world.service().submit("sku-1", body())
+    (offer,) = world.store.offers.values()
+    world.store.edit_offer(offer.id, status="PUBLISHED")
+    world.store.category_enabled = False
+
+    view = await world.service().get("sku-1")
+
+    assert (view.status, view.public_url) == ("live", None)

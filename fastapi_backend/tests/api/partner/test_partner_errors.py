@@ -161,3 +161,30 @@ async def test_a_405_names_only_the_allowed_methods(world: PartnerWorld) -> None
     assert response.status == 405
     assert response.header("allow") == "GET"
     assert_fixed(response, [world.key.value])
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"title": "' + b"\xff\xfe" + b'"}',  # invalid UTF-8
+        b"[" * 5000 + b"]" * 5000,  # nested far too deep
+        b'{"requires_card": '
+        + b"9" * 5000
+        + b"}",  # an integer with five thousand digits
+    ],
+    ids=["invalid-utf8", "deep-nesting", "huge-integer"],
+)
+async def test_a_body_the_parser_rejects_is_the_plain_422_inside_the_closed_set(
+    world: PartnerWorld, raw: bytes
+) -> None:
+    response = await call_raw(
+        app,
+        "PUT",
+        "/partner/v1/offers/some-ref",
+        headers=[*world.headers(), ("content-type", "application/json")],
+        chunks=[raw],
+    )
+
+    assert response.status == 422
+    assert response.json() == {"success": False, "error": "Invalid request"}
+    assert_fixed(response, [world.key.value])

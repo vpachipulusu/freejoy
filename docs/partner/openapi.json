@@ -85,7 +85,7 @@
           "offers"
         ],
         "summary": "Create or update an offer submission",
-        "description": "Send the whole offer. It is stored as a **draft** for an editor to review: nothing you send is ever published\nby the API. The same body twice changes nothing. ``outcome`` says what happened: ``created``; ``refreshed``\n(an editor had not touched the draft yet, so it took the new content); ``pending_update`` (an editor has edited,\npublished or ended the offer, so the new content waits for an editor and the published page is unchanged);\n``unchanged``.",
+        "description": "Send the whole offer. It is stored for our editors to review: nothing you send is ever published by this API,\nand an editor decides whether it goes live. Send the same body again and nothing changes; send changed content and\nthe answer's `outcome` says what happened (see the field's description).\n\n`ref` is your own id for the offer. Two merchants may use the same ref; yours are only ever yours.\n\nA `PUT` on a ref one of our editors has archived is always a 409 (`offer_closed`); that is permanent, so submit\nagain under a new ref. New refs are limited to 50 offers waiting for review (`open_submission_cap`, which clears\nonly as our editors review them) and 20 new offers a day (`daily_submission_cap`); updating an existing ref is\nnever refused for either. Each merchant has 2,000 writes a day across all its keys (`daily_write_budget`).",
         "operationId": "partner-offers-put",
         "security": [
           {
@@ -99,7 +99,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9._-]{1,64}$",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
               "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
               "title": "Ref"
             },
@@ -214,6 +214,7 @@
           "offers"
         ],
         "summary": "Read one submission",
+        "description": "One of your submissions. A ref that is not yours is answered exactly like one that does not exist (404).",
         "operationId": "partner-offers-get",
         "security": [
           {
@@ -227,7 +228,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9._-]{1,64}$",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
               "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
               "title": "Ref"
             },
@@ -314,7 +315,7 @@
           "offers"
         ],
         "summary": "List your submissions",
-        "description": "Your submissions, newest first: status, the public page when live, and whether an update is waiting.",
+        "description": "Your submissions, newest first, with each one's status (pending_review, live, ended or declined), the public\npage while it is live and whether an update is waiting for our editors.",
         "operationId": "partner-offers-list",
         "security": [
           {
@@ -340,7 +341,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 1000000,
+              "maximum": 50000,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -417,7 +418,7 @@
           "offers"
         ],
         "summary": "End an offer: the sample ran out",
-        "description": "Takes effect immediately: the offer's end date becomes now, so the public site and the outbound links already\ntreat it as ended. Ending it again changes nothing.",
+        "description": "Use this when the sample has run out. The offer's end date becomes now, so it stops being offered at once.\n\nEnding cannot be undone by this API: sending the offer again without a future `end_at` does not reopen it, and\nan update that was waiting for our editors when you ended the offer is discarded. Calling it again changes\nnothing (`changed` is false).",
         "operationId": "partner-offers-end",
         "security": [
           {
@@ -431,7 +432,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9._-]{1,64}$",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
               "description": "Your own id for the offer: 1 to 64 letters, digits, dots, underscores or hyphens.",
               "title": "Ref"
             },
@@ -521,11 +522,13 @@
             "type": "boolean",
             "const": false,
             "title": "Success",
+            "description": "Always false.",
             "default": false
           },
           "error": {
             "type": "string",
-            "title": "Error"
+            "title": "Error",
+            "description": "A fixed message. It never repeats what you sent."
           },
           "code": {
             "anyOf": [
@@ -541,14 +544,16 @@
                   "subscription_terms_required",
                   "offer_closed",
                   "open_submission_cap",
-                  "daily_submission_cap"
+                  "daily_submission_cap",
+                  "daily_write_budget"
                 ]
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Code"
+            "title": "Code",
+            "description": "A stable code to branch on. open_submission_cap: you have 50 offers waiting for review and it clears only as our editors review them, not with time. daily_submission_cap: 20 new offers a day (UTC); try again tomorrow. daily_write_budget: 2,000 writes a day (UTC). offer_closed: one of our editors archived this offer, which is permanent; use a new ref."
           }
         },
         "type": "object",
@@ -562,7 +567,8 @@
         "properties": {
           "ref": {
             "type": "string",
-            "title": "Ref"
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
           },
           "status": {
             "type": "string",
@@ -572,11 +578,13 @@
               "ended",
               "declined"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "pending_review: with our editors, not yet published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
           },
           "title": {
             "type": "string",
-            "title": "Title"
+            "title": "Title",
+            "description": "The title as it is stored now."
           },
           "public_url": {
             "anyOf": [
@@ -587,16 +595,19 @@
                 "type": "null"
               }
             ],
-            "title": "Public Url"
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
           },
           "update_pending": {
             "type": "boolean",
-            "title": "Update Pending"
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
           },
           "submitted_at": {
             "type": "string",
             "format": "date-time",
-            "title": "Submitted At"
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
           },
           "ends_at": {
             "anyOf": [
@@ -608,11 +619,13 @@
                 "type": "null"
               }
             ],
-            "title": "Ends At"
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
           },
           "changed": {
             "type": "boolean",
-            "title": "Changed"
+            "title": "Changed",
+            "description": "True if this call ended the offer, false if it had already ended (nothing was changed)."
           }
         },
         "type": "object",
@@ -635,10 +648,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/EndResult"
+            "$ref": "#/components/schemas/EndResult",
+            "description": "The submission after the call."
           }
         },
         "type": "object",
@@ -653,11 +668,13 @@
             "type": "boolean",
             "const": false,
             "title": "Success",
+            "description": "Always false.",
             "default": false
           },
           "error": {
             "type": "string",
-            "title": "Error"
+            "title": "Error",
+            "description": "A fixed message for the kind of error. It never repeats what was sent."
           }
         },
         "type": "object",
@@ -671,11 +688,13 @@
         "properties": {
           "merchant_name": {
             "type": "string",
-            "title": "Merchant Name"
+            "title": "Merchant Name",
+            "description": "The name of the merchant this key was issued to."
           },
           "key_label": {
             "type": "string",
-            "title": "Key Label"
+            "title": "Key Label",
+            "description": "The label the key was given when it was issued."
           }
         },
         "type": "object",
@@ -691,10 +710,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/MeData"
+            "$ref": "#/components/schemas/MeData",
+            "description": "Who this key belongs to."
           }
         },
         "type": "object",
@@ -709,13 +730,15 @@
             "type": "string",
             "maxLength": 120,
             "minLength": 1,
-            "title": "Title"
+            "title": "Title",
+            "description": "The offer's title, up to 120 characters of plain text (markup is removed)."
           },
           "summary": {
             "type": "string",
             "maxLength": 200,
             "minLength": 1,
-            "title": "Summary"
+            "title": "Summary",
+            "description": "One line under the title, up to 200 characters."
           },
           "description": {
             "items": {
@@ -725,7 +748,8 @@
             },
             "type": "array",
             "maxItems": 5,
-            "title": "Description"
+            "title": "Description",
+            "description": "Up to 5 paragraphs of up to 600 characters. Optional; omitting it and sending [] are the same."
           },
           "offer_type": {
             "type": "string",
@@ -733,19 +757,22 @@
               "FREE_SAMPLE",
               "FREE_TRIAL"
             ],
-            "title": "Offer Type"
+            "title": "Offer Type",
+            "description": "FREE_SAMPLE or FREE_TRIAL. No other kind of offer can be submitted."
           },
           "category": {
             "type": "string",
             "maxLength": 80,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "title": "Category"
+            "title": "Category",
+            "description": "The slug of one of our categories that is currently open to submissions."
           },
           "url": {
             "type": "string",
             "maxLength": 2048,
             "minLength": 1,
-            "title": "Url"
+            "title": "Url",
+            "description": "Where the visitor claims the offer: an https address on your own website's host (or its www form)."
           },
           "postage_kind": {
             "type": "string",
@@ -754,7 +781,8 @@
               "COST",
               "CHECK_TERMS"
             ],
-            "title": "Postage Kind"
+            "title": "Postage Kind",
+            "description": "FREE, COST (the visitor pays postage; send the amount and currency) or CHECK_TERMS."
           },
           "postage_amount_minor": {
             "anyOf": [
@@ -767,7 +795,8 @@
                 "type": "null"
               }
             ],
-            "title": "Postage Amount Minor"
+            "title": "Postage Amount Minor",
+            "description": "The postage in the smallest currency unit (pence). Send it exactly when postage_kind is COST."
           },
           "postage_currency": {
             "anyOf": [
@@ -779,11 +808,13 @@
                 "type": "null"
               }
             ],
-            "title": "Postage Currency"
+            "title": "Postage Currency",
+            "description": "Three capital letters, for example GBP. Send it exactly when postage_kind is COST."
           },
           "requires_card": {
             "type": "boolean",
-            "title": "Requires Card"
+            "title": "Requires Card",
+            "description": "True if the visitor has to give a payment card to claim the offer."
           },
           "subscription_terms": {
             "anyOf": [
@@ -796,19 +827,22 @@
                 "type": "null"
               }
             ],
-            "title": "Subscription Terms"
+            "title": "Subscription Terms",
+            "description": "What the visitor commits to and how to cancel, up to 600 characters. Required for FREE_TRIAL; send null for a sample with nothing to cancel."
           },
           "eligibility": {
             "type": "string",
             "maxLength": 400,
             "minLength": 1,
-            "title": "Eligibility"
+            "title": "Eligibility",
+            "description": "Who can claim it, up to 400 characters."
           },
           "availability": {
             "type": "string",
             "maxLength": 300,
             "minLength": 1,
-            "title": "Availability"
+            "title": "Availability",
+            "description": "How long or where it is available, up to 300 characters."
           },
           "steps": {
             "items": {
@@ -816,7 +850,8 @@
             },
             "type": "array",
             "maxItems": 6,
-            "title": "Steps"
+            "title": "Steps",
+            "description": "Up to 6 steps to claim it. Optional."
           },
           "start_at": {
             "anyOf": [
@@ -828,7 +863,8 @@
                 "type": "null"
               }
             ],
-            "title": "Start At"
+            "title": "Start At",
+            "description": "When the offer starts, an ISO 8601 date-time with a time zone, or null. At most 90 days ahead."
           },
           "end_at": {
             "anyOf": [
@@ -840,7 +876,8 @@
                 "type": "null"
               }
             ],
-            "title": "End At"
+            "title": "End At",
+            "description": "When the offer ends, an ISO 8601 date-time with a time zone, or null for no end date. Must be in the future."
           }
         },
         "additionalProperties": false,
@@ -868,13 +905,15 @@
             "type": "string",
             "maxLength": 80,
             "minLength": 1,
-            "title": "Title"
+            "title": "Title",
+            "description": "A short heading for the step, up to 80 characters of plain text."
           },
           "detail": {
             "type": "string",
             "maxLength": 300,
             "minLength": 1,
-            "title": "Detail"
+            "title": "Detail",
+            "description": "What the visitor does in this step, up to 300 characters of plain text."
           }
         },
         "additionalProperties": false,
@@ -891,10 +930,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/SubmissionView"
+            "$ref": "#/components/schemas/SubmissionView",
+            "description": "The submission."
           }
         },
         "type": "object",
@@ -907,7 +948,8 @@
         "properties": {
           "ref": {
             "type": "string",
-            "title": "Ref"
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
           },
           "status": {
             "type": "string",
@@ -917,11 +959,13 @@
               "ended",
               "declined"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "pending_review: with our editors, not yet published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
           },
           "title": {
             "type": "string",
-            "title": "Title"
+            "title": "Title",
+            "description": "The title as it is stored now."
           },
           "public_url": {
             "anyOf": [
@@ -932,16 +976,19 @@
                 "type": "null"
               }
             ],
-            "title": "Public Url"
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
           },
           "update_pending": {
             "type": "boolean",
-            "title": "Update Pending"
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
           },
           "submitted_at": {
             "type": "string",
             "format": "date-time",
-            "title": "Submitted At"
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
           },
           "ends_at": {
             "anyOf": [
@@ -953,7 +1000,8 @@
                 "type": "null"
               }
             ],
-            "title": "Ends At"
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
           },
           "outcome": {
             "type": "string",
@@ -963,7 +1011,8 @@
               "pending_update",
               "unchanged"
             ],
-            "title": "Outcome"
+            "title": "Outcome",
+            "description": "created: a new submission. refreshed: our editors had not touched it yet, so it took your new content. pending_update: our editors have edited, published or ended it, so your new content waits for them and the published page is unchanged. unchanged: nothing needed to change (the same content again, or content that matches what the offer already shows)."
           }
         },
         "type": "object",
@@ -986,10 +1035,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/SubmissionResult"
+            "$ref": "#/components/schemas/SubmissionResult",
+            "description": "The submission and what happened to it."
           }
         },
         "type": "object",
@@ -1002,7 +1053,8 @@
         "properties": {
           "ref": {
             "type": "string",
-            "title": "Ref"
+            "title": "Ref",
+            "description": "Your own id for the offer, as you sent it."
           },
           "status": {
             "type": "string",
@@ -1012,11 +1064,13 @@
               "ended",
               "declined"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "pending_review: with our editors, not yet published. live: published and not past its end date. ended: past its end date, or one of our editors retired it after it was live. declined: one of our editors turned it down before it was ever published; it is final, so send a new ref to submit again."
           },
           "title": {
             "type": "string",
-            "title": "Title"
+            "title": "Title",
+            "description": "The title as it is stored now."
           },
           "public_url": {
             "anyOf": [
@@ -1027,16 +1081,19 @@
                 "type": "null"
               }
             ],
-            "title": "Public Url"
+            "title": "Public Url",
+            "description": "The offer's page on our site. Present only while status is live."
           },
           "update_pending": {
             "type": "boolean",
-            "title": "Update Pending"
+            "title": "Update Pending",
+            "description": "True while an update you sent is waiting for one of our editors, who may apply it or dismiss it. The published page has not changed. It going back to false does not mean the update was applied: read the offer's status and content. Sending content an editor dismissed again is answered unchanged and is not queued again; send changed content to propose it afresh."
           },
           "submitted_at": {
             "type": "string",
             "format": "date-time",
-            "title": "Submitted At"
+            "title": "Submitted At",
+            "description": "When you last sent this offer (an ISO 8601 time, UTC)."
           },
           "ends_at": {
             "anyOf": [
@@ -1048,7 +1105,8 @@
                 "type": "null"
               }
             ],
-            "title": "Ends At"
+            "title": "Ends At",
+            "description": "The offer's end date as stored, or null. Ending an offer sets it to the moment you called end."
           }
         },
         "type": "object",
@@ -1071,19 +1129,23 @@
               "$ref": "#/components/schemas/SubmissionView"
             },
             "type": "array",
-            "title": "Offers"
+            "title": "Offers",
+            "description": "This page of your submissions, newest first."
           },
           "total_count": {
             "type": "integer",
-            "title": "Total Count"
+            "title": "Total Count",
+            "description": "How many submissions you have in all."
           },
           "limit": {
             "type": "integer",
-            "title": "Limit"
+            "title": "Limit",
+            "description": "The page size that was used."
           },
           "offset": {
             "type": "integer",
-            "title": "Offset"
+            "title": "Offset",
+            "description": "How many submissions were skipped."
           }
         },
         "type": "object",
@@ -1101,10 +1163,12 @@
             "type": "boolean",
             "const": true,
             "title": "Success",
+            "description": "Always true.",
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/SubmissionsPage"
+            "$ref": "#/components/schemas/SubmissionsPage",
+            "description": "A page of submissions."
           }
         },
         "type": "object",

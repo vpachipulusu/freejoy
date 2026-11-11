@@ -7,6 +7,7 @@ the things the store must never contain (a delete, the status column in a write)
 
 import dataclasses
 import inspect
+import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -121,8 +122,35 @@ class RecordingSession:
         )
 
 
+# Plain ``INSERT ... VALUES`` of a row that has its own ``merchant_id`` column (or a lock keyed by it): the merchant is
+# a value there, not a filter. Every other statement must put it in its WHERE clause.
+MERCHANT_IS_A_VALUE = {
+    "insert_offer",
+    "audit",
+    "lock_creation",
+    "merchant_facts",
+}  # merchant_facts reads the merchant by its own id
+
+
 def carries_the_merchant(session: RecordingSession) -> bool:
     return any(MERCHANT in str(value) for value in session.compiled_params())
+
+
+def merchant_is_in_every_where(session: RecordingSession) -> bool:
+    """Every statement filters on a ``merchant_id`` bound to the calling merchant, in its WHERE clause."""
+    for statement in session.statements:
+        compiled = statement.compile(dialect=postgresql.dialect())
+        text = str(compiled)
+        parts = re.split(r"\s+WHERE\s+", text, maxsplit=1)
+        where = parts[1] if len(parts) == 2 else ""
+        bound = [
+            name
+            for name, value in compiled.params.items()
+            if value == MERCHANT and f"%({name})s" in where
+        ]
+        if "merchant_id" not in where or not bound:
+            return False
+    return True
 
 
 CALLS: dict[str, tuple[type | None, Any]] = {
@@ -167,7 +195,7 @@ CALLS: dict[str, tuple[type | None, Any]] = {
         lambda s: s.update_import(MERCHANT, "offer", {"source_hash": "h"}),
     ),
     "insert_submission": (
-        None,
+        SubmissionRow,
         lambda s: s.insert_submission(
             MERCHANT,
             submission_id="s",
@@ -202,6 +230,8 @@ async def test_the_statement_each_method_sends_carries_the_merchant(name: str) -
 
     assert session.statements, name
     assert carries_the_merchant(session), name
+    if name not in MERCHANT_IS_A_VALUE:
+        assert merchant_is_in_every_where(session), name
 
 
 async def test_the_set_of_methods_checked_is_every_public_method() -> None:

@@ -85,14 +85,12 @@ SUBMISSION_FIELDS = (
     "ref",
     "offer_id",
     "content_hash",
-    "pending_payload",
     "pending_hash",
-    "pending_at",
-    "submitted_at",
     "key_id",
-    "first_published_at",
-    "created_at",
 )
+# Keys of the two-key advisory lock that serialises the creation of one merchant's submissions: a namespace of our
+# own, then the merchant, so it cannot meet a lock taken for any other purpose.
+CREATION_LOCK_NAMESPACE = 58_001
 
 
 @dataclass(frozen=True)
@@ -163,13 +161,8 @@ class SubmissionRow:
     ref: str
     offer_id: str
     content_hash: str
-    pending_payload: dict[str, Any] | None
     pending_hash: str | None
-    pending_at: datetime | None
-    submitted_at: datetime
     key_id: str
-    first_published_at: datetime | None
-    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -185,6 +178,7 @@ class ViewRow:
     ever_published: bool
     update_pending: bool
     submitted_at: datetime
+    category_enabled: bool = True
 
 
 def _past_end() -> ColumnElement[bool]:
@@ -228,13 +222,17 @@ class PartnerSubmissionStore:
         )
         row = (
             await self._session.execute(
-                statement.with_for_update() if lock else statement
+                statement.with_for_update(key_share=True) if lock else statement
             )
         ).first()
         return None if row is None else SubmissionRow(**row._mapping)
 
     async def lock_offer(self, merchant_id: str, offer_id: str) -> OfferRow | None:
-        """The offer, row-locked FOR UPDATE: the first lock of every write, as in the admin service."""
+        """The offer, row-locked FOR NO KEY UPDATE: the first lock of every write, as in the admin service.
+
+        Weaker than the admin's ``FOR UPDATE`` on purpose: it excludes every writer but does not block the
+        foreign-key check of a visitor's click on the offer.
+        """
         row = (
             await self._session.execute(
                 _offer_select()
@@ -267,7 +265,9 @@ class PartnerSubmissionStore:
         )
         row = (
             await self._session.execute(
-                statement.with_for_update(of=offer_imports) if lock else statement
+                statement.with_for_update(of=offer_imports, key_share=True)
+                if lock
+                else statement
             )
         ).first()
         return None if row is None else ImportRow(**row._mapping)
@@ -279,7 +279,7 @@ class PartnerSubmissionStore:
         await self._session.execute(
             select(
                 func.pg_advisory_xact_lock(
-                    func.hashtext(literal(f"partner_submit:{merchant_id}"))
+                    CREATION_LOCK_NAMESPACE, func.hashtext(literal(merchant_id))
                 )
             )
         )
@@ -482,16 +482,26 @@ class PartnerSubmissionStore:
         content_hash: str,
         key_id: str,
     ) -> None:
-        await self._session.execute(
-            insert(partner_submissions).values(
-                id=submission_id,
-                merchant_id=merchant_id,
-                ref=ref,
-                offer_id=offer_id,
-                content_hash=content_hash,
-                key_id=key_id,
-            )
+        """The submission of a draft, inserted only if the offer is this merchant's (``NoResultFound`` otherwise)."""
+        source = self._owned_offer(
+            merchant_id,
+            offer_id,
+            literal(submission_id, Text),
+            literal(merchant_id, Text),
+            literal(ref, Text),
+            offers.c.id,
+            literal(content_hash, Text),
+            literal(key_id, Text),
         )
+        result = await self._session.execute(
+            insert(partner_submissions)
+            .from_select(
+                ["id", "merchant_id", "ref", "offer_id", "content_hash", "key_id"],
+                source,
+            )
+            .returning(partner_submissions.c.id)
+        )
+        result.one()
 
     async def update_submission(
         self, merchant_id: str, submission_id: str, values: dict[str, Any]
@@ -540,8 +550,10 @@ class PartnerSubmissionStore:
                 ),
                 partner_submissions.c.pending_hash.is_not(None).label("update_pending"),
                 partner_submissions.c.submitted_at,
+                func.coalesce(categories.c.enabled, False).label("category_enabled"),
             )
             .join(offers, offers.c.id == partner_submissions.c.offer_id)
+            .outerjoin(categories, categories.c.id == offers.c.category_id)
             .where(
                 partner_submissions.c.merchant_id == merchant_id,
                 offers.c.merchant_id == merchant_id,
@@ -559,16 +571,23 @@ class PartnerSubmissionStore:
     async def list_views(
         self, merchant_id: str, limit: int, offset: int
     ) -> tuple[list[ViewRow], int]:
+        """A page, newest first, and the total counted over the same join as the rows."""
         rows = await self._session.execute(
             self._view_select(merchant_id)
-            .order_by(partner_submissions.c.created_at.desc(), partner_submissions.c.id)
+            .order_by(
+                partner_submissions.c.created_at.desc(), partner_submissions.c.id.desc()
+            )
             .limit(limit)
             .offset(offset)
         )
         total = await self._session.scalar(
             select(func.count())
             .select_from(partner_submissions)
-            .where(partner_submissions.c.merchant_id == merchant_id)
+            .join(offers, offers.c.id == partner_submissions.c.offer_id)
+            .where(
+                partner_submissions.c.merchant_id == merchant_id,
+                offers.c.merchant_id == merchant_id,
+            )
         )
         return [ViewRow(**row._mapping) for row in rows], total or 0
 

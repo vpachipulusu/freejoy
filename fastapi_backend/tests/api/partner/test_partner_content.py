@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from app.core.plain_text import MAX_RAW_LENGTH
 from app.partner.content import (
     CleanContent,
     clean_destination,
     clean_submission,
     hash_payload,
+    require_current_window,
 )
 from app.partner.errors import SubmissionRefused
 from app.partner.schemas import OfferSubmission
@@ -42,7 +42,7 @@ def submission(**changes: Any) -> OfferSubmission:
 
 def clean(**changes: Any) -> CleanContent:
     return clean_submission(
-        submission(**changes), category_id="cat1", merchant_website=SITE, now=NOW
+        submission(**changes), category_id="cat1", merchant_website=SITE
     )
 
 
@@ -114,18 +114,6 @@ def test_a_hostile_text_at_the_cap_comes_out_without_a_tag_opener() -> None:
     )
 
 
-def test_a_raw_text_the_cleaner_refuses_is_the_same_fixed_refusal_not_a_crash() -> None:
-    from app.partner import content
-
-    huge = "x" * (MAX_RAW_LENGTH + 1)
-    model = submission().model_copy(update={"title": huge})
-
-    with pytest.raises(SubmissionRefused) as caught:
-        content.clean_submission(model, category_id="c", merchant_website=SITE, now=NOW)
-
-    assert caught.value.code == "empty_text"
-
-
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
@@ -191,9 +179,26 @@ def test_a_window_must_end_after_it_starts_and_in_the_future() -> None:
     later = (NOW + timedelta(days=2)).isoformat()
     soon = (NOW + timedelta(days=1)).isoformat()
     assert refusal(start_at=later, end_at=soon) == "invalid_window"
-    assert refusal(end_at=(NOW - timedelta(days=1)).isoformat()) == "invalid_window"
-    assert refusal(end_at=NOW.isoformat()) == "invalid_window"
     assert clean(start_at=soon, end_at=later).end_at is not None
+
+
+def test_the_clock_rules_are_a_separate_check_so_a_resend_of_stored_content_is_not_refused_by_them() -> (
+    None
+):
+    past = clean(
+        end_at="2020-01-01T00:00:00Z"
+    )  # shape-valid: the clock is not asked here
+
+    with pytest.raises(SubmissionRefused) as ended:
+        require_current_window(past.start_at, past.end_at, NOW)
+    require_current_window(None, None, NOW)
+    require_current_window(NOW + timedelta(days=90), NOW + timedelta(days=100), NOW)
+    with pytest.raises(SubmissionRefused) as too_far:
+        require_current_window(NOW + timedelta(days=91), None, NOW)
+    with pytest.raises(SubmissionRefused):
+        require_current_window(None, NOW, NOW)
+
+    assert ended.value.code == too_far.value.code == "invalid_window"
 
 
 def test_dates_are_stored_in_utc() -> None:
@@ -215,6 +220,7 @@ def test_the_payload_is_json_safe_and_complete_and_its_hash_is_stable() -> None:
 
     assert json.loads(json.dumps(payload)) == payload
     assert set(payload) == {
+        "v",
         "title",
         "summary",
         "description",
@@ -271,3 +277,105 @@ def test_a_date_that_cannot_be_stored_or_is_absurdly_far_off_is_refused_not_a_cr
 ) -> None:
     assert refusal(end_at=when) == "invalid_window"
     assert refusal(start_at=when, end_at="2099-01-01T00:00:00Z") == "invalid_window"
+
+
+# The bytes of the payload hash are a contract: three stored columns depend on them. Changing the payload's keys or
+# the cleaning changes every stored digest, and the next sync of every retailer would queue an update on every live
+# offer: that needs a plan (docs/developer/backend-partner-api.md), not a quiet edit of this constant.
+GOLDEN_DIGEST = "e4573e42e72a45a374ecd3116afee4e745215410834dde21df171d0123c05431"
+
+
+def test_the_content_hash_of_a_known_submission_is_pinned() -> None:
+    content = clean(
+        description=["One", "Two"],
+        steps=[{"title": "Go", "detail": "Do it"}],
+        end_at="2099-01-01T12:00:00+02:00",
+    )
+
+    assert content.payload()["v"] == 1
+    assert content.hash == GOLDEN_DIGEST
+
+
+def test_the_largest_valid_body_in_four_byte_characters_fits_the_stored_proposal_limit() -> (
+    None
+):
+    from app.models.platform.partner_submission import MAX_PENDING_BYTES
+    from app.partner import schemas
+
+    wide = "\U0001f600"
+    body = submission(
+        title=wide * schemas.MAX_TITLE,
+        summary=wide * schemas.MAX_SUMMARY,
+        description=[wide * schemas.MAX_PARAGRAPH] * schemas.MAX_PARAGRAPHS,
+        subscription_terms=wide * schemas.MAX_TERMS,
+        eligibility=wide * schemas.MAX_ELIGIBILITY,
+        availability=wide * schemas.MAX_AVAILABILITY,
+        steps=[
+            {
+                "title": wide * schemas.MAX_STEP_TITLE,
+                "detail": wide * schemas.MAX_STEP_DETAIL,
+            }
+        ]
+        * schemas.MAX_STEPS,
+        url=f"{SITE}/" + "a" * (2048 - len(SITE) - 1),
+        category="c" * schemas.CATEGORY_SLUG_MAX,
+    )
+
+    content = clean_submission(body, category_id="x" * 24, merchant_website=SITE)
+    stored = json.dumps(
+        content.payload(), ensure_ascii=False, separators=(", ", ": ")
+    ).encode("utf-8")
+
+    assert len(stored) <= MAX_PENDING_BYTES
+    assert len(stored) > 24_576  # the old limit would have refused it
+
+
+@pytest.mark.parametrize(
+    ("website", "url", "ok"),
+    [
+        (
+            "https://shop.example.com/store/brand",
+            "https://shop.example.com/store/brand/x",
+            True,
+        ),
+        (
+            "https://shop.example.com/store/brand/",
+            "https://shop.example.com/store/brand",
+            True,
+        ),
+        (
+            "https://shop.example.com/store/brand",
+            "https://shop.example.com/store/brandy",
+            False,
+        ),
+        (
+            "https://shop.example.com/store/brand",
+            "https://shop.example.com/other",
+            False,
+        ),
+        (
+            "https://shop.example.com/store/brand",
+            "https://www.shop.example.com/x",
+            False,
+        ),
+        ("https://shop.example.com", "https://shop.example.com/anything", True),
+        ("https://shop.example.com/", "https://shop.example.com/anything", True),
+    ],
+)
+def test_on_a_shared_host_the_link_must_sit_under_the_websites_path(
+    website: str, url: str, ok: bool
+) -> None:
+    if ok:
+        assert clean_destination(url, website)
+    else:
+        with pytest.raises(SubmissionRefused) as caught:
+            clean_destination(url, website)
+        assert caught.value.code == "link_host_not_allowed"
+
+
+@pytest.mark.parametrize(
+    "when", ["1700000000", "1700000000.5", "20990101", "2099-01-01"]
+)
+def test_a_date_that_is_not_an_iso_date_time_is_refused_by_the_shape(when: str) -> None:
+    with pytest.raises(ValueError):
+        submission(end_at=when)

@@ -43,6 +43,7 @@ from app.partner.schemas import (
     SubmissionsPageResponse,
 )
 from app.partner.submission_service import SubmissionService
+from app.partner.write_budget import enforce_merchant_write_budget
 
 logger = logging.getLogger("yourapp.partner")
 
@@ -50,7 +51,7 @@ router = APIRouter(prefix="/offers", tags=["offers"])
 
 # A timeout, a lock timeout, a deadlock or a serialisation failure: the request can simply be sent again.
 BUSY_SQLSTATES = frozenset({"55P03", "57014", "40001", "40P01"})
-MAX_OFFSET = 1_000_000
+MAX_OFFSET = 50_000
 
 RefPath = Annotated[
     str,
@@ -126,6 +127,7 @@ def answers() -> Iterator[None]:
     response_model=SubmissionResultResponse,
     operation_id="partner-offers-put",
     summary="Create or update an offer submission",
+    dependencies=[Depends(enforce_merchant_write_budget)],
     responses={
         **REFUSALS,
         201: {
@@ -137,11 +139,17 @@ def answers() -> Iterator[None]:
 async def put_offer(
     ref: RefPath, body: OfferSubmission, response: Response, service: ServiceDep
 ) -> SubmissionResultResponse:
-    """Send the whole offer. It is stored as a **draft** for an editor to review: nothing you send is ever published
-    by the API. The same body twice changes nothing. ``outcome`` says what happened: ``created``; ``refreshed``
-    (an editor had not touched the draft yet, so it took the new content); ``pending_update`` (an editor has edited,
-    published or ended the offer, so the new content waits for an editor and the published page is unchanged);
-    ``unchanged``."""
+    """Send the whole offer. It is stored for our editors to review: nothing you send is ever published by this API,
+    and an editor decides whether it goes live. Send the same body again and nothing changes; send changed content and
+    the answer's `outcome` says what happened (see the field's description).
+
+    `ref` is your own id for the offer. Two merchants may use the same ref; yours are only ever yours.
+
+    A `PUT` on a ref one of our editors has archived is always a 409 (`offer_closed`); that is permanent, so submit
+    again under a new ref. New refs are limited to 50 offers waiting for review (`open_submission_cap`, which clears
+    only as our editors review them) and 20 new offers a day (`daily_submission_cap`); updating an existing ref is
+    never refused for either. Each merchant has 2,000 writes a day across all its keys (`daily_write_budget`).
+    """
     with answers():
         result = await service.submit(ref, body)
     if result.outcome == "created":
@@ -160,7 +168,8 @@ async def list_offers(
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
 ) -> SubmissionsPageResponse:
-    """Your submissions, newest first: status, the public page when live, and whether an update is waiting."""
+    """Your submissions, newest first, with each one's status (pending_review, live, ended or declined), the public
+    page while it is live and whether an update is waiting for our editors."""
     with answers():
         return SubmissionsPageResponse(
             data=await service.list_submissions(limit, offset)
@@ -175,6 +184,7 @@ async def list_offers(
     responses={404: REFUSALS[404]},
 )
 async def get_offer(ref: RefPath, service: ServiceDep) -> SubmissionResponse:
+    """One of your submissions. A ref that is not yours is answered exactly like one that does not exist (404)."""
     with answers():
         return SubmissionResponse(data=await service.get(ref))
 
@@ -184,10 +194,15 @@ async def get_offer(ref: RefPath, service: ServiceDep) -> SubmissionResponse:
     response_model=EndResultResponse,
     operation_id="partner-offers-end",
     summary="End an offer: the sample ran out",
+    dependencies=[Depends(enforce_merchant_write_budget)],
     responses={404: REFUSALS[404]},
 )
 async def end_offer(ref: RefPath, service: ServiceDep) -> EndResultResponse:
-    """Takes effect immediately: the offer's end date becomes now, so the public site and the outbound links already
-    treat it as ended. Ending it again changes nothing."""
+    """Use this when the sample has run out. The offer's end date becomes now, so it stops being offered at once.
+
+    Ending cannot be undone by this API: sending the offer again without a future `end_at` does not reopen it, and
+    an update that was waiting for our editors when you ended the offer is discarded. Calling it again changes
+    nothing (`changed` is false).
+    """
     with answers():
         return EndResultResponse(data=await service.end(ref))

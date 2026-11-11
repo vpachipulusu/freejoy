@@ -7,7 +7,7 @@ from typing import Any, Final, Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.status import HTTP_422_UNPROCESSABLE_CONTENT
 
@@ -17,8 +17,10 @@ logger = logging.getLogger("yourapp.errors")
 class ErrorResponse(BaseModel):
     """Body of every error response (documents the runtime envelope in OpenAPI)."""
 
-    success: Literal[False] = False
-    error: str
+    success: Literal[False] = Field(default=False, description="Always false.")
+    error: str = Field(
+        description="A fixed message for the kind of error. It never repeats what was sent."
+    )
 
 
 # Machine-readable refusal codes for sign-in. The UI branches on ``code``, never on the message.

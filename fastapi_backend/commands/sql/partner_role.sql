@@ -105,7 +105,7 @@ DECLARE
     'offer_imports.provider.INSERT', 'offer_imports.external_id.INSERT', 'offer_imports.offer_id.INSERT',
     'offer_imports.source_hash.INSERT', 'offer_imports.applied_source_hash.INSERT',
     'offer_imports.applied_content_hash.INSERT', 'offer_imports.applied_at.INSERT',
-    'offer_imports.source_changed_at.INSERT', 'offer_imports.source_hash.UPDATE',
+    'offer_imports.source_hash.UPDATE',
     'offer_imports.applied_source_hash.UPDATE', 'offer_imports.applied_content_hash.UPDATE',
     'offer_imports.applied_at.UPDATE', 'offer_imports.source_changed_at.UPDATE',
     'offer_imports.updated_at.UPDATE', 'categories.id.SELECT', 'categories.slug.SELECT',
@@ -182,13 +182,27 @@ BEGIN
   EXECUTE format('REVOKE ALL ON SCHEMA public FROM %I', role_name);
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM %I', database_name, role_name);
 
-  -- The grants below lean on the triggers of migration 0008 (the audit guard, and the defaults the role cannot set).
-  -- Refuse to grant anything if they are missing or disabled: run alembic upgrade head first.
-  IF (SELECT count(*) FROM pg_trigger
-       WHERE NOT tgisinternal AND tgenabled = 'O'
-         AND tgname IN ('trg_offers_insert_defaults', 'trg_affiliate_links_insert_defaults',
-                        'trg_audit_logs_insert_guard', 'trg_offers_note_first_publish')) <> 4 THEN
-    RAISE EXCEPTION 'the partner guard triggers of migration 0008 are missing or disabled; run alembic upgrade head first';
+  -- The grants below lean on the triggers of migration 0008: the defaults the role cannot set and the guards that
+  -- give its column grants a row condition. Refuse to grant anything unless every one is the expected trigger: on
+  -- the expected table, running the expected function, for the expected event (tgtype), and enabled. (A trigger
+  -- whose function a later migration replaced is the migration's business; a disabled one, or a same-named
+  -- trigger elsewhere, is not accepted.) Run alembic upgrade head first. The same list is in
+  -- app/core/database.py (RESTRICTED_ROLE_QUERY), which makes the live connection check it too.
+  IF (SELECT count(*) FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_proc p ON p.oid = t.tgfoid
+       WHERE NOT t.tgisinternal AND t.tgenabled IN ('O', 'A') AND n.nspname = 'public'
+         AND (c.relname, t.tgname, p.proname, t.tgtype::int) IN (
+         ('offers', 'trg_offers_insert_defaults', 'freejoy_offer_insert_defaults', 7),
+         ('offers', 'trg_offers_update_guard', 'freejoy_offer_update_guard', 19),
+         ('offers', 'trg_offers_note_first_publish', 'freejoy_note_first_publish', 17),
+         ('affiliate_links', 'trg_affiliate_links_insert_defaults', 'freejoy_link_insert_defaults', 7),
+         ('affiliate_links', 'trg_affiliate_links_write_guard', 'freejoy_link_write_guard', 23),
+         ('offer_imports', 'trg_offer_imports_write_guard', 'freejoy_import_write_guard', 23),
+         ('partner_submissions', 'trg_partner_submissions_insert_guard', 'freejoy_submission_insert_guard', 7),
+         ('audit_logs', 'trg_audit_logs_insert_guard', 'freejoy_audit_insert_guard', 7))) <> 8 THEN
+    RAISE EXCEPTION 'the partner guard triggers of migration 0008 are missing, changed or disabled; run alembic upgrade head first';
   END IF;
 
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', database_name, role_name);
@@ -234,7 +248,7 @@ BEGIN
   EXECUTE format(
     'GRANT SELECT (id, provider, external_id, offer_id, source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at) ON offer_imports TO %I', role_name);
   EXECUTE format(
-    'GRANT INSERT (id, provider, external_id, offer_id, source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at) ON offer_imports TO %I', role_name);
+    'GRANT INSERT (id, provider, external_id, offer_id, source_hash, applied_source_hash, applied_content_hash, applied_at) ON offer_imports TO %I', role_name);
   EXECUTE format(
     'GRANT UPDATE (source_hash, applied_source_hash, applied_content_hash, applied_at, source_changed_at, updated_at) ON offer_imports TO %I', role_name);
 
@@ -259,6 +273,9 @@ BEGIN
     'GRANT INSERT (id, action, resource, resource_id, metadata) ON audit_logs TO %I', role_name);
 
   -- Verify from the catalog, counting what reaches the role through PUBLIC. Raise on anything not listed.
+  IF has_parameter_privilege(role_name, 'session_replication_role', 'SET') THEN
+    RAISE EXCEPTION 'verification failed: the role can switch triggers off for its session';
+  END IF;
   IF has_schema_privilege(role_name, 'public', 'CREATE') THEN
     RAISE EXCEPTION 'verification failed: the role can create objects in public';
   END IF;

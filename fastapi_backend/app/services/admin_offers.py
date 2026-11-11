@@ -49,6 +49,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.affiliate_hosts import destination_allowed, is_known_provider
 from app.core.config import settings
 from app.core.permissions import AdminContext
+from app.core.slugs import CATALOGUE_SLUG_MAX_LENGTH, InvalidSlug, slugify
 from app.models.platform.offer import CommercialBasis, OfferStatus
 from app.repositories.admin_offers import (
     AffiliateLinkRecord,
@@ -249,6 +250,14 @@ class AdminOfferService:
         current = await self._locked(offer_id)
         previous = await self._stored_token(current)
         require_editable(current.status)
+        wanted_merchant = changes.get("merchant_id")
+        if (
+            wanted_merchant is not None
+            and wanted_merchant != current.merchant_id
+            and await self._is_partner_submission(offer_id)
+        ):
+            # The retailer's submission is keyed by its merchant: moving the offer would orphan it.
+            raise InvalidInput("partner_merchant_fixed")
         self._guard_basis_change(actor, current, changes, review_token, previous)
         values = clean_urls(changes, URL_FIELDS)
         merged = replace(current, **values)
@@ -290,9 +299,18 @@ class AdminOfferService:
         if action is OfferAction.VERIFY:
             raise ValueError("Use verify")
         current = await self._locked(offer_id)
+        partner = False
         if action is OfferAction.PUBLISH:
             previous = await self._require_unchanged(current, review_token)
-            if commercial_basis not in (None, current.commercial_basis):
+            partner = await self._is_partner_submission(offer_id)
+            if partner and commercial_basis is None:
+                # A retailer's draft carries a placeholder basis that nobody chose: the editor states one.
+                raise PublishBlocked([PublishReason.COMMERCIAL_BASIS_REQUIRED.value])
+            if (
+                not partner
+                and commercial_basis is not None
+                and commercial_basis != current.commercial_basis
+            ):
                 raise OfferChanged()
         else:
             previous = await self._stored_token(current)
@@ -301,14 +319,30 @@ class AdminOfferService:
             await self._require_publishable(
                 current, basis_confirmed=commercial_basis is not None
             )
-        updated = await self.store.update(offer_id, {"status": target})
+        changes: dict[str, Any] = {"status": target}
+        if partner and commercial_basis is not None:
+            changes["commercial_basis"] = (
+                commercial_basis  # the editor's statement replaces the placeholder
+            )
+        if partner and action is OfferAction.PUBLISH:
+            fresh = await self._fresh_partner_slug(current)
+            if fresh is not None:
+                changes["slug"] = fresh
+        updated = await self.store.update(offer_id, changes)
         await self.auditor.record(
             actor,
             action=f"admin.offers.{action.value}",
             resource=RESOURCE,
             resource_id=offer_id,
-            before={"status": current.status.value},
-            after=self._transition_after(action, target, current),
+            before=(
+                {
+                    "status": current.status.value,
+                    "commercial_basis": current.commercial_basis.value,
+                }
+                if partner
+                else {"status": current.status.value}
+            ),
+            after=self._transition_after(action, target, updated),
             details=(
                 {"basis_confirmed": commercial_basis is not None}
                 if action is OfferAction.PUBLISH
@@ -629,6 +663,25 @@ class AdminOfferService:
             # The basis of a retailer's draft is a placeholder (nothing set it), whatever links an editor added.
             return True
         return needs_basis_confirmation(await self._provider_pairs(offer_id))
+
+    async def _fresh_partner_slug(self, current: OfferRecord) -> str | None:
+        """For a retailer's draft that was never live, the slug rebuilt from the title as it is now (token kept).
+
+        The slug was made from the title the retailer first sent, which an editor may never have seen; a retailer
+        could otherwise keep keywords in the public address after changing the title. Once published it is fixed.
+        """
+        partner = await self.store.get_partner_submission(current.id)
+        if partner is None or partner.first_published_at is not None:
+            return None
+        token = current.slug.rsplit("-", 1)[-1]
+        try:
+            base = slugify(current.title, CATALOGUE_SLUG_MAX_LENGTH - len(token) - 1)
+        except InvalidSlug:
+            base = "offer"
+        slug = f"{base}-{token}"
+        if slug == current.slug or await self.store.slug_exists(slug):
+            return None
+        return slug
 
     async def _is_partner_submission(self, offer_id: str) -> bool:
         provenance = await self.store.get_provenance(offer_id)

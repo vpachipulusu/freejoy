@@ -267,3 +267,133 @@ def test_the_script_refuses_to_grant_anything_without_the_guard_triggers() -> No
     ):
         assert trigger in SQL
     assert "run alembic upgrade head first" in SQL
+
+
+# --- exact offline pins (the Postgres suites prove the same against the catalog) -------------------------------------
+
+EXPECTED_SELECT = {
+    "partner_api_keys": "id merchant_id key_hash label revoked_at last_used_at",
+    "merchants": "id name website active",
+    "offers": (
+        "id title slug summary description category_id merchant_id offer_type status featured image_tint "
+        "image_label image_alt source_url postage_kind postage_amount_minor postage_currency requires_card "
+        "subscription_terms eligibility availability steps start_at end_at last_verified_at freshness "
+        "publisher_notes"
+    ),
+    "affiliate_links": "id offer_id provider destination_url tracking_id active",
+    "offer_imports": (
+        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at "
+        "source_changed_at"
+    ),
+    "categories": "id slug enabled",
+    "partner_submissions": (
+        "id merchant_id ref offer_id content_hash pending_payload pending_hash pending_at submitted_at key_id "
+        "first_published_at created_at"
+    ),
+}
+EXPECTED_INSERT = {
+    "offers": (
+        "id title slug summary description category_id merchant_id offer_type image_tint image_label image_alt "
+        "postage_kind postage_amount_minor postage_currency requires_card subscription_terms eligibility "
+        "availability steps start_at end_at"
+    ),
+    "affiliate_links": "id offer_id destination_url",
+    "offer_imports": (
+        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at"
+    ),
+    "partner_submissions": "id merchant_id ref offer_id content_hash key_id",
+    "audit_logs": "id action resource resource_id metadata",
+}
+
+
+def test_the_select_grants_are_exactly_these() -> None:
+    assert _columns(GRANT_SELECT) == {
+        table: set(names.split()) for table, names in EXPECTED_SELECT.items()
+    }
+
+
+def test_the_insert_grants_are_exactly_these_so_an_added_column_fails_offline() -> None:
+    assert _columns(GRANT_INSERT) == {
+        table: set(names.split()) for table, names in EXPECTED_INSERT.items()
+    }
+
+
+def test_every_column_the_store_reads_or_writes_is_granted_in_the_way_it_is_used() -> (
+    None
+):
+    from app.partner import submission_store as store
+
+    selected = _columns(GRANT_SELECT)
+    for table, names in (
+        ("offers", store.OFFER_FIELDS),
+        ("affiliate_links", store.LINK_FIELDS),
+        ("offer_imports", store.IMPORT_FIELDS),
+        ("partner_submissions", store.SUBMISSION_FIELDS),
+    ):
+        assert set(names) <= selected[table], table
+
+
+TRIGGER_TUPLE = re.compile(r"\('(\w+)', '(trg_\w+)', '(freejoy_\w+)', (\d+)\)")
+TGTYPE = {
+    "BEFORE INSERT": 7,
+    "BEFORE UPDATE": 19,
+    "BEFORE INSERT OR UPDATE": 23,
+    "AFTER UPDATE OF status": 17,
+}
+
+
+def _migration():  # type: ignore[no-untyped-def]
+    import importlib.util
+
+    path = (
+        REPO_ROOT
+        / "fastapi_backend"
+        / "alembic_migrations"
+        / "versions"
+        / "0008_partner_submissions.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0008", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_script_the_live_check_and_the_migration_name_the_same_eight_triggers() -> (
+    None
+):
+    from app.core.database import PARTNER_GUARD_TRIGGERS, RESTRICTED_ROLE_QUERY
+
+    in_script = {(t, n, f, int(k)) for t, n, f, k in TRIGGER_TUPLE.findall(SQL)}
+    in_migration = {
+        (table, name, function, TGTYPE[event])
+        for name, table, event, function in _migration().TRIGGERS
+    }
+
+    assert len(PARTNER_GUARD_TRIGGERS) == 8
+    assert in_script == set(PARTNER_GUARD_TRIGGERS) == in_migration
+    for _table, name, function, _kind in PARTNER_GUARD_TRIGGERS:
+        assert name in str(RESTRICTED_ROLE_QUERY) and function in str(
+            RESTRICTED_ROLE_QUERY
+        )
+
+
+def test_the_script_checks_the_trigger_shape_and_that_the_role_cannot_switch_triggers_off() -> (
+    None
+):
+    from app.core.database import RESTRICTED_ROLE_QUERY
+
+    assert "t.tgtype::int" in SQL and "p.proname" in SQL and "c.relname" in SQL
+    assert (
+        "has_parameter_privilege(role_name, 'session_replication_role', 'SET')" in SQL
+    )
+    assert "session_replication_role" in str(RESTRICTED_ROLE_QUERY)
+
+
+def test_every_migration_function_is_invoker_rights_with_a_pinned_search_path() -> None:
+    functions = _migration().FUNCTIONS
+
+    assert len(functions) == 8
+    for name, statement in functions.items():
+        assert "SECURITY DEFINER" not in statement.upper(), name
+        assert "SET search_path = pg_catalog, public" in statement, name

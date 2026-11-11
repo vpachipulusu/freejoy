@@ -78,8 +78,7 @@ INSERT_COLUMNS = {
     ),
     "affiliate_links": "id offer_id destination_url",
     "offer_imports": (
-        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at "
-        "source_changed_at"
+        "id provider external_id offer_id source_hash applied_source_hash applied_content_hash applied_at"
     ),
     "partner_submissions": "id merchant_id ref offer_id content_hash key_id",
     "audit_logs": "id action resource resource_id metadata",

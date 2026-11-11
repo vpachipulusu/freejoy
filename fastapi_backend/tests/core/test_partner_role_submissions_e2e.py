@@ -33,6 +33,7 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is not set"
 )
 
+KEY_ID = "k" * 24
 OFFER_COLUMNS = (
     "id, title, slug, summary, description, category_id, merchant_id, offer_type, image_tint, image_label, "
     "image_alt, postage_kind, requires_card, eligibility, availability, steps"
@@ -112,7 +113,10 @@ async def refusal(engine: AsyncEngine, sql: str, **params: object) -> str:
 async def partner_offer(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> tuple[str, str, str]:
-    """Insert an offer as the role; returns (offer id, merchant id, category id)."""
+    """Insert an offer and its submission as the role, in the order the guards need (offer, then submission).
+
+    Returns (offer id, merchant id, category id).
+    """
     merchant_id, category_id = await seed(owner)
     offer_id = new_id()
     await run(partner, INSERT_OFFER, **offer_values(offer_id, merchant_id, category_id))
@@ -134,7 +138,7 @@ async def test_an_offer_the_role_inserts_is_an_unverified_unfeatured_draft_with_
         id=offer_id,
     )
 
-    assert tuple(row) == ("DRAFT", False, None, "EDITORIAL", None, None)
+    assert tuple(row) == ("DRAFT", False, None, "SPONSORED", None, None)
 
 
 async def test_the_owner_still_has_to_state_the_commercial_basis(
@@ -401,11 +405,13 @@ async def test_the_guard_does_not_touch_the_owner_so_admin_rows_are_written_as_b
 async def insert_submission(
     partner: AsyncEngine, offer_id: str, merchant_id: str, ref: str = "ref-1"
 ) -> str:
+    """Attach a submission to an offer the role just inserted (key id of the right shape)."""
     submission_id = new_id()
     await run(
         partner,
         "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
-        "VALUES (:i, :m, :r, :o, :h, 'key1')",
+        "VALUES (:i, :m, :r, :o, :h, :k)",
+        k=KEY_ID,
         i=submission_id,
         m=merchant_id,
         r=ref,
@@ -419,7 +425,6 @@ async def test_a_ref_is_unique_per_merchant_and_an_offer_has_one_submission(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
     offer_id, merchant_id, category_id = await partner_offer(owner, partner)
-    await insert_submission(partner, offer_id, merchant_id)
     other_offer = new_id()
     await run(
         partner, INSERT_OFFER, **offer_values(other_offer, merchant_id, category_id)
@@ -428,7 +433,7 @@ async def test_a_ref_is_unique_per_merchant_and_an_offer_has_one_submission(
     same_ref = await refusal(
         partner,
         "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
-        "VALUES (:i, :m, 'ref-1', :o, :h, 'key1')",
+        "VALUES (:i, :m, 'ref-1', :o, :h, 'kkkkkkkkkkkkkkkkkkkkkkkk')",
         i=new_id(),
         m=merchant_id,
         o=other_offer,
@@ -437,7 +442,7 @@ async def test_a_ref_is_unique_per_merchant_and_an_offer_has_one_submission(
     same_offer = await refusal(
         partner,
         "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
-        "VALUES (:i, :m, 'ref-2', :o, :h, 'key1')",
+        "VALUES (:i, :m, 'ref-2', :o, :h, 'kkkkkkkkkkkkkkkkkkkkkkkk')",
         i=new_id(),
         m=merchant_id,
         o=offer_id,
@@ -461,8 +466,7 @@ async def test_a_ref_is_unique_per_merchant_and_an_offer_has_one_submission(
 async def test_a_submission_keeps_its_identity_and_its_first_publish_time_is_not_the_roles(
     owner: AsyncEngine, partner: AsyncEngine, assignment: str
 ) -> None:
-    offer_id, merchant_id, _ = await partner_offer(owner, partner)
-    await insert_submission(partner, offer_id, merchant_id)
+    _offer_id, _merchant_id, _ = await partner_offer(owner, partner)
 
     message = await refusal(partner, f"UPDATE partner_submissions SET {assignment}")
 
@@ -473,8 +477,7 @@ async def test_a_submission_keeps_its_identity_and_its_first_publish_time_is_not
 async def test_a_pending_update_is_all_or_nothing_and_capped(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
-    offer_id, merchant_id, _ = await partner_offer(owner, partner)
-    await insert_submission(partner, offer_id, merchant_id)
+    _offer_id, _merchant_id, _ = await partner_offer(owner, partner)
     big = json.dumps({"x": "y" * 30_000})
 
     half = await refusal(
@@ -505,7 +508,7 @@ async def test_a_ref_that_is_not_a_plain_identifier_is_refused_by_the_database(
     message = await refusal(
         partner,
         "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
-        "VALUES (:i, :m, 'a b', :o, :h, 'key1')",
+        "VALUES (:i, :m, 'a b', :o, :h, 'kkkkkkkkkkkkkkkkkkkkkkkk')",
         i=new_id(),
         m=merchant_id,
         o=offer_id,
@@ -518,8 +521,7 @@ async def test_a_ref_that_is_not_a_plain_identifier_is_refused_by_the_database(
 async def test_the_first_time_an_offer_is_published_its_submission_notes_it_once(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
-    offer_id, merchant_id, _ = await partner_offer(owner, partner)
-    await insert_submission(partner, offer_id, merchant_id)
+    offer_id, _merchant_id, _ = await partner_offer(owner, partner)
     sql = "SELECT first_published_at FROM partner_submissions"
 
     before = await fetch_one(owner, sql)
@@ -540,8 +542,7 @@ async def test_the_first_time_an_offer_is_published_its_submission_notes_it_once
 async def test_an_archived_draft_never_published_has_no_first_publish_time(
     owner: AsyncEngine, partner: AsyncEngine
 ) -> None:
-    offer_id, merchant_id, _ = await partner_offer(owner, partner)
-    await insert_submission(partner, offer_id, merchant_id)
+    offer_id, _merchant_id, _ = await partner_offer(owner, partner)
 
     await run(owner, "UPDATE offers SET status = 'ARCHIVED' WHERE id = :i", i=offer_id)
     row = await fetch_one(owner, "SELECT first_published_at FROM partner_submissions")
@@ -630,3 +631,511 @@ async def test_the_end_of_an_offer_only_needs_the_end_column(
     )
 
     assert row[0] == "DRAFT"
+
+
+# ------------------------------------------------------- row conditions: what the role may touch (FREEJ-58 H1)
+
+OWNER_OFFER = (
+    "INSERT INTO offers (id, title, slug, summary, description, category_id, merchant_id, offer_type, "
+    "commercial_basis, status, image_tint, image_label, image_alt, postage_kind, eligibility, "
+    "availability, steps) VALUES (:id, 'Owner offer', :slug, 's', '[]'::jsonb, :cat, :mer, :kind, 'EDITORIAL', "
+    "'DRAFT', 'cream', 'l', 'a', 'FREE', 'e', 'a', '[]'::jsonb)"
+)
+
+
+async def fetch_all(engine: AsyncEngine, sql: str, **params: object):  # type: ignore[no-untyped-def]
+    async with engine.connect() as connection:
+        return list((await connection.execute(text(sql), params)).all())
+
+
+async def owner_offer(
+    owner: AsyncEngine,
+    merchant_id: str,
+    category_id: str,
+    *,
+    status: str = "PUBLISHED",
+    kind: str = "FREE_SAMPLE",
+    provider: str | None = None,
+) -> str:
+    """An offer the owner made (hand-made, never submitted); with ``provider`` it has a link and an import row."""
+    offer_id = new_id()
+    async with owner.begin() as connection:
+        await connection.execute(
+            text(OWNER_OFFER),
+            {
+                "id": offer_id,
+                "slug": f"owner-{offer_id}",
+                "cat": category_id,
+                "mer": merchant_id,
+                "kind": kind,
+            },
+        )
+        if status != "DRAFT":
+            await connection.execute(
+                text("UPDATE offers SET last_verified_at = now() WHERE id = :i"),
+                {"i": offer_id},
+            )
+            await connection.execute(
+                text("UPDATE offers SET status = :s WHERE id = :i"),
+                {"i": offer_id, "s": status},
+            )
+        if provider is not None:
+            await connection.execute(
+                text(
+                    "INSERT INTO affiliate_links (id, offer_id, provider, destination_url) "
+                    "VALUES (:l, :o, :p, 'https://www.awin1.com/cread.php?x=1')"
+                ),
+                {"l": new_id(), "o": offer_id, "p": provider},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO offer_imports (id, provider, external_id, offer_id, source_hash, "
+                    "applied_source_hash, applied_content_hash, applied_at) "
+                    "VALUES (:i, :p, :e, :o, :h, :h, :h, now())"
+                ),
+                {
+                    "i": new_id(),
+                    "p": provider,
+                    "e": new_id(),
+                    "o": offer_id,
+                    "h": "d" * 64,
+                },
+            )
+    return offer_id
+
+
+async def publish_as_owner(owner: AsyncEngine, offer_id: str) -> None:
+    await run(
+        owner, "UPDATE offers SET last_verified_at = now() WHERE id = :i", i=offer_id
+    )
+    await run(owner, "UPDATE offers SET status = 'PUBLISHED' WHERE id = :i", i=offer_id)
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        "title = 'Rewritten'",
+        "summary = 'x'",
+        "description = '[\"x\"]'::jsonb",
+        "end_at = now()",
+        "start_at = NULL",
+    ],
+)
+@pytest.mark.parametrize("status", ["PUBLISHED", "EXPIRED"])
+async def test_the_role_cannot_rewrite_or_end_a_hand_made_offer_in_any_status(
+    owner: AsyncEngine, partner: AsyncEngine, status: str, assignment: str
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    offer_id = await owner_offer(owner, merchant_id, category_id, status=status)
+
+    message = await refusal(
+        partner, f"UPDATE offers SET {assignment} WHERE id = :i", i=offer_id
+    )
+
+    assert "this writer may only change an offer it submitted" in message
+
+
+async def test_an_unscoped_end_of_every_offer_is_refused_and_changes_nothing(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    await owner_offer(owner, merchant_id, category_id)
+    await partner_offer(owner, partner)
+
+    message = await refusal(partner, "UPDATE offers SET end_at = now()")
+
+    assert "this writer may only" in message
+    ended = await fetch_one(
+        owner, "SELECT count(*) FROM offers WHERE end_at IS NOT NULL"
+    )
+    assert ended[0] == 0
+
+
+async def test_once_the_owner_publishes_a_partner_offer_the_role_can_only_end_it(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    offer_id, _, _ = await partner_offer(owner, partner)
+    await publish_as_owner(owner, offer_id)
+
+    for assignment in (
+        "title = 'Defaced'",
+        "description = '[\"x\"]'::jsonb",
+        "end_at = now() + interval '1 day'",
+        "end_at = NULL",
+        "start_at = now()",
+        "offer_type = 'FREE_TRIAL'",
+        "requires_card = true",
+    ):
+        message = await refusal(
+            partner, f"UPDATE offers SET {assignment} WHERE id = :i", i=offer_id
+        )
+        assert "this writer may only end an offer that is not a draft" in message, (
+            assignment
+        )
+    await run(
+        partner,
+        "UPDATE offers SET end_at = now(), updated_at = now() WHERE id = :i",
+        i=offer_id,
+    )
+    row = await fetch_one(
+        owner, "SELECT status, title, end_at FROM offers WHERE id = :i", i=offer_id
+    )
+    assert (row.status, row.title) == ("PUBLISHED", "Free sample")
+    assert row.end_at is not None
+
+
+async def test_ending_an_offer_may_clear_a_future_start_but_never_set_one(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    offer_id, _, _ = await partner_offer(owner, partner)
+    await run(
+        owner,
+        "UPDATE offers SET start_at = now() + interval '5 days' WHERE id = :i",
+        i=offer_id,
+    )
+    await publish_as_owner(owner, offer_id)
+
+    await run(
+        partner,
+        "UPDATE offers SET end_at = now(), start_at = NULL, updated_at = now() WHERE id = :i",
+        i=offer_id,
+    )
+
+    row = await fetch_one(
+        owner, "SELECT start_at, end_at FROM offers WHERE id = :i", i=offer_id
+    )
+    assert row.start_at is None and row.end_at is not None
+
+
+async def test_the_role_cannot_insert_an_offer_of_a_kind_the_api_refuses(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    values = {**offer_values(new_id(), merchant_id, category_id), "kind": "VOUCHER"}
+
+    message = await refusal(partner, INSERT_OFFER, **values)
+
+    assert "this writer may only insert a sample or a trial" in message
+
+
+async def test_the_residual_nothing_separates_one_merchant_from_another_inside_the_role(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    """Documented in ADR-013: the session carries no merchant identity, so the role can edit any partner draft."""
+    offer_id, _, _ = await partner_offer(owner, partner)
+
+    await run(partner, "UPDATE offers SET title = 'Edited' WHERE id = :i", i=offer_id)
+
+    row = await fetch_one(owner, "SELECT title FROM offers WHERE id = :i", i=offer_id)
+    assert row.title == "Edited"
+
+
+async def test_an_awin_link_and_a_link_of_a_published_offer_cannot_be_written(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    awin_offer = await owner_offer(
+        owner, merchant_id, category_id, status="DRAFT", provider="awin"
+    )
+    awin_link = (
+        await fetch_all(
+            owner, "SELECT id FROM affiliate_links WHERE offer_id = :o", o=awin_offer
+        )
+    )[0].id
+    offer_id, _, _ = await partner_offer(owner, partner)
+    mine = new_id()
+    await run(
+        partner,
+        "INSERT INTO affiliate_links (id, offer_id, destination_url) VALUES (:i, :o, 'https://shop.example.com/x')",
+        i=mine,
+        o=offer_id,
+    )
+    await publish_as_owner(owner, offer_id)
+
+    awin = await refusal(
+        partner,
+        "UPDATE affiliate_links SET destination_url = 'https://www.awin1.com/cread.php?awinaffid=1' WHERE id = :i",
+        i=awin_link,
+    )
+    live = await refusal(
+        partner,
+        "UPDATE affiliate_links SET destination_url = 'https://shop.example.com/y' WHERE id = :i",
+        i=mine,
+    )
+    insert_on_live = await refusal(
+        partner,
+        "INSERT INTO affiliate_links (id, offer_id, destination_url) VALUES (:i, :o, 'https://shop.example.com/z')",
+        i=new_id(),
+        o=offer_id,
+    )
+    unscoped = await refusal(
+        partner,
+        "UPDATE affiliate_links SET destination_url = 'https://evil.example.net/'",
+    )
+
+    assert "this writer may only write direct links" in awin
+    assert "this writer may only write links of a submitted draft" in live
+    assert "this writer may only write links of a submitted draft" in insert_on_live
+    assert "this writer may only" in unscoped
+    stored = await fetch_one(
+        owner, "SELECT destination_url FROM affiliate_links WHERE id = :i", i=awin_link
+    )
+    assert "evil" not in stored[0] and "awinaffid" not in stored[0]
+
+
+async def test_an_import_row_must_be_partner_and_of_a_submitted_offer(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    awin_offer = await owner_offer(
+        owner, merchant_id, category_id, status="DRAFT", provider="awin"
+    )
+    offer_id, _, _ = await partner_offer(owner, partner)
+    insert = (
+        "INSERT INTO offer_imports (id, provider, external_id, offer_id, source_hash, applied_source_hash, "
+        "applied_content_hash, applied_at) VALUES (:i, :p, :e, :o, :h, :h, :h, now())"
+    )
+
+    awin_row = await refusal(
+        partner, insert, i=new_id(), p="awin", e=new_id(), o=offer_id, h="c" * 64
+    )
+    foreign = await refusal(
+        partner, insert, i=new_id(), p="partner", e=new_id(), o=awin_offer, h="c" * 64
+    )
+    update_awin = await refusal(
+        partner,
+        "UPDATE offer_imports SET source_hash = :h WHERE provider = 'awin'",
+        h="e" * 64,
+    )
+    ok = await refusal(
+        partner, insert, i=new_id(), p="partner", e=new_id(), o=offer_id, h="c" * 64
+    )
+
+    assert "this writer may only write partner provenance" in awin_row
+    assert "this writer may only write provenance of a submitted offer" in foreign
+    assert "this writer may only write partner provenance" in update_awin
+    assert ok == ""
+    untouched = await fetch_one(
+        owner, "SELECT source_hash FROM offer_imports WHERE provider = 'awin'"
+    )
+    assert untouched[0] == "d" * 64
+
+
+async def test_a_submission_can_only_be_attached_to_a_new_draft_of_the_same_merchant(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    owner_made = await owner_offer(owner, merchant_id, category_id, status="DRAFT")
+    published = await owner_offer(owner, merchant_id, category_id, status="PUBLISHED")
+    other_merchant, other_category = await seed(owner)
+    foreign = new_id()
+    await run(
+        partner, INSERT_OFFER, **offer_values(foreign, other_merchant, other_category)
+    )
+    insert = (
+        "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
+        "VALUES (:i, :m, :r, :o, :h, :k)"
+    )
+
+    for kind, offer_id in (
+        ("hand-made", owner_made),
+        ("published", published),
+        ("of another merchant", foreign),
+    ):
+        message = await refusal(
+            partner,
+            insert,
+            i=new_id(),
+            m=merchant_id,
+            r=f"r-{kind[:3]}",
+            o=offer_id,
+            h="a" * 64,
+            k=KEY_ID,
+        )
+        assert (
+            "this writer may only submit a new draft of its own merchant" in message
+        ), kind
+
+
+async def test_a_submission_cannot_adopt_a_draft_that_already_has_a_link(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    with_link = await owner_offer(
+        owner, merchant_id, category_id, status="DRAFT", provider="awin"
+    )
+
+    message = await refusal(
+        partner,
+        "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
+        "VALUES (:i, :m, 'adopt', :o, :h, :k)",
+        i=new_id(),
+        m=merchant_id,
+        o=with_link,
+        h="a" * 64,
+        k=KEY_ID,
+    )
+
+    assert "this writer may only submit a new draft of its own merchant" in message
+
+
+async def test_a_link_inserted_before_its_submission_is_refused_so_the_order_is_offer_submission_link(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    merchant_id, category_id = await seed(owner)
+    offer_id = new_id()
+    await run(partner, INSERT_OFFER, **offer_values(offer_id, merchant_id, category_id))
+
+    message = await refusal(
+        partner,
+        "INSERT INTO affiliate_links (id, offer_id, destination_url) VALUES (:i, :o, 'https://shop.example.com/x')",
+        i=new_id(),
+        o=offer_id,
+    )
+
+    assert "this writer may only write links of a submitted draft" in message
+
+
+# ------------------------------------------------------------------------- audit rows: shape and size (M12)
+
+
+@pytest.mark.parametrize(
+    ("action", "resource", "resource_id", "metadata"),
+    [
+        ("partner.users.delete", "users", "u1", "{}"),
+        ("partner.offers.revoke", "offers", "o1", "{}"),
+        ("partner.offers.submit", "users", "o1", "{}"),
+        ("partner.offers.submit", "offers", "x" * 65, "{}"),
+        ("partner.offers.submit", "offers", "o1", '{"x": "' + "y" * 2100 + '"}'),
+    ],
+)
+async def test_an_audit_row_must_be_a_real_partner_action_about_an_offer_with_bounded_size(
+    owner: AsyncEngine,
+    partner: AsyncEngine,
+    action: str,
+    resource: str,
+    resource_id: str,
+    metadata: str,
+) -> None:
+    message = await refusal(
+        partner,
+        "INSERT INTO audit_logs (id, action, resource, resource_id, metadata) "
+        "VALUES (:i, :a, :r, :ri, CAST(:m AS jsonb))",
+        i=new_id(),
+        a=action,
+        r=resource,
+        ri=resource_id,
+        m=metadata,
+    )
+
+    assert "this writer may only append partner audit rows" in message
+    count = await fetch_one(owner, "SELECT count(*) FROM audit_logs")
+    assert count[0] == 0
+
+
+# ------------------------------------------------------------ the guards cannot be switched off by the role (M4)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_insert_guard",
+        "ALTER TABLE offers DISABLE TRIGGER ALL",
+        "DROP TRIGGER trg_offers_update_guard ON offers",
+        "CREATE OR REPLACE FUNCTION freejoy_audit_insert_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+        "DROP FUNCTION freejoy_audit_insert_guard()",
+        "SET session_replication_role = replica",
+        "CREATE TRIGGER trg_mine BEFORE INSERT ON offers FOR EACH ROW EXECUTE FUNCTION freejoy_offer_insert_defaults()",
+    ],
+)
+async def test_the_role_cannot_disable_replace_or_add_a_trigger_or_switch_triggers_off(
+    partner: AsyncEngine, statement: str
+) -> None:
+    async with partner.connect() as connection:
+        with pytest.raises(DBAPIError) as caught:
+            await connection.execute(text(statement))
+
+    message = str(caught.value.orig).lower()
+    assert "must be" in message or "permission denied" in message
+
+
+async def test_the_script_refuses_a_same_named_trigger_on_the_wrong_table_and_a_disabled_guard(
+    database_url: str, role: str, owner: AsyncEngine
+) -> None:
+    await run(owner, "DROP TRIGGER trg_audit_logs_insert_guard ON audit_logs")
+    await run(
+        owner,
+        "CREATE TRIGGER trg_audit_logs_insert_guard BEFORE INSERT ON email_templates FOR EACH ROW "
+        "EXECUTE FUNCTION freejoy_audit_insert_guard()",
+    )
+    try:
+        with pytest.raises(Exception, match="missing, changed or disabled"):
+            await apply_partner_role(database_url, role, role_password_for(role))
+    finally:
+        await run(owner, "DROP TRIGGER trg_audit_logs_insert_guard ON email_templates")
+        await run(
+            owner,
+            "CREATE TRIGGER trg_audit_logs_insert_guard BEFORE INSERT ON audit_logs FOR EACH ROW "
+            "EXECUTE FUNCTION freejoy_audit_insert_guard()",
+        )
+
+    await run(owner, "ALTER TABLE offers DISABLE TRIGGER trg_offers_update_guard")
+    try:
+        with pytest.raises(Exception, match="missing, changed or disabled"):
+            await apply_partner_role(database_url, role, role_password_for(role))
+    finally:
+        await run(owner, "ALTER TABLE offers ENABLE TRIGGER trg_offers_update_guard")
+    await apply_partner_role(database_url, role, role_password_for(role))
+
+
+async def test_the_live_connection_check_notices_a_disabled_guard(
+    partner_url: str, owner: AsyncEngine
+) -> None:
+    from app.core.database import PartnerRoleNotRestricted, PartnerSessionProvider
+
+    async with PartnerSessionProvider(partner_url).session():
+        pass
+    await run(
+        owner,
+        "ALTER TABLE affiliate_links DISABLE TRIGGER trg_affiliate_links_write_guard",
+    )
+    try:
+        with pytest.raises(PartnerRoleNotRestricted):
+            async with PartnerSessionProvider(partner_url).session():
+                pass
+    finally:
+        await run(
+            owner,
+            "ALTER TABLE affiliate_links ENABLE TRIGGER trg_affiliate_links_write_guard",
+        )
+
+
+# --------------------------------------------------------------------------------------- shape checks (L5)
+
+
+async def test_a_pending_payload_must_be_a_json_object_a_key_id_a_real_key_id_and_a_ref_start_alphanumeric(
+    owner: AsyncEngine, partner: AsyncEngine
+) -> None:
+    offer_id, _, _ = await partner_offer(owner, partner)
+
+    array = await refusal(
+        partner,
+        "UPDATE partner_submissions SET pending_payload = '[]'::jsonb, pending_hash = :h, pending_at = now()",
+        h="b" * 64,
+    )
+    bad_key = await refusal(partner, "UPDATE partner_submissions SET key_id = 'short'")
+    leading_dot = await refusal(
+        partner,
+        "INSERT INTO partner_submissions (id, merchant_id, ref, offer_id, content_hash, key_id) "
+        "SELECT :i, merchant_id, '.hidden', id, :h, :k FROM offers WHERE id = :o",
+        i=new_id(),
+        o=offer_id,
+        h="a" * 64,
+        k=KEY_ID,
+    )
+
+    assert "ck_partner_submissions_pending_complete" in array
+    assert "ck_partner_submissions_key_id_valid" in bad_key
+    assert (
+        "uq_partner_submissions_offer_id" in leading_dot or "ref_valid" in leading_dot
+    )

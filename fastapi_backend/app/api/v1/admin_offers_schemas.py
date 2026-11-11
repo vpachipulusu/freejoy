@@ -299,6 +299,9 @@ class OfferOut(OfferSummaryOut):
     review_token: str
     # True when publishing needs the editor to confirm the commercial basis (see ``needs_basis_confirmation``).
     needs_basis_confirmation: bool
+    # True while the stored commercial basis is the placeholder of a retailer's draft that no editor has put live:
+    # nobody chose it, so a form must not present it as the current basis.
+    basis_is_placeholder: bool
     provenance: OfferProvenanceOut | None
     # Null unless the offer was submitted through the partner API.
     partner_submission: PartnerSubmissionOut | None
@@ -412,6 +415,8 @@ def _offer_fields(detail: OfferDetail) -> dict[str, Any]:
         **_import_fields(provenance, detail.partner.ref if detail.partner else None),
         "links": [link_out(i) for i in detail.links],
         "review_token": detail.review_token,
+        "basis_is_placeholder": detail.partner is not None
+        and detail.partner.first_published_at is None,
         "needs_basis_confirmation": detail.partner is not None
         or needs_basis_confirmation(
             (link.provider, link.active) for link in detail.links

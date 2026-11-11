@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Any, Self
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from app.partner.submission_store import (
     ImportRow,
@@ -93,6 +93,9 @@ class FakeSubmissionStore:
         self.links_by_offer: dict[str, list[LinkRow]] = {}
         self.imports: dict[str, ImportRow] = {}
         self.submissions: dict[str, SubmissionRow] = {}
+        self.pending_payloads: dict[str, dict[str, Any] | None] = {}
+        self.first_published: set[str] = set()
+        self.category_enabled = True
         self.audits: list[dict[str, Any]] = []
         self.locks: list[str] = []
         self.calls: list[str] = []
@@ -290,19 +293,11 @@ class FakeSubmissionStore:
             if "ref" in self.fail_inserts:
                 self.fail_inserts.remove("ref")
             raise unique_violation("uq_partner_submissions_merchant_id_ref")
+        offer = self.offers.get(offer_id)
+        if offer is None or offer.merchant_id != merchant_id:
+            raise NoResultFound  # the INSERT ... SELECT scoped to the merchant's own offer finds nothing
         self.submissions[submission_id] = SubmissionRow(
-            submission_id,
-            merchant_id,
-            ref,
-            offer_id,
-            content_hash,
-            None,
-            None,
-            None,
-            NOW,
-            key_id,
-            None,
-            NOW,
+            submission_id, merchant_id, ref, offer_id, content_hash, None, key_id
         )
 
     async def update_submission(
@@ -310,11 +305,17 @@ class FakeSubmissionStore:
     ) -> None:
         current = self.submissions[submission_id]
         assert current.merchant_id == merchant_id
-        resolved = {
-            k: (NOW if k.endswith("_at") and v is not None else v)
+        if "pending_payload" in values:
+            self.pending_payloads[submission_id] = values["pending_payload"]
+        fields = {
+            k: v
             for k, v in values.items()
+            if k in ("content_hash", "pending_hash", "key_id")
         }
-        self.submissions[submission_id] = replace(current, **resolved)
+        self.submissions[submission_id] = replace(current, **fields)
+
+    def pending_payload_of(self, submission: SubmissionRow) -> dict[str, Any] | None:
+        return self.pending_payloads.get(submission.id)
 
     async def audit(
         self, merchant_id: str, *, action: str, offer_id: str, metadata: dict[str, Any]
@@ -344,9 +345,10 @@ class FakeSubmissionStore:
             offer_status=offer.status,
             end_at=offer.end_at,
             past_end=offer.past_end,
-            ever_published=submission.first_published_at is not None,
+            ever_published=submission.id in self.first_published,
             update_pending=submission.pending_hash is not None,
-            submitted_at=submission.submitted_at,
+            submitted_at=NOW,
+            category_enabled=self.category_enabled,
         )
 
     async def list_views(

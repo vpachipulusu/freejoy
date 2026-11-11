@@ -11,17 +11,15 @@ Its ``hash`` is the SHA-256 of that payload, so sending the same content twice i
 Every refusal is a ``SubmissionRefused`` with a fixed code; nothing the caller sent is put in it.
 """
 
-import hashlib
-import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
 from app.core.affiliate_hosts import DIRECT_PROVIDER, destination_allowed
 from app.core.catalogue_urls import InvalidUrl, validate_https_url
-from app.core.offer_content import postage_problem, window_problem
-from app.core.plain_text import TextTooLong, plain_line
+from app.core.offer_content import payload_hash, postage_problem, window_problem
+from app.core.plain_text import plain_line
 from app.partner.errors import SubmissionRefused
 from app.partner.schemas import (
     MAX_AVAILABILITY,
@@ -37,6 +35,11 @@ from app.partner.schemas import (
 
 FREE_TRIAL = "FREE_TRIAL"
 MAX_YEAR = 2100
+# A start date this far ahead would sit first in "newest" for months once published.
+MAX_START_DAYS = 90
+# The version of the payload shape. A change to the keys or to the cleaning changes every stored hash: the next sync
+# run of every retailer would then queue an update on every live offer, so it needs a plan (docs/developer).
+PAYLOAD_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,7 @@ class CleanContent:
     def payload(self) -> dict[str, Any]:
         """The JSON form that is stored as ``pending_payload`` and hashed (dates as UTC ISO strings)."""
         return {
+            "v": PAYLOAD_VERSION,
             "title": self.title,
             "summary": self.summary,
             "description": list(self.description),
@@ -91,6 +95,7 @@ class CleanContent:
         """The columns of ``offers`` a create or a refresh writes from this content (dates as datetimes)."""
         values = self.payload()
         values.pop("destination_url")
+        values.pop("v")
         values["start_at"], values["end_at"] = self.start_at, self.end_at
         return values
 
@@ -99,19 +104,14 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(UTC).isoformat() if value is not None else None
 
 
-def hash_payload(payload: dict[str, Any]) -> str:
-    text = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+hash_payload = payload_hash
 
 
 def _line(raw: str, maximum: int) -> str:
     """One cleaned line, never empty: a text that is nothing but markup or invisible characters is refused."""
-    try:
-        cleaned = plain_line(raw, maximum)
-    except TextTooLong:
-        raise SubmissionRefused("empty_text") from None
+    cleaned = plain_line(
+        raw, maximum
+    )  # the schema caps every raw text far below the cleaner's own limit
     if not cleaned:
         raise SubmissionRefused("empty_text")
     return cleaned
@@ -125,10 +125,7 @@ def _paragraphs(raw: list[str]) -> tuple[str, ...]:
     """Each paragraph cleaned to one line; one that is nothing but markup is dropped, not refused."""
     cleaned: list[str] = []
     for item in raw:
-        try:
-            line = plain_line(item, MAX_PARAGRAPH)
-        except TextTooLong:
-            raise SubmissionRefused("empty_text") from None
+        line = plain_line(item, MAX_PARAGRAPH)
         if line:
             cleaned.append(line)
     return tuple(cleaned)
@@ -143,13 +140,22 @@ def clean_destination(raw: str, merchant_website: str | None) -> str:
         url = validate_https_url(raw)
     except InvalidUrl:
         raise SubmissionRefused("invalid_url") from None
-    host = urlsplit(url).hostname or ""
+    parts = urlsplit(url)
     allowed = destination_allowed(
-        DIRECT_PROVIDER, host, merchant_website=merchant_website, allow_sample=False
+        DIRECT_PROVIDER,
+        parts.hostname or "",
+        merchant_website=merchant_website,
+        allow_sample=False,
     )
-    if not allowed:
+    if not allowed or not _under_website_path(parts.path, merchant_website):
         raise SubmissionRefused("link_host_not_allowed")
     return url
+
+
+def _under_website_path(path: str, merchant_website: str | None) -> bool:
+    """When the stored website has a path (a shop on a shared host), the link must sit under it, not elsewhere on the host."""
+    prefix = urlsplit(merchant_website or "").path.rstrip("/")
+    return not prefix or path == prefix or path.startswith(f"{prefix}/")
 
 
 def _normalised(value: datetime | None) -> datetime | None:
@@ -165,11 +171,25 @@ def _normalised(value: datetime | None) -> datetime | None:
     return moved
 
 
+def require_current_window(
+    start_at: datetime | None, end_at: datetime | None, now: datetime
+) -> None:
+    """Rules that depend on the clock, so they judge a new or changed submission, never a resend of what is stored.
+
+    The end must be in the future (an offer that has already ended is of no use to anyone) and a start may not be more
+    than ``MAX_START_DAYS`` ahead (it would sit first in "newest" for months). Judged by the service after the
+    unchanged shortcut: a nightly resend of the same body must not turn into a 422 the day its end date passes.
+    """
+    if (end_at is not None and end_at <= now) or (
+        start_at is not None and start_at > now + timedelta(days=MAX_START_DAYS)
+    ):
+        raise SubmissionRefused("invalid_window")
+
+
 def _check_money_and_window(
     submission: OfferSubmission,
     start_at: datetime | None,
     end_at: datetime | None,
-    now: datetime,
 ) -> None:
     postage = {
         "postage_kind": submission.postage_kind,
@@ -177,8 +197,6 @@ def _check_money_and_window(
         "postage_currency": submission.postage_currency,
     }
     problem = postage_problem(postage) or window_problem(start_at, end_at)
-    if problem is None and end_at is not None and end_at <= now:
-        problem = "invalid_window"  # a submission that has already ended is of no use to anyone
     if problem is not None:
         raise SubmissionRefused(problem)
 
@@ -188,11 +206,10 @@ def clean_submission(
     *,
     category_id: str,
     merchant_website: str | None,
-    now: datetime,
 ) -> CleanContent:
     """The content to store for ``submission``, or ``SubmissionRefused`` with the code of the first rule it breaks."""
     start_at, end_at = _normalised(submission.start_at), _normalised(submission.end_at)
-    _check_money_and_window(submission, start_at, end_at, now)
+    _check_money_and_window(submission, start_at, end_at)
     terms = _optional_line(submission.subscription_terms, MAX_TERMS)
     if submission.offer_type == FREE_TRIAL and terms is None:
         raise SubmissionRefused("subscription_terms_required")

@@ -111,6 +111,8 @@ class PartnerSubmissionRecord:
     pending_payload: dict[str, Any] | None
     pending_hash: str | None
     pending_at: datetime | None
+    # Set the first time the offer was published; null while an editor has never put it live.
+    first_published_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,7 @@ class AdminOfferRepository(BaseRepository):
                 PartnerSubmission.pending_payload,
                 PartnerSubmission.pending_hash,
                 PartnerSubmission.pending_at,
+                PartnerSubmission.first_published_at,
             )
             .join(Merchant, Merchant.id == PartnerSubmission.merchant_id)
             .where(PartnerSubmission.offer_id == offer_id)

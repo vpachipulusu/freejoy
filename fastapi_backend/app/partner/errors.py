@@ -18,6 +18,7 @@ REFUSAL_CODES = Literal[
     "offer_closed",
     "open_submission_cap",
     "daily_submission_cap",
+    "daily_write_budget",
 ]
 
 MESSAGE_INVALID: Final = "Invalid request"
@@ -37,6 +38,7 @@ _STATUS_AND_MESSAGE: Final[dict[str, tuple[int, str]]] = {
     "offer_closed": (409, MESSAGE_CONFLICT),
     "open_submission_cap": (429, MESSAGE_TOO_MANY),
     "daily_submission_cap": (429, MESSAGE_TOO_MANY),
+    "daily_write_budget": (429, MESSAGE_TOO_MANY),
 }
 
 

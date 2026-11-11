@@ -330,6 +330,12 @@ PARTNER_READ_POLICY = RateLimitPolicy(
 PARTNER_WRITE_POLICY = RateLimitPolicy(
     "partner_write", limit=30, window_seconds=60, fail_closed=True
 )
+# Writes (PUT and end) of one merchant per UTC day, across all of its keys: the per-key limit above scales with the
+# number of keys issued, and every accepted write is an audit row, so this bounds the trail (2,000 a day is far
+# above a real sync of a few hundred offers). Keyed by merchant id. Fails closed: an outage must not lift it.
+PARTNER_MERCHANT_WRITE_POLICY = RateLimitPolicy(
+    "partner_merchant_write", limit=2000, window_seconds=24 * 60 * 60, fail_closed=True
+)
 # Failed partner authentications of a well-formed key, counted only on failure (a valid key is never held up by it) and
 # keyed by the presented key id. Nothing keyless is counted. Fail closed: an outage must not lift the limit. It turns repeated
 # failures for one key id into a 429; it does NOT bound database work (every well-formed key costs a connection and a SELECT,
