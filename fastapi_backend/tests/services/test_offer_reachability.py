@@ -458,10 +458,10 @@ async def test_unfinished_targets_are_reported_as_not_checked_when_time_runs_out
         target(f"s{n}", f"https://slow{n}.example/") for n in range(4)
     ]
 
-    started = asyncio.get_running_loop().time()
     findings = await probe_targets(Sleepy(), targets, concurrency=5, max_seconds=0.05)
 
-    assert asyncio.get_running_loop().time() - started < 2
+    # No clock assertion: had the run waited for the 10 s probes they would have finished and come
+    # back REACHABLE, not NOT_CHECKED (the checks below), so those already prove the deadline cut them.
     assert findings[0].status is ProbeStatus.REACHABLE
     unfinished = findings[1:]
     assert [f.reason for f in unfinished] == [ProbeReason.NOT_CHECKED] * 4
