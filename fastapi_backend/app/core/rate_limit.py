@@ -88,6 +88,21 @@ OUTBOUND_OFFER_POLICY = RateLimitPolicy(
 OUTBOUND_OFFER_BOT_POLICY = RateLimitPolicy(
     "outbound_offer_bot", limit=60, window_seconds=60, fail_closed=False
 )
+# The same endpoint, keyed by client address AND offer id (FREEJ-63): one address may have at most this many clicks on
+# one offer recorded a minute, for every class except BOT (which spends only its own bucket above), so a flood that does
+# not identify itself as automated cannot fill the offer's whole budget from a few addresses. Past it the visitor is still
+# sent on, the click is not recorded and the per-offer budgets above are not touched. It is skipped when no client address
+# was forwarded (everyone would share one key). The address part groups IPv6 by /56 (``CLICK_IPV6_GROUP_PREFIX``).
+OUTBOUND_CLICK_OFFER_POLICY = RateLimitPolicy(
+    "outbound_click_offer", limit=5, window_seconds=60, fail_closed=False
+)
+# Not a limit on visitors: a once-per-clock-minute gate on the log line that says an offer's main budget is spent
+# (FREEJ-63), keyed by offer id, so a long flood writes about one warning a minute for the offer instead of one per
+# request (with a limit of 1 the sliding window behaves as a fixed window, so two lines can be adjacent across a
+# minute boundary).
+OUTBOUND_OFFER_CAP_SIGNAL_POLICY = RateLimitPolicy(
+    "outbound_offer_cap_signal", limit=1, window_seconds=60, fail_closed=False
+)
 # Bulk Stripe subscription reconciliation: up to 20 Stripe calls per run, so a
 # few runs a minute per admin are plenty. Fail closed: an outage must not lift the limit.
 ADMIN_SYNC_POLICY = RateLimitPolicy(
@@ -97,13 +112,17 @@ ADMIN_SYNC_POLICY = RateLimitPolicy(
 
 # One IPv6 subscriber usually holds a whole /64, so a per-address key would give one client 2**64 buckets.
 IPV6_GROUP_PREFIX = 64
+# The click policies (``OUTBOUND_CLICK_POLICY`` and ``OUTBOUND_CLICK_OFFER_POLICY``) group IPv6 by /56 instead: a
+# host with a routed /56 holds 256 /64 networks, which would otherwise be 256 separate clients (FREEJ-63).
+CLICK_IPV6_GROUP_PREFIX = 56
 
 
-def client_bucket(address: str) -> str:
+def client_bucket(address: str, ipv6_prefix: int = IPV6_GROUP_PREFIX) -> str:
     """The rate-limit key part for a client address.
 
-    IPv4 is unchanged. IPv6 is grouped by its /64 (``2001:db8:1:2::/64``), and an IPv4-mapped IPv6
-    address counts as the IPv4 address. Raises ``ValueError`` for anything that is not an address.
+    IPv4 is unchanged. IPv6 is grouped by its /64 (``2001:db8:1:2::/64``) unless ``ipv6_prefix`` says
+    otherwise, and an IPv4-mapped IPv6 address counts as the IPv4 address. Raises ``ValueError`` for anything
+    that is not an address.
     """
     host = (
         address.split("%", 1)[0] if ":" in address else address
@@ -112,7 +131,7 @@ def client_bucket(address: str) -> str:
     if isinstance(ip, ipaddress.IPv6Address):
         if ip.ipv4_mapped is not None:
             return str(ip.ipv4_mapped)
-        return str(ipaddress.ip_network((ip, IPV6_GROUP_PREFIX), strict=False))
+        return str(ipaddress.ip_network((ip, ipv6_prefix), strict=False))
     return str(ip)
 
 

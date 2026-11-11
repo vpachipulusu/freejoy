@@ -95,20 +95,45 @@ class RaisingRateLimiter:
         raise RateLimiterUnavailable("redis down")
 
 
-class ScopedOutageRateLimiter(FakeRateLimiter):
+class ScriptedRateLimiter(FakeRateLimiter):
+    """Counts like ``FakeRateLimiter``, with some policy scopes scripted: never limited, always denied, or down.
+
+    Every hit is recorded in ``hits``, scripted or not, so a test can assert the exact sequence of hits.
+    """
+
+    def __init__(
+        self,
+        *,
+        unlimited_scopes: set[str] | None = None,
+        denied_scopes: set[str] | None = None,
+        failing_scopes: set[str] | None = None,
+        reset_at: float = 4_000_000_000.0,
+    ) -> None:
+        super().__init__(reset_at)
+        self._unlimited = unlimited_scopes or set()
+        self._denied = denied_scopes or set()
+        self._failing = failing_scopes or set()
+
+    async def hit(self, identifier: str, policy: RateLimitPolicy) -> RateLimitDecision:
+        scope = policy.scope
+        if scope in self._failing:
+            self.hits.append((identifier, policy))
+            raise RateLimiterUnavailable("redis down")
+        if scope in self._unlimited or scope in self._denied:
+            self.hits.append((identifier, policy))
+            return RateLimitDecision(
+                scope in self._unlimited, policy.limit, 0, self._reset_at
+            )
+        return await super().hit(identifier, policy)
+
+
+class ScopedOutageRateLimiter(ScriptedRateLimiter):
     """Counts like ``FakeRateLimiter``, but a Redis outage hits only the named policy scopes."""
 
     def __init__(
         self, failing_scopes: set[str], reset_at: float = 4_000_000_000.0
     ) -> None:
-        super().__init__(reset_at)
-        self._failing_scopes = failing_scopes
-
-    async def hit(self, identifier: str, policy: RateLimitPolicy) -> RateLimitDecision:
-        if policy.scope in self._failing_scopes:
-            self.hits.append((identifier, policy))
-            raise RateLimiterUnavailable("redis down")
-        return await super().hit(identifier, policy)
+        super().__init__(failing_scopes=failing_scopes, reset_at=reset_at)
 
 
 def as_limiter(limiter: FakeRateLimiter | RaisingRateLimiter) -> RateLimiter:

@@ -14,7 +14,16 @@ request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 _QUIET_LOGGERS = ("httpx", "httpcore")
 
 # Extra fields copied from a log record into the JSON payload when present.
-_EXTRA_FIELDS = ("request_id", "method", "path", "status", "duration_ms")
+# ``offer_id`` and ``scope`` are for the "offer recording cap reached" warning (FREEJ-63).
+_EXTRA_FIELDS = (
+    "request_id",
+    "method",
+    "path",
+    "status",
+    "duration_ms",
+    "offer_id",
+    "scope",
+)
 
 
 class JsonFormatter(logging.Formatter):

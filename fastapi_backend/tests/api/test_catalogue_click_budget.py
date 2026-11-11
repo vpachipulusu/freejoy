@@ -15,6 +15,7 @@ from app.api.deps import get_rate_limiter
 from app.api.v1 import catalogue_click
 from app.api.v1.catalogue_click import get_click_service
 from app.core.rate_limit import (
+    OUTBOUND_CLICK_OFFER_POLICY,
     OUTBOUND_CLICK_POLICY,
     OUTBOUND_OFFER_BOT_POLICY,
     OUTBOUND_OFFER_POLICY,
@@ -143,6 +144,7 @@ async def test_every_other_class_and_a_missing_class_spends_only_the_main_bucket
     assert response.status_code == 200
     assert limiter.hits == [
         ("outbound_click:ip:10.0.1.1", OUTBOUND_CLICK_POLICY),
+        ("outbound_click_offer:ip:10.0.1.1:offer:offer_1", OUTBOUND_CLICK_OFFER_POLICY),
         ("outbound_offer:offer:offer_1", OUTBOUND_OFFER_POLICY),
     ]
     assert len(store.clicks) == 1
@@ -241,9 +243,14 @@ async def test_every_body_shape_still_works_with_the_class_read_by_the_dependenc
     http, store, _ = build(limiter)
 
     async with http:
-        response = await http.post(PATH, **request_kwargs)
+        headers = {"X-Client-IP": "203.0.113.5", **request_kwargs.get("headers", {})}
+        response = await http.post(PATH, **{**request_kwargs, "headers": headers})
 
     assert response.status_code == 200
     assert response.json()["data"]["destination_url"] == DESTINATION
     assert len(store.clicks) == 1
-    assert scopes(limiter) == [OUTBOUND_CLICK_POLICY.scope, MAIN]
+    assert scopes(limiter) == [
+        OUTBOUND_CLICK_POLICY.scope,
+        OUTBOUND_CLICK_OFFER_POLICY.scope,
+        MAIN,
+    ]
