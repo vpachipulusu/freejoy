@@ -148,6 +148,13 @@ mitigation is a Vercel Firewall rate rule on `/partner/v1/` (a launch preconditi
 whole request before the ASGI app sees it, so "never buffered" is true of the surface only, and the 256 KiB cap is
 a defence for the function, not for the platform's own limits.
 
+**Column grants cannot limit rows** (FREEJ-59). The restricted role reads `offers (id, merchant_id, title, slug, status)` and `click_events (offer_id,
+occurred_at, user_agent_class)` for the click report. Any SQL run on the partner session (a flaw in partner code, never a retailer) can read those
+columns of **every** merchant's offers, drafts and archived included, and of every click. Tenancy rests on the `WHERE` clauses of the partner queries,
+which tests pin (the merchant and status predicates are in each statement, and a statement given another merchant's offer ids returns nothing of theirs).
+No visitor data is reachable: no referrer, link or user column is granted. This is accepted, like the temporary-table residual; a row-level view or
+policy is a later hardening. `tests/core/test_partner_role_e2e.py` names it as the accepted residual.
+
 **Middleware of the main app wraps the surface from outside.** Anything added to the main app (a CORS or session
 middleware, a response hook) also runs on partner responses and the surface cannot undo it. So the list of main-app
 middleware is pinned by a test; adding to it has to be a decision that also deals with `/partner/v1`.
@@ -171,6 +178,8 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
    step 2 is a condition of `PARTNER_API_ENABLED=true`**, not a nicety: nothing else bounds unauthenticated lookups.
 5. Do not set `PARTNER_API_ENABLED=true` in production until the submissions story (FREEJ-58) is in and reviewed, and re-run
    `commands/sql/partner_role.sql` after FREEJ-59 (its click grants are new).
+6. Set `PUBLIC_SITE_URL` to the website's public https origin. Every offer in a click report carries a link built from it (it defaults to
+   `http://localhost:3000`), so startup refuses `PARTNER_API_ENABLED=true` in production unless it is an https origin that is not localhost.
 
 ### Amendments to earlier records
 
@@ -215,7 +224,11 @@ middleware is pinned by a test; adding to it has to be a decision that also deal
   internal route; a mount confines by construction and can be checked by one walk of the route table.
 - **Reusing `X-Internal-Key` for partners.** One leaked partner key would be the service key of the whole backend.
 - **`/partner/v1` served with docs enabled for retailers.** A public schema of the partner surface helps an
-  attacker more than a retailer; the contract is shared as a file.
+  attacker more than a retailer; the contract is shared as a file. FREEJ-59 later decided to publish the contract on the website too
+  (`/developers/partner-api` and `/partner-openapi.json`, from a committed copy: the backend still serves no docs or schema route). What an unauthenticated
+  reader of the public page and file now learns is the route list, the key format (`fj_<env>_<key id>_<secret>`, already the format of every key), the
+  request and answer shapes, the fixed error messages and the rate limits. None of it opens anything: every route needs a key, the key's secret is 256 bits,
+  and the limits and the Firewall rule do not depend on being secret. The document is written for a retailer (a test keeps internal wording out of it).
 
 ## Open question: the hostname
 

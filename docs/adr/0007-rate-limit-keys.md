@@ -49,7 +49,9 @@ many IPs.
   `rl:partner_write:key:{key id}` (30 per minute, fails closed) and, for failed authentications,
   `rl:partner_auth_failure:key:{presented key id}` (30 per minute, fails closed; counted only when a well-formed key fails, so a valid key
   is never held up, and never for a request with no header, an unparseable key or mixed credentials). The read and write limits are applied
-  by the surface after authentication, before routing. None of them bounds database work for unauthenticated callers (ADR-013). Never keyed by client address: partner code does not read forwarded client-IP headers. The
+  by the surface after authentication, before routing. `GET /partner/v1/clicks` (FREEJ-59), the one partner read that aggregates over many rows, also counts
+`rl:partner_clicks:key:{key id}` (20 per minute, fails closed, `PARTNER_CLICKS_POLICY`), applied by a dependency of that route with the shared
+`enforce_rate_limit` helper on top of the read limit. None of them bounds database work for unauthenticated callers (ADR-013). Never keyed by client address: partner code does not read forwarded client-IP headers. The
   enforcement helpers and the limiter singleton live in `app/core` (`rate_limit_enforcement.py`, `rate_limiter_provider.py`) so the partner
   package, which imports only `app.core`, uses them; `app.api.rate_limit` and `app.api.deps` re-export the names.
 - Timeouts and retry. Fail-open policies keep the 200 ms Redis timeout and are never retried.

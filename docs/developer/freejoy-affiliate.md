@@ -195,7 +195,7 @@ directly. Send the CSV and say plainly:
 - Your live listings are in the file (up to 100 offers, busiest first), with 0 where one had no clicks.
 - Recording is limited to 600 clicks for one offer in a minute (the cap above), so a very busy minute is undercounted.
 
-A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with the same words in the answer ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
+A retailer with a partner API key reads the same counts itself, `GET /partner/v1/clicks`, with its own text in the answer (what a click is, bots left out, UTC days, the retention, and that recording is rate limited, without the figure) ([backend-partner-api.md](backend-partner-api.md#click-counts-get-partnerv1clicks-freej-59)).
 
 ## Retention
 
