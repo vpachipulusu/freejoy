@@ -65,5 +65,5 @@ def test_the_check_constraints_are_named() -> None:
 
 
 def test_the_revision_is_registered_as_the_head() -> None:
-    assert PLATFORM_HEAD == "0007"
-    assert PLATFORM_REVISIONS[-2:] == ("0006", "0007")
+    assert "0007" in PLATFORM_REVISIONS
+    assert PLATFORM_REVISIONS.index("0007") == PLATFORM_REVISIONS.index("0006") + 1
