@@ -11,6 +11,7 @@ from app.core.plain_text import (
     plain_line,
     plain_paragraphs,
 )
+from tests.cpu_scaling import assert_linear
 
 TAG_LIKE = re.compile(r"<[A-Za-z/!?]")
 
@@ -136,27 +137,31 @@ def test_invisible_characters_cannot_glue_a_tag_together_after_the_strip(
     assert not any(TAG_LIKE.search(p) for p in plain_paragraphs(raw, 5, 500))
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "<a " * 6666,
-        "<!--" * 5000,
-        "<script>" * 2500,
-        "<" * 19_000,
-        "<a>" * 6000 + "<",
-        "<p " * 3000 + ">" + "<b " * 3000,
-        "&lt;a " * 3000,
-        "<style>" + "</style" * 2500,
-    ],
-)
-def test_hostile_input_takes_linear_time(raw: str) -> None:
-    import time
+# Each hostile input is built from a repeat count, so the same shape can be made at two sizes.
+HOSTILE_SHAPES = {
+    "unclosed-a": (lambda n: "<a " * n, 6666),
+    "unclosed-comments": (lambda n: "<!--" * n, 5000),
+    "script-openers": (lambda n: "<script>" * n, 2500),
+    "bare-less-than": (lambda n: "<" * n, 19_000),
+    "tags-then-less-than": (lambda n: "<a>" * n + "<", 6000),
+    "open-then-unclosed": (lambda n: "<p " * n + ">" + "<b " * n, 3000),
+    "encoded-openers": (lambda n: "&lt;a " * n, 3000),
+    "style-closers": (lambda n: "<style>" + "</style" * n, 2500),
+}
 
-    started = time.perf_counter()
+
+def _clean_it_all(raw: str) -> None:
     plain_line(raw, 300)
     plain_paragraphs(raw, 20, 2000)
 
-    assert time.perf_counter() - started < 1.0
+
+@pytest.mark.parametrize("shape", HOSTILE_SHAPES)
+def test_hostile_input_takes_linear_time(shape: str) -> None:
+    # Not a wall-clock limit: those failed the gate on a correct tree when the machine was busy. The
+    # CPU cost at four times the size is compared with the cost at the base size (see tests/cpu_scaling).
+    build, count = HOSTILE_SHAPES[shape]
+
+    assert_linear(lambda n: _clean_it_all(build(n)), count)
 
 
 DOTTED_I = chr(0x130)  # "I" with a dot: .lower() turns it into two characters
@@ -187,13 +192,10 @@ def test_a_lone_less_than_before_a_letter_loses_only_the_sign_not_the_rest() -> 
 
 
 def test_many_unterminated_openers_still_finish_at_once() -> None:
-    import time
-
-    started = time.perf_counter()
     result = plain_line("<a " * 6000, 300)
 
-    assert time.perf_counter() - started < 0.5
     assert "<" not in result
+    assert_linear(lambda n: plain_line("<a " * n, 300), 6000)
 
 
 def test_fit_line_collapses_and_cuts_without_cleaning() -> None:
