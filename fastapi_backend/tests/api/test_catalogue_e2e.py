@@ -403,6 +403,86 @@ async def test_detail_returns_the_full_public_offer(
     assert response.headers["Cache-Control"] == "private, max-age=60"
 
 
+AWIN_URL = "https://www.awin1.com/cread.php?awinmid=1&awinaffid=2"
+SHOP_URL = "https://www.acme.example/free-sample"
+OFF_HOST_URL = "https://evil.example/x"
+LINK_SCENARIOS = {
+    "network-only": ([("awin", AWIN_URL)], True),
+    "direct-only": ([("direct", SHOP_URL)], False),
+    "network-then-direct": ([("awin", AWIN_URL), ("direct", SHOP_URL)], True),
+    "direct-then-network": ([("direct", SHOP_URL), ("awin", AWIN_URL)], False),
+    "unusable-network-then-direct": (
+        [("awin", OFF_HOST_URL), ("direct", SHOP_URL)],
+        False,
+    ),
+    "unusable-direct-then-network": (
+        [("direct", OFF_HOST_URL), ("awin", AWIN_URL)],
+        True,
+    ),
+    "unusable-only": ([("awin", OFF_HOST_URL)], False),
+    "no-links": ([], False),
+}
+
+
+@pytest.mark.parametrize("scenario", list(LINK_SCENARIOS))
+async def test_detail_flag_describes_the_link_the_click_follows(
+    client: AsyncClient, engine: AsyncEngine, shop: dict[str, str], scenario: str
+) -> None:
+    links, expected = LINK_SCENARIOS[scenario]
+    merchant = await add_merchant(
+        engine, "acme-site", website="https://www.acme.example"
+    )
+    offer_id = await add_offer(engine, shop["category"], merchant, "linked")
+    for provider, url in links:
+        await insert(
+            engine,
+            "affiliate_links",
+            {"offer_id": offer_id, "provider": provider, "destination_url": url},
+        )
+
+    detail = await client.get("/v1/catalogue/offers/linked")
+    click = await client.post(f"/v1/catalogue/offers/{offer_id}/click", json={})
+
+    assert detail.status_code == 200
+    assert detail.json()["data"]["earns_commission"] is expected
+    if links and click.status_code == 200:
+        followed = click.json()["data"]["destination_url"]
+        provider = next(p for p, url in links if url == followed)
+        assert (provider != "direct") is expected
+    else:
+        assert expected is False
+
+
+async def test_an_inactive_network_link_does_not_make_the_offer_earn(
+    client: AsyncClient, engine: AsyncEngine, shop: dict[str, str]
+) -> None:
+    merchant = await add_merchant(
+        engine, "acme-site", website="https://www.acme.example"
+    )
+    offer_id = await add_offer(engine, shop["category"], merchant, "linked")
+    await insert(
+        engine,
+        "affiliate_links",
+        {
+            "offer_id": offer_id,
+            "provider": "awin",
+            "destination_url": AWIN_URL,
+            "active": False,
+        },
+    )
+    await insert(
+        engine,
+        "affiliate_links",
+        {"offer_id": offer_id, "provider": "direct", "destination_url": SHOP_URL},
+    )
+
+    detail = await client.get("/v1/catalogue/offers/linked")
+
+    assert detail.json()["data"]["earns_commission"] is False
+    for hidden in ("awin", "direct", AWIN_URL, SHOP_URL, "provider"):
+        assert hidden not in detail.text
+
+
 async def test_detail_404_for_unknown_draft_and_archived(
     client: AsyncClient, engine: AsyncEngine, shop: dict[str, str]
 ) -> None:
@@ -597,6 +677,7 @@ async def fixed_clock_client(engine: AsyncEngine) -> AsyncIterator[AsyncClient]:
             yield CatalogueService(CatalogueRepository(session), clock=lambda: FIXED)
 
     app.dependency_overrides[get_catalogue_service] = service
+    app.dependency_overrides[get_session_provider] = lambda: provider
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
         transport=transport, base_url="http://test", headers={"X-Internal-Key": KEY}

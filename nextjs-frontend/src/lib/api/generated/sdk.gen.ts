@@ -642,7 +642,7 @@ export const listOffers = <ThrowOnError extends boolean = false>(options?: Optio
 /**
  * Read one published offer
  *
- * A live offer. An ended offer answers 410 with ``expired: true`` and its title.
+ * A live offer, with ``earns_commission``. An ended offer answers 410 with ``expired: true`` and its title.
  */
 export const readOffer = <ThrowOnError extends boolean = false>(options: Options<ReadOfferData, ThrowOnError>) => (options.client ?? client).get<ReadOfferResponses, ReadOfferErrors, ThrowOnError>({ url: '/v1/catalogue/offers/{slug}', ...options });
 

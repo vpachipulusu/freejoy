@@ -27,9 +27,10 @@ from app.api.v1.catalogue_schemas import (
     OfferTypeValue,
     category_data,
     expired_response,
-    offer_data,
+    offer_detail_data,
     offer_list_response,
 )
+from app.core.config import settings
 from app.core.errors import CodedHTTPException, ErrorResponse
 from app.core.rate_limit import PUBLIC_CATALOGUE_POLICY
 from app.models.platform.offer import OfferType
@@ -39,7 +40,9 @@ from app.repositories.catalogue import (
     OfferFilters,
     OfferSort,
 )
+from app.repositories.outbound_clicks import OutboundClickRepository
 from app.services.catalogue import CatalogueService, ExpiredOffer
+from app.services.offer_commission import OfferCommissionService
 
 CACHE_CONTROL = "private, max-age=60"
 # The 404 of an unknown or unpublished offer. The Next.js app prunes a visitor's saved offer only on this code,
@@ -64,7 +67,15 @@ def get_catalogue_service(session: SessionDep) -> CatalogueService:
     return CatalogueService(CatalogueRepository(session))
 
 
+def get_offer_commission_service(session: SessionDep) -> OfferCommissionService:
+    return OfferCommissionService(
+        OutboundClickRepository(session),
+        allow_sample_provider=settings.relaxed_environment,
+    )
+
+
 ServiceDep = Annotated[CatalogueService, Depends(get_catalogue_service)]
+CommissionDep = Annotated[OfferCommissionService, Depends(get_offer_commission_service)]
 IfNoneMatch = Annotated[str | None, Header(description="ETag from an earlier response")]
 NOT_MODIFIED: dict[int | str, dict[str, Any]] = {
     304: {"description": "Not modified (If-None-Match matched)"}
@@ -149,15 +160,18 @@ async def list_offers(
 async def read_offer(
     slug: Annotated[str, Path(min_length=1, max_length=MAX_TEXT_LENGTH)],
     service: ServiceDep,
+    commission: CommissionDep,
     if_none_match: IfNoneMatch = None,
 ) -> Response:
-    """A live offer. An ended offer answers 410 with ``expired: true`` and its title."""
+    """A live offer, with ``earns_commission``. An ended offer answers 410 with ``expired: true`` and its title."""
     offer = await service.get_offer(slug)
     if offer is None:
         raise CodedHTTPException(404, "Offer not found", OFFER_NOT_FOUND)
     if isinstance(offer, ExpiredOffer):
         return cached_response(expired_response(offer), if_none_match, 410)
-    return cached_response(OfferResponse(data=offer_data(offer)), if_none_match)
+    earns_commission = await commission.earns_commission(offer.id)
+    body = OfferResponse(data=offer_detail_data(offer, earns_commission))
+    return cached_response(body, if_none_match)
 
 
 @router.get(

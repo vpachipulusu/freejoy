@@ -11,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.api.deps import get_rate_limiter
-from app.api.v1.catalogue import get_catalogue_service
+from app.api.v1.catalogue import get_catalogue_service, get_offer_commission_service
 from app.api.v1.catalogue_schemas import (
     CategoryData,
     CategoryRef,
@@ -19,6 +19,7 @@ from app.api.v1.catalogue_schemas import (
     ExpiredOfferResponse,
     MerchantData,
     OfferData,
+    OfferDetailData,
 )
 from app.core.rate_limit import PUBLIC_CATALOGUE_POLICY
 from app.main import create_app
@@ -30,7 +31,9 @@ from app.models.platform.offer import (
     PostageKind,
 )
 from app.repositories.catalogue import OfferRecord, OfferSort
+from app.repositories.outbound_clicks import LinkRecord
 from app.services.catalogue import CatalogueService
+from app.services.offer_commission import OfferCommissionService
 from tests.fakes import FakeRateLimiter, RaisingRateLimiter, as_limiter
 from tests.fakes_catalogue import (
     NOW,
@@ -38,6 +41,7 @@ from tests.fakes_catalogue import (
     make_category,
     make_offer,
 )
+from tests.fakes_outbound import FakeClickStore, make_link
 
 CATEGORY_FIELDS = {
     "slug",
@@ -69,11 +73,15 @@ EDITORIAL_ONLY = {
 def build(
     repo: FakeCatalogueRepository,
     limiter: FakeRateLimiter | RaisingRateLimiter | None = None,
+    links: list[LinkRecord] | None = None,
 ) -> tuple[AsyncClient, FakeRateLimiter | RaisingRateLimiter]:
     limiter = limiter or FakeRateLimiter()
     app = create_app()
     app.dependency_overrides[get_catalogue_service] = lambda: CatalogueService(
         repo, clock=lambda: NOW
+    )
+    app.dependency_overrides[get_offer_commission_service] = lambda: (
+        OfferCommissionService(FakeClickStore(links or []), allow_sample_provider=False)
     )
     app.dependency_overrides[get_rate_limiter] = lambda: as_limiter(limiter)
     client = AsyncClient(
@@ -249,6 +257,43 @@ async def test_detail_returns_the_offer() -> None:
         "First paragraph.",
         "Second paragraph.",
     ]
+
+
+async def test_detail_says_whether_the_followed_link_earns_commission() -> None:
+    offer = make_offer()
+    network, direct = make_link(), make_link(provider="direct")
+    http_network, _ = build(FakeCatalogueRepository(by_slug=offer), links=[network])
+    http_direct, _ = build(FakeCatalogueRepository(by_slug=offer), links=[direct])
+    http_none, _ = build(FakeCatalogueRepository(by_slug=offer))
+
+    async with http_network, http_direct, http_none:
+        paid = (await http_network.get("/v1/catalogue/offers/free-shampoo")).json()
+        free = (await http_direct.get("/v1/catalogue/offers/free-shampoo")).json()
+        bare = (await http_none.get("/v1/catalogue/offers/free-shampoo")).json()
+
+    assert paid["data"]["earns_commission"] is True
+    assert free["data"]["earns_commission"] is False
+    assert bare["data"]["earns_commission"] is False
+
+
+async def test_the_flag_is_the_only_trace_of_the_link_in_the_detail_body() -> None:
+    link = make_link(id="link_secret_77")
+    http, _ = build(FakeCatalogueRepository(by_slug=make_offer()), links=[link])
+
+    async with http:
+        text = (await http.get("/v1/catalogue/offers/free-shampoo")).text
+
+    for hidden in (link.id, link.provider, link.destination_url, "awin", "provider"):
+        assert hidden not in text
+
+
+async def test_list_items_carry_no_commission_flag() -> None:
+    http, _ = build(FakeCatalogueRepository(offers=[make_offer()]), links=[make_link()])
+
+    async with http:
+        item = (await http.get("/v1/catalogue/offers")).json()["data"]["items"][0]
+
+    assert "earns_commission" not in item
 
 
 async def test_detail_of_an_unknown_slug_is_404() -> None:
@@ -496,7 +541,11 @@ def _field_names(model: Any) -> set[str]:
 
 
 def test_public_offer_schema_exposes_no_editorial_only_field() -> None:
-    names = _field_names(OfferData) | _field_names(ExpiredOfferResponse)
+    names = (
+        _field_names(OfferData)
+        | _field_names(OfferDetailData)
+        | _field_names(ExpiredOfferResponse)
+    )
 
     assert names.isdisjoint(EDITORIAL_ONLY)
     assert _field_names(CategoryData).isdisjoint(EDITORIAL_ONLY)
@@ -506,7 +555,10 @@ def test_public_offer_schema_exposes_no_editorial_only_field() -> None:
 
 
 def test_public_offer_schema_is_an_explicit_allowlist() -> None:
-    assert set(OfferData.model_fields) == {
+    list_fields = set(OfferData.model_fields)
+    assert "earns_commission" not in list_fields
+    assert set(OfferDetailData.model_fields) == list_fields | {"earns_commission"}
+    assert list_fields == {
         "id",
         "slug",
         "title",

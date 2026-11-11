@@ -9768,7 +9768,7 @@
           "catalogue"
         ],
         "summary": "Read one published offer",
-        "description": "A live offer. An ended offer answers 410 with ``expired: true`` and its title.",
+        "description": "A live offer, with ``earns_commission``. An ended offer answers 410 with ``expired: true`` and its title.",
         "operationId": "read_offer",
         "parameters": [
           {
@@ -16703,6 +16703,172 @@
         ],
         "title": "OfferData"
       },
+      "OfferDetailData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "description": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Description"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategoryRef"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/MerchantData"
+          },
+          "offer_type": {
+            "type": "string",
+            "enum": [
+              "free_sample",
+              "free_trial",
+              "cashback",
+              "voucher",
+              "competition"
+            ],
+            "title": "Offer Type"
+          },
+          "sponsored": {
+            "type": "boolean",
+            "title": "Sponsored"
+          },
+          "featured": {
+            "type": "boolean",
+            "title": "Featured"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageData"
+          },
+          "postage": {
+            "$ref": "#/components/schemas/PostageData"
+          },
+          "requires_card": {
+            "type": "boolean",
+            "title": "Requires Card"
+          },
+          "subscription_terms": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscription Terms"
+          },
+          "eligibility": {
+            "type": "string",
+            "title": "Eligibility"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start At"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new_today",
+                  "just_added",
+                  "popular",
+                  "ends_soon",
+                  "limited"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "earns_commission": {
+            "type": "boolean",
+            "title": "Earns Commission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "summary",
+          "description",
+          "category",
+          "merchant",
+          "offer_type",
+          "sponsored",
+          "featured",
+          "image",
+          "postage",
+          "requires_card",
+          "subscription_terms",
+          "eligibility",
+          "availability",
+          "start_at",
+          "end_at",
+          "last_verified_at",
+          "freshness",
+          "steps",
+          "earns_commission"
+        ],
+        "title": "OfferDetailData",
+        "description": "The offer page: everything in a list item plus whether its outbound link earns commission.\n\nA list card links to this page, never to the provider, so only the page needs the flag."
+      },
       "OfferFreshness": {
         "type": "string",
         "enum": [
@@ -20321,7 +20487,7 @@
             "default": true
           },
           "data": {
-            "$ref": "#/components/schemas/OfferData"
+            "$ref": "#/components/schemas/OfferDetailData"
           }
         },
         "type": "object",

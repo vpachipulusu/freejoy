@@ -2019,6 +2019,92 @@ export type OfferData = {
 };
 
 /**
+ * OfferDetailData
+ *
+ * The offer page: everything in a list item plus whether its outbound link earns commission.
+ *
+ * A list card links to this page, never to the provider, so only the page needs the flag.
+ */
+export type OfferDetailData = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Slug
+     */
+    slug: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Description
+     */
+    description: Array<string>;
+    category: CategoryRef;
+    merchant: MerchantData;
+    /**
+     * Offer Type
+     */
+    offer_type: 'free_sample' | 'free_trial' | 'cashback' | 'voucher' | 'competition';
+    /**
+     * Sponsored
+     */
+    sponsored: boolean;
+    /**
+     * Featured
+     */
+    featured: boolean;
+    image: ImageData;
+    postage: PostageData;
+    /**
+     * Requires Card
+     */
+    requires_card: boolean;
+    /**
+     * Subscription Terms
+     */
+    subscription_terms: string | null;
+    /**
+     * Eligibility
+     */
+    eligibility: string;
+    /**
+     * Availability
+     */
+    availability: string;
+    /**
+     * Start At
+     */
+    start_at: string;
+    /**
+     * End At
+     */
+    end_at: string | null;
+    /**
+     * Last Verified At
+     */
+    last_verified_at: string | null;
+    /**
+     * Freshness
+     */
+    freshness: 'new_today' | 'just_added' | 'popular' | 'ends_soon' | 'limited' | null;
+    /**
+     * Steps
+     */
+    steps: Array<ClaimStep>;
+    /**
+     * Earns Commission
+     */
+    earns_commission: boolean;
+};
+
+/**
  * OfferFreshness
  *
  * Editorial label set by the publisher; never computed from the clock.
@@ -3946,7 +4032,7 @@ export type AppApiV1CatalogueSchemasOfferResponse = {
      * Success
      */
     success?: true;
-    data: OfferData;
+    data: OfferDetailData;
 };
 
 /**
