@@ -351,7 +351,7 @@ export async function expectToast(page: Page, text: string | RegExp): Promise<vo
 export async function waitForPageReady(page: Page): Promise<void> {
   // Not 'networkidle': Firebase, Stripe and Sentry keep connections open, so it can time out on its own.
   await page.waitForLoadState('load');
-  // The admin, auth, dashboard and pricing loading.tsx files are the Suspense fallback for those routes (the public pages have none, see loading-boundary.test.ts). React reveals streamed content shortly after the
+  // The admin, auth, dashboard, pricing and most static public pages have a loading.tsx (the Suspense fallback; home, /freebies and /category do not, see loading-boundary.test.ts). React reveals streamed content shortly after the
   // load event, so wait until the fallback ("Loading") is gone before tests read the page without retrying.
   await expect(page.getByText('Loading', { exact: true })).toHaveCount(0);
   await waitForHydration(page);
