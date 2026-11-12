@@ -130,7 +130,7 @@ run would do). It needs outbound HTTPS to `api.awin.com`, `DATABASE_URL`, and op
   1 to 9 digits (cut to microseconds), then either no zone (read as UTC), `Z`, or an offset `+HH:MM`, `+HHMM`, `-HH:MM`
   or `-HHMM` (hours at most 23, minutes at most 59), which is converted to UTC. Refused: a date alone, a time without
   seconds, a number or an epoch (as a number or a string of digits), any other text, an out-of-range component, a
-  lowercase `t` or `z`, an hour-only offset, and a UTC instant outside the years 2000 to 2100. A start that is refused
+  lowercase `t` or `z`, an hour-only offset, and a year outside 2000 to 2100 (as written, and again after conversion to UTC). A start that is refused
   is `invalid_start_date`, an end that is refused `invalid_end_date` (the start is reported when both fail). An end not
   after the start is `invalid_window`; an end already passed is `ended`; both are judged on the UTC instants. Missing
   or empty is open. The transaction report parser keeps the strict rule (`parse_utc_timestamp`: `T`, no offset), see
@@ -376,17 +376,21 @@ as possible from data it does not control, and this is exactly what it can print
   (`accepted`, `tracking_host_not_allowed`, `tracking_shape_unrecognised`, ...). Items of programmes you have not joined
   are skipped as `not_joined` before that check, so the skip counts alone cannot show these;
 - the **date outlines** (FREEJ-66) of `startDate` and `endDate`, each a sorted set of `outline xCOUNT` pairs on the
-  lines `startDate outlines` and `endDate outlines`. An outline replaces every digit with `9` and keeps another
-  character only if it is in the label set below (anything else, a space or a `+` included, becomes `?`):
-  `2026-11-01T00:00:00.000` prints as `9999-99-99T99:99:99.999`, `2026-11-01 00:00:00` as `9999-99-99?99:99:99`
-  and an offset `+01:00` as `?99:99`. A value that is not a string prints as `<null>`, `<int>`, `<float>`, `<bool>`,
-  `<object>` or `<array>`, a key that is absent as `<missing>` and an empty string as `<empty>`. The value itself is
-  never printed, and a string cannot forge one of these markers (`<` and `>` become `?`). Letters stay (they show the
-  `T` and the `Z`), so a date field that held prose would print its letters, cut to 60 characters. The sets use
-  the same caps as the others (40 shown, `(+N more)`; 1000 tracked, `(+N or more)`).
+  lines `startDate outlines` and `endDate outlines`. An outline has its own small vocabulary, because a date needs
+  nothing more: a digit is `9`; a run of ASCII letters is itself only when it is a single `T`, `Z`, `t` or `z`, and
+  otherwise `a`; `-`, `:`, `.` and `+` stay; exactly one space is `_`; everything else (a tab, a no-break space, `/`,
+  `_`, `[`, `]`, `%`, `<`, `>`, a control character, any non-ASCII character) is `?`. So `2026-11-01T00:00:00.000`
+  prints as `9999-99-99T99:99:99.999`, `2026-11-01 00:00:00` as `9999-99-99_99:99:99` and an offset `+01:00` as
+  `+99:99` (a space in its place would be `_99:99`). A value that is not a string prints as `<null>`, `<int>`,
+  `<float>`, `<bool>`, `<object>` or `<array>` (`<other>` for a type JSON cannot produce, which does not happen in
+  practice), a key that is absent as `<missing>` and an empty string as `<empty>`. The value itself is never
+  printed: a word, a code or a URL in a date field collapses to `a` and `?` (`SAVE20NOW` is `a99a`,
+  `https://evil.example/claim-prize` is `a:??a.a?a-a`), and `<` and `>` cannot come out of a value, so a string
+  cannot forge a marker. The sets use the same caps as the others (40 shown, `(+N more)`; 1000 tracked,
+  `(+N or more)`; 60 characters per outline).
 
 It never prints the token, the publisher id, a query value, a fragment, user info, a port, a voucher code, a title, a
-description, terms or a full URL. Every label is made of `A-Z a-z 0-9 . _ - / [ ] % :` (and `#` from the mask), so a
+description, terms or a full URL. Every other label is made of `A-Z a-z 0-9 . _ - / [ ] % :` (and `#` from the mask; the date outlines above use their smaller set), so a
 response cannot put a space, comma, parenthesis, backtick, `@`, angle bracket, control character or line break into a
 line, and no name can imitate the `(none)` marker. Each printed set is sorted and holds at most 40 labels
 (`MAX_ENTRIES`, then `(+N more)`), each label at most 60 characters (`MAX_NAME_LENGTH`); each set the report tracks stops

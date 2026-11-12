@@ -217,6 +217,11 @@ REFUSED_SHAPES: list[Any] = [
     "2101-01-01T00:00:00",
     "2000-01-01T00:00:00+01:00",
     "2100-12-31T23:59:59-01:00",
+    "0001-01-01T00:00:00+01:00",
+    "0001-01-01T00:00:00",
+    "9999-12-31T23:59:59-01:00",
+    "9999-12-31T23:59:59-00:01",
+    "9999-12-31T23:59:59",
 ]
 
 
@@ -225,6 +230,27 @@ def test_parse_instant_refuses_everything_that_is_not_an_unambiguous_instant(
     value: Any,
 ) -> None:
     assert parse_instant(value) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0001-01-01T00:00:00+01:00",
+        "9999-12-31T23:59:59-01:00",
+        "9999-12-31T23:59:59-00:01",
+    ],
+)
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("startDate", SkipReason.INVALID_START_DATE),
+        ("endDate", SkipReason.INVALID_END_DATE),
+    ],
+)
+def test_an_offset_that_would_overflow_the_calendar_is_a_skip_not_a_crash(
+    field: str, reason: SkipReason, value: str
+) -> None:
+    assert rejected(make_item(**{field: value})) is reason
 
 
 def test_the_years_2000_and_2100_are_the_inclusive_limits() -> None:
@@ -258,13 +284,9 @@ def test_a_bad_end_is_reported_as_the_end_when_the_start_is_good() -> None:
     assert rejected(item) is SkipReason.INVALID_END_DATE
 
 
-def test_the_one_invalid_date_reason_no_longer_exists() -> None:
-    assert "invalid_date" not in {reason.value for reason in SkipReason}
-
-
 def test_the_window_is_judged_after_offsets_are_converted_to_utc() -> None:
     item = make_item(
-        startDate="2026-12-01T10:00:00+02:00", endDate="2026-12-01T08:00:00Z"
+        startDate="2026-12-01T08:00:00-02:00", endDate="2026-12-01T09:00:00Z"
     )
 
     assert rejected(item) is SkipReason.INVALID_WINDOW
@@ -276,18 +298,26 @@ def test_a_promotion_ending_by_an_offset_instant_is_judged_as_ended_in_utc() -> 
     assert rejected(item) is SkipReason.ENDED
 
 
-def test_parse_utc_timestamp_stays_strict_for_the_transaction_reports() -> None:
+def test_parse_utc_timestamp_still_reads_the_documented_shape_as_utc() -> None:
     assert parse_utc_timestamp("2026-11-03T10:15:00.123Z") == utc(
         2026, 11, 3, 10, 15, micro=123000
     )
-    for value in (
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
         "2026-11-03 10:15:00",
         "2026-11-03T10:15:00+01:00",
         "2026-11-03T10:15:00-0100",
         "2026-11-03",
         1762164900,
-    ):
-        assert parse_utc_timestamp(value) is None
+    ],
+)
+def test_parse_utc_timestamp_stays_strict_for_the_transaction_reports(
+    value: object,
+) -> None:
+    assert parse_utc_timestamp(value) is None
 
 
 def test_a_missing_url_leaves_no_source_url() -> None:

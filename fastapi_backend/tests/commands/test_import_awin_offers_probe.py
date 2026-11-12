@@ -344,8 +344,8 @@ def test_show_shape_prints_the_date_outlines_and_never_a_date(
 
     out = capsys.readouterr().out
     assert (
-        f"{SHAPE}: startDate outlines: 9999-99-99?99:99:99?99:99 x1, "
-        "9999-99-99T99:99:99.999 x2"
+        f"{SHAPE}: startDate outlines: 9999-99-99T99:99:99.999 x2, "
+        "9999-99-99_99:99:99+99:99 x1"
     ) in out
     assert f"{SHAPE}: endDate outlines: 9999-99-99 x1, <missing> x1, <null> x1" in out
     assert "2026" not in out.split(SHAPE, 1)[1]
@@ -364,7 +364,7 @@ def test_show_shape_prints_none_for_the_date_outlines_when_there_are_no_items(
 def test_show_shape_says_how_many_more_date_outlines_there_were(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    items = [raw_item(n, startDate="x" * n) for n in range(1, 50)]
+    items = [raw_item(n, startDate="9" * n) for n in range(1, 50)]
 
     run(["--dry-run", "--show-shape"], FakeAwinClient([items]))
 

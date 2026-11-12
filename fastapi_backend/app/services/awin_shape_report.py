@@ -21,18 +21,20 @@ print, exactly:
   and any run of five or more digits is masked as ``#`` before the length cut. A host can still name a
   merchant or a network: that is the point of printing it.
 * **Schemes** of ``urlTracking``, through the name rule above.
-* **Date outlines** (FREEJ-66) of ``startDate`` and ``endDate``, each with a count: every digit becomes
-  ``9``, every other character is kept only if it is in the label set below (else ``?``), the result is cut
-  to ``MAX_NAME_LENGTH``. ``2026-11-01T00:00:00.000`` prints as ``9999-99-99T99:99:99.999``. A value that is
-  not a string prints as ``<null>``, ``<int>``, ``<float>``, ``<bool>``, ``<object>`` or ``<array>``, an
-  absent key as ``<missing>``, an empty string as ``<empty>`` (``<`` and ``>`` cannot come from a value, so
-  none of these can be forged). The letters of a string stay (a ``T``, a ``Z``, a month name), so a date
-  field that holds prose would print its letters: that is the residual risk of an outline, bounded by the
-  length cut and the ``MAX_ENTRIES`` limit.
+* **Date outlines** (FREEJ-66) of ``startDate`` and ``endDate``, each with a count, in a vocabulary of their
+  own that only a date needs: a digit is ``9``; a run of ASCII letters is itself only when it is a single
+  ``T``, ``Z``, ``t`` or ``z`` and otherwise ``a``; ``- : . +`` stay; exactly one space is ``_``; every
+  other character (a tab, a no-break space, ``/ _ [ ] % < >``, a control character, any non-ASCII
+  character) is ``?``; the result is cut to ``MAX_NAME_LENGTH``. ``2026-11-01T00:00:00.000`` prints as
+  ``9999-99-99T99:99:99.999``, a space separator as ``9999-99-99_99:99:99`` and an offset as ``+99:99``. A
+  value that is not a string prints as ``<null>``, ``<int>``, ``<float>``, ``<bool>``, ``<object>``,
+  ``<array>`` (or ``<other>`` for a type JSON cannot produce), an absent key as ``<missing>``, an empty
+  string as ``<empty>``; ``<`` and ``>`` never come out of a value, so none of these can be forged. Words,
+  codes and URLs collapse to ``a`` and ``?``, so nothing a field says survives except its date punctuation.
 
 Never printed: a query value, a fragment, user info, a port, a voucher code, a title, a description, terms, a
 full URL, the publisher id or the token. Every label is built from the characters ``A-Z a-z 0-9 . _ - / [ ]
-% :`` (plus ``#`` from the mask), cut to ``MAX_NAME_LENGTH``, so a response cannot put a space, comma,
+% :`` (plus ``#`` from the mask; the date outlines above have their own, smaller set), cut to ``MAX_NAME_LENGTH``, so a response cannot put a space, comma,
 bracket pair, backtick, ``@``, angle bracket, control character or line break into the output. Each printed
 set is sorted and holds at most ``MAX_ENTRIES`` labels; each tracked set stops growing at ``NAME_CAP``.
 
@@ -69,7 +71,11 @@ _LONG_DIGITS = re.compile(r"[0-9]{5,}")
 _OUTLINE = re.compile(r"([A-Za-z]+)|([0-9]+)|(.)", re.DOTALL)
 _OUTLINE_KEPT = frozenset("/.-_")
 _ALLOWED = frozenset(string.ascii_letters + string.digits + "._-/[]%:")
-_DIGIT = re.compile(r"[0-9]")
+_DATE_TOKEN = re.compile(
+    r"([A-Za-z]+)|([0-9])|(.)", re.DOTALL
+)  # each alternative is one step: linear
+_DATE_LETTERS = frozenset("TZtz")
+_DATE_KEPT = frozenset("-:.+")
 DATE_KEYS = ("startDate", "endDate")
 MISSING, EMPTY = "<missing>", "<empty>"
 _JSON_KINDS: tuple[tuple[type, str], ...] = (
@@ -171,8 +177,19 @@ def _outline(path: str) -> str:
     return _cut(_OUTLINE.sub(collapse, path))
 
 
+def _date_token(match: re.Match[str]) -> str:
+    if match[1]:
+        return match[1] if match[1] in _DATE_LETTERS else "a"
+    if match[2]:
+        return "9"
+    char = match[3]
+    if char in _DATE_KEPT:
+        return char
+    return "_" if char == " " else REPLACEMENT
+
+
 def date_outline(value: object) -> str:
-    """What a date field looks like, never what it says: digits as ``9``, see the module docstring.
+    """What a date field looks like, never what it says: the vocabulary is in the module docstring.
 
     The string is cut to one character past the limit before anything is read, so a huge one stays cheap.
     """
@@ -181,7 +198,7 @@ def date_outline(value: object) -> str:
     if value is None:
         return "<null>"
     if isinstance(value, str):
-        return sanitise_name(_DIGIT.sub("9", value[: MAX_NAME_LENGTH + 1]))
+        return _cut(_DATE_TOKEN.sub(_date_token, value[: MAX_NAME_LENGTH + 1]))
     return next(
         (label for kind, label in _JSON_KINDS if isinstance(value, kind)), OTHER_KIND
     )

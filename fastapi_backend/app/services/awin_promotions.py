@@ -190,6 +190,8 @@ def _advertiser(item: dict[str, Any]) -> tuple[int, str]:
 def _instant(match: re.Match[str]) -> datetime | None:
     """The UTC instant a matched timestamp names, or ``None`` when a component is out of range."""
     year, month, day = int(match[1]), int(match[2]), int(match[3])
+    if not MIN_YEAR <= year <= MAX_YEAR:
+        return None  # before any datetime is built: a year like 0001 or 9999 can overflow an offset conversion
     hour, minute, second = int(match[5]), int(match[6]), int(match[7])
     micro = int((match[8] or "0").ljust(MICROSECOND_DIGITS, "0")[:MICROSECOND_DIGITS])
     zone: timezone = UTC
@@ -200,10 +202,11 @@ def _instant(match: re.Match[str]) -> datetime | None:
         delta = timedelta(hours=offset_hours, minutes=offset_minutes)
         zone = timezone(-delta if match[10] == "-" else delta)
     try:
-        local = datetime(year, month, day, hour, minute, second, micro, tzinfo=zone)
-    except ValueError:
+        utc = datetime(
+            year, month, day, hour, minute, second, micro, tzinfo=zone
+        ).astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    utc = local.astimezone(UTC)
     return utc if MIN_YEAR <= utc.year <= MAX_YEAR else None
 
 

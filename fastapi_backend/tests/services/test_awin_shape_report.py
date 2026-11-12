@@ -1,6 +1,7 @@
 """``ShapeCollector``: counts and safe labels, bounded, sanitised, and never a value (FREEJ-52)."""
 
 import gc
+import re
 import weakref
 from dataclasses import fields
 from typing import Any
@@ -611,6 +612,12 @@ def test_a_very_long_name_is_not_printed_at_all() -> None:
 # --- date outlines (FREEJ-66) --------------------------------------------------------------
 
 
+def distinct_outline(n: int) -> str:
+    """A string whose outline differs for each n below 5**6: base 5 over ``9 - : . +``, six characters."""
+    digits = [(n // 5**i) % 5 for i in range(6)]
+    return "".join("9-:.+"[d] for d in digits)
+
+
 def dates(**changes: Any) -> dict[str, Any]:
     return raw_item(1, **changes)
 
@@ -628,21 +635,59 @@ def test_a_date_prints_as_an_outline_with_its_digits_as_nines() -> None:
     ("value", "outline"),
     [
         ("2026-11-01T00:00:00Z", "9999-99-99T99:99:99Z"),
-        ("2026-11-01 00:00:00", "9999-99-99?99:99:99"),
-        ("2026-11-01T00:00:00+01:00", "9999-99-99T99:99:99?99:99"),
+        ("2026-11-01t00:00:00z", "9999-99-99t99:99:99z"),
+        ("2026-11-01 00:00:00", "9999-99-99_99:99:99"),
+        ("2026-11-01T00:00:00+01:00", "9999-99-99T99:99:99+99:99"),
         ("2026-11-01T00:00:00-0100", "9999-99-99T99:99:99-9999"),
+        ("2026-11-01T00:00:00 01:00", "9999-99-99T99:99:99_99:99"),
         ("2026-11-01T00:00", "9999-99-99T99:99"),
-        ("11/01/2026", "99/99/9999"),
+        ("11/01/2026", "99?99?9999"),
         ("1796119200", "9999999999"),
-        ("Tue, 01 Nov 2026", "Tue??99?Nov?9999"),
-        (chr(0xFF12) + chr(0xE9) + "<b>", "???b?"),
-        ("a" * 200, "a" * 57 + "..."),
+        ("Tue, 01 Nov 2026", "a?_99_a_9999"),
+        ("2026-11-01T00:00:00 UTC", "9999-99-99T99:99:99_a"),
+        ("a" * 200, "a"),
+        ("9" * 200, "9" * 57 + "..."),
     ],
 )
-def test_the_outline_of_a_string_keeps_only_safe_characters(
+def test_the_outline_of_a_string_uses_only_the_date_vocabulary(
     value: str, outline: str
 ) -> None:
     assert date_outline(value) == outline
+
+
+def test_a_space_a_tab_and_a_no_break_space_are_told_apart_where_it_matters() -> None:
+    space, tab, nbsp = (
+        date_outline("2026-11-01" + sep + "00:00:00")
+        for sep in (" ", chr(9), chr(0xA0))
+    )
+
+    assert space == "9999-99-99_99:99:99"
+    assert tab == nbsp == "9999-99-99?99:99:99"
+    assert date_outline("+01:00") == "+99:99" != date_outline(" 01:00") == "_99:99"
+
+
+@pytest.mark.parametrize(
+    ("value", "outline"),
+    [
+        ("https://evil.example/claim-prize", "a:??a.a?a-a"),
+        ("SAVE20NOW", "a99a"),
+        ("SAVE-TWENTY-NOW", "a-a-a"),
+        ("tomorrow", "a"),
+        ("Today", "a"),
+        ("<script>alert(1)</script>", "?a?a?9???a?"),
+        ("[x](http://e.example) @channel `tick`", "?a??a:??a.a?_?a_?a?"),
+        ("line" + NL + "break", "a?a"),
+        ("a_b%20c", "a?a?99a"),
+        (E_ACUTE + RLO + ESC, "???"),
+    ],
+)
+def test_words_codes_urls_and_markup_never_survive_in_an_outline(
+    value: str, outline: str
+) -> None:
+    result = date_outline(value)
+
+    assert result == outline
+    assert re.fullmatch(r"[9aTZtz:.+_?-]*", result)
 
 
 @pytest.mark.parametrize(
@@ -669,10 +714,10 @@ def test_a_string_cannot_forge_a_kind_label() -> None:
     forged = ["<null>", "<missing>", "<empty>", "<int>"]
 
     assert [date_outline(value) for value in forged] == [
-        "?null?",
-        "?missing?",
-        "?empty?",
-        "?int?",
+        "?a?",
+        "?a?",
+        "?a?",
+        "?a?",
     ]
 
 
@@ -692,8 +737,8 @@ def test_each_outline_is_counted_and_start_and_end_are_kept_apart() -> None:
         ("<null>", 1),
     )
     assert report.end_date_outlines.entries == (
-        ("9999-99-99?99:99:99", 1),
         ("9999-99-99T99:99:99.999", 1),
+        ("9999-99-99_99:99:99", 1),
         ("<empty>", 1),
         ("<float>", 1),
     )
@@ -735,8 +780,28 @@ def test_a_date_value_never_reaches_the_report() -> None:
         assert value not in text, value
 
 
+def test_no_word_or_url_in_a_date_field_reaches_the_report() -> None:
+    items = [
+        dates(startDate="https://evil.example/claim-prize", endDate="SAVE20NOW"),
+        dates(startDate="tomorrow", endDate="SAVE-TWENTY-NOW"),
+    ]
+
+    text = all_text(shape(page(*items)))
+
+    for word in (
+        "evil",
+        "claim",
+        "prize",
+        "SAVE",
+        "NOW",
+        "tomorrow",
+        "TWENTY",
+    ):
+        assert word not in text, word
+
+
 def test_outlines_are_bounded_sorted_and_say_how_many_more() -> None:
-    items = [dates(startDate="x" * n) for n in range(1, 60)]
+    items = [dates(startDate="9" * n) for n in range(1, 60)]
 
     report = shape(page(*items))
 
@@ -751,7 +816,12 @@ def test_outlines_stop_growing_at_the_cap_and_say_so() -> None:
     collector = ShapeCollector(PUBLISHER_ID)
     for part in range(3):
         collector.add_page(
-            page(*[dates(startDate=letters(part * 5000 + n)) for n in range(5000)])
+            page(
+                *[
+                    dates(startDate=distinct_outline(part * 5000 + n))
+                    for n in range(5000)
+                ]
+            )
         )
 
     outlines = collector.report().start_date_outlines
