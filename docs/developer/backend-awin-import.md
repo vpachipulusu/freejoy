@@ -63,7 +63,7 @@ either is empty (a `--dry-run` also needs them: it calls the API). The token is 
 | `--max-seconds N` | 1200 (1 to 86400) | Time limit for the **whole run**, fetching and writing. On expiry the run fails (`run_deadline`, exit 1; stderr says "already committed and kept (at least)" because a batch cancelled inside its own commit may be committed and not counted) and what was committed stays; a rerun carries on. |
 | `--updated-since YYYY-MM-DD` | unset | Only promotions Awin updated since that date (exactly that shape). |
 | `--membership {joined,notJoined,all}` | `joined` | Which programmes to ask Awin for. **Dry run only**: with any value but `joined` and no `--dry-run` the command exits 2. See [the probe](#the-dry-run-probe-membership-and-show-shape). |
-| `--show-shape` | off | After the counts, print counts and a bounded set of key, host and path labels of what Awin returned (never values; see the probe section). **Dry run only**: without `--dry-run` the command exits 2. |
+| `--show-shape` | off | After the counts, print counts and a bounded set of key, host, path and date-outline labels of what Awin returned (never values; see the probe section). **Dry run only**: without `--dry-run` the command exits 2. |
 
 | Exit | Meaning |
 | --- | --- |
@@ -87,7 +87,7 @@ probe below. A real run prints no filters line.
 "valid" and "skipped".
 
 Skip reasons (`SkipReason`): `invalid_item`, `invalid_id`, `unsupported_type`, `invalid_advertiser`, `not_joined`,
-`invalid_title`, `invalid_text`, `field_too_long`, `invalid_date`, `invalid_window`, `ended`, `invalid_url`,
+`invalid_title`, `invalid_text`, `field_too_long`, `invalid_start_date`, `invalid_end_date`, `invalid_window`, `ended`, `invalid_url`,
 `source_url_on_tracking_host`, `missing_tracking_url`, `invalid_tracking_url`, `tracking_host_not_allowed`,
 `tracking_shape_unrecognised`, `tracking_owner_mismatch`, `tracking_destination_mismatch`, `region_mismatch`, `invalid_voucher`, `duplicate_in_feed`, `slug_unavailable`.
 
@@ -125,8 +125,16 @@ run would do). It needs outbound HTTPS to `api.awin.com`, `DATABASE_URL`, and op
   API's (title 200, summary 300, paragraph 2000 and at most 20 of them, terms 500): longer text is cut on a word with
   an ellipsis, text over 20,000 characters rejects the item (`field_too_long`), a title or advertiser name that is empty
   after cleaning rejects it. Only plain text is stored.
-- **Dates:** `YYYY-MM-DDTHH:MM:SS[.fraction][Z]` read as UTC and nothing else (no offset, no date-only, years 2000 to
-  2100). An end not after the start is `invalid_window`; an end already passed is `ended`. Missing or empty is open.
+- **Dates** (`startDate`, `endDate`; FREEJ-66): an ISO 8601 instant that names one moment, and nothing else
+  (`parse_instant`). `YYYY-MM-DD`, then `T` or a single space, then `HH:MM:SS` (seconds required), an optional fraction of
+  1 to 9 digits (cut to microseconds), then either no zone (read as UTC), `Z`, or an offset `+HH:MM`, `+HHMM`, `-HH:MM`
+  or `-HHMM` (hours at most 23, minutes at most 59), which is converted to UTC. Refused: a date alone, a time without
+  seconds, a number or an epoch (as a number or a string of digits), any other text, an out-of-range component, a
+  lowercase `t` or `z`, an hour-only offset, and a UTC instant outside the years 2000 to 2100. A start that is refused
+  is `invalid_start_date`, an end that is refused `invalid_end_date` (the start is reported when both fail). An end not
+  after the start is `invalid_window`; an end already passed is `ended`; both are judged on the UTC instants. Missing
+  or empty is open. The transaction report parser keeps the strict rule (`parse_utc_timestamp`: `T`, no offset), see
+  [backend-network-reports.md](backend-network-reports.md).
 - **URLs:** `url` (optional) and `urlTracking` (required) go through `validate_https_url`. `urlTracking` must also be on
   an Awin host via `affiliate_hosts` (`awin1.com` and subdomains; `awin1.com.evil.example`, `evilawin1.com`, other
   networks' hosts and user-info or port tricks are refused). `url` must not be on any network's tracking host.
@@ -306,9 +314,14 @@ Awin's page does not document these. Each is handled defensively; the **first dr
    stops early silently, which only an item count against Awin's UI would show.
 3. **`page` is 1-based** and `pageSize` can be any value 10 to 200 (the documented range).
 4. **Item shapes and types.** `promotionId` and `advertiser.id` are integers, `advertiser.joined` a boolean,
-   `regions.list[].countryCode` upper-case, dates exactly `YYYY-MM-DDTHH:MM:SS.fff` (an optional `Z` is tolerated). An item
-   that differs is skipped with a reason code, so a wrong assumption shows as a skip count (for example everything
-   `invalid_date` or `invalid_id`).
+   `regions.list[].countryCode` upper-case, dates an ISO 8601 instant (Awin documents `YYYY-MM-DDT00:00:00.000`, UTC; the
+   parser also takes a space for the `T`, a `Z` and an explicit offset, see Dates above). An item that differs is
+   skipped with a reason code, so a wrong assumption shows as a skip count (for example everything
+   `invalid_start_date`, `invalid_end_date` or `invalid_id`). *The first real dry run that read joined programmes (`membership=joined`,
+   GB) fetched 10 promotions and skipped all 10 as `invalid_date` (the single code the importer used then), so the real
+   date shape is not the documented one and was not known. FREEJ-66 widened the parser and made `--show-shape` print the
+   outline of `startDate` and `endDate` so the next run shows the shape; until a real run reads valid items, the date
+   format is still unverified.*
 5. **`endDate` semantics.** Read as the instant given in UTC. If Awin means "through the end of that day", a promotion
    on its last day is skipped as `ended` (a midnight end date has already passed), and an imported offer is treated as
    ending up to a day early (the expiry job would expire a published one early). Check one real promotion.
@@ -361,7 +374,16 @@ as possible from data it does not control, and this is exactly what it can print
   (the importer refuses all three);
 - the outcome of the importer's own tracking-link check, **as if the programme were joined**, per reason code
   (`accepted`, `tracking_host_not_allowed`, `tracking_shape_unrecognised`, ...). Items of programmes you have not joined
-  are skipped as `not_joined` before that check, so the skip counts alone cannot show these.
+  are skipped as `not_joined` before that check, so the skip counts alone cannot show these;
+- the **date outlines** (FREEJ-66) of `startDate` and `endDate`, each a sorted set of `outline xCOUNT` pairs on the
+  lines `startDate outlines` and `endDate outlines`. An outline replaces every digit with `9` and keeps another
+  character only if it is in the label set below (anything else, a space or a `+` included, becomes `?`):
+  `2026-11-01T00:00:00.000` prints as `9999-99-99T99:99:99.999`, `2026-11-01 00:00:00` as `9999-99-99?99:99:99`
+  and an offset `+01:00` as `?99:99`. A value that is not a string prints as `<null>`, `<int>`, `<float>`, `<bool>`,
+  `<object>` or `<array>`, a key that is absent as `<missing>` and an empty string as `<empty>`. The value itself is
+  never printed, and a string cannot forge one of these markers (`<` and `>` become `?`). Letters stay (they show the
+  `T` and the `Z`), so a date field that held prose would print its letters, cut to 60 characters. The sets use
+  the same caps as the others (40 shown, `(+N more)`; 1000 tracked, `(+N or more)`).
 
 It never prints the token, the publisher id, a query value, a fragment, user info, a port, a voucher code, a title, a
 description, terms or a full URL. Every label is made of `A-Z a-z 0-9 . _ - / [ ] % :` (and `#` from the mask), so a
@@ -400,13 +422,16 @@ collector and pure helpers) and `commands/awin_shape_print.py` (formatting).
      the importer would refuse before any shape check (6 and 11), and `importer check, as if joined` runs the
      importer's own tracking-link check on every item and counts the reason codes, which the skip counts cannot show
      while the items are `not_joined`: `accepted` for all of them would support 6 and 11 for these links;
-   - `url hosts` check 7 (a merchant host, not a tracking host).
+   - `url hosts` check 7 (a merchant host, not a tracking host);
+   - `startDate outlines` and `endDate outlines` check the date shape in 4: `9999-99-99T99:99:99.999` is the documented
+     shape; any other outline is what Awin really sends, and tells whether the parser (Dates above) already accepts it
+     or needs another shape. `<null>` and `<missing>` are open-ended dates, not failures.
 
-   Values are not shown, so 4's date and id formats, 5, 9 and 10 stay unverified until a joined programme returns items,
-   and the dry-run skip counts (`invalid_date`, `invalid_id`, `ended`) are what check them. Items of programmes you have not joined should
+   Values are not shown, so 4's id format, 5, 9 and 10 stay unverified until a joined programme returns items,
+   and the dry-run skip counts (`invalid_start_date`, `invalid_end_date`, `invalid_id`, `ended`) are what check them. Items of programmes you have not joined should
    be skipped as `not_joined`, so expect `0 valid`.
 4. With joined programmes, read the counts. Exit 0 with mostly `valid` means 1, 3 and 4 held. `unrecognised_response` breaks 1;
-   `invalid_date` or `invalid_id` breaks 4; `tracking_host_not_allowed` breaks 6; `tracking_shape_unrecognised`,
+   `invalid_start_date`, `invalid_end_date` or `invalid_id` breaks 4 (the date outlines from `--show-shape` show which shape); `tracking_host_not_allowed` breaks 6; `tracking_shape_unrecognised`,
    `tracking_owner_mismatch` or `tracking_destination_mismatch` in numbers break 11 (or the publisher id is wrong);
    `auth_failed` is the token or publisher id.
 5. Only then run it without `--dry-run` against a database you own, then open the admin offers list: the drafts are in

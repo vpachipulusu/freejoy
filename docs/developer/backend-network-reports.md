@@ -124,7 +124,8 @@ The lock is per chunk, not per run: see [known limits](#known-limits).
 - **Ids** (`id`, `advertiserId`): positive integers, not strings or booleans.
 - **Date** (`transactionDate`): `YYYY-MM-DDTHH:MM:SS[.fraction][Z]` read as UTC (the request asks for `timezone=UTC`),
   years 2000 to 2100; an offset, a date alone or a number is `invalid_date`. The timestamp rule is the offers
-  importer's (`parse_utc_timestamp`).
+  importer's strict form (`parse_utc_timestamp`); the offers importer's own dates accept more (FREEJ-66,
+  `parse_instant`, see [backend-awin-import.md](backend-awin-import.md)), this parser does not.
 - **Status** (`commissionStatus`): 1 to 32 characters of `[A-Za-z0-9 _-]`, else `invalid_status`; then, case-insensitively,
   one of `pending`, `approved`, `declined`, `paid` or `deleted` (Awin's documented filter values plus `paid`), stored
   one to one, else `unknown_status`. The value as written is kept in `commission_status_raw`. A transaction that
