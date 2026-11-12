@@ -367,8 +367,8 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
 - An outage answers HTTP 200 (error state, normal robots) for as long as it lasts; a 5xx is a follow-up.
 - The offer page has no route-level loading skeleton: a `loading.tsx` there would turn every unknown offer into
   a 200 soft 404. The skeleton (with the spinner) lives in `components/site/route-skeleton.tsx` and is re-exported by the
-  admin, auth, dashboard and pricing segments and the public pages that cannot 404; the offer page, `/freebies` and
-  the home page rely on the global navigation indicator ([loading-states.md](loading-states.md)).
+  admin, auth, dashboard and pricing segments and the public pages that cannot 404; the offer page, `/category/[slug]`,
+  `/freebies` and the home page rely on the global navigation indicator ([loading-states.md](loading-states.md)).
 
 ## Error monitoring and addresses (FREEJ-31)
 

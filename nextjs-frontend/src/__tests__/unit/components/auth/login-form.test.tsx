@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 import { findIdleControl } from '@/__tests__/unit/helpers/idle';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
@@ -243,6 +244,7 @@ describe('LoginForm', () => {
   });
 
   it('redirects to the dashboard on success', async () => {
+    const announced = recordNavigationAnnouncements();
     const user = setupUser();
     mocks.signInWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({ success: true });
@@ -251,6 +253,7 @@ describe('LoginForm', () => {
     await fillAndSubmit(user);
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/dashboard'));
+    expect(announced.hrefs).toEqual(['/dashboard']);
   });
 
   it('hands the ID token to the two-factor step when the account needs a code', async () => {

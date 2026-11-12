@@ -12,9 +12,13 @@ const NON_PAGE_PATH_PREFIX = '/api/';
 
 type CurrentLocation = Pick<Location, 'href' | 'origin' | 'pathname' | 'search'>;
 
-/** Path plus query: the part of the URL that identifies a page (a hash never loads one). */
+/**
+ * Path plus query: the part of the URL that identifies a page (a hash never loads one). The query goes through
+ * URLSearchParams so `?q=a%20b` (the address bar) and `q=a+b` (`useSearchParams().toString()`) are the same key.
+ */
 export function routeKeyOf(pathname: string, search: string): string {
-  return `${pathname}${search}`;
+  const query = new URLSearchParams(search).toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 /**
@@ -80,6 +84,17 @@ export function resolveFormDestination(event: Event, current: CurrentLocation): 
   }
   url.search = query.toString();
   return internalDestination(url.href, current);
+}
+
+/**
+ * For the `onSubmit` of a `next/form` `<Form>` (see announcing-form.tsx): it always calls `preventDefault` and then
+ * `router.push`, so the document-level submit listener cannot tell it from a form that script handles. The
+ * destination comes from the native submit event, the same way as for a native GET form.
+ */
+export function announceFormNavigation(event: { nativeEvent: Event }): void {
+  if (typeof window === 'undefined') return;
+  const destination = resolveFormDestination(event.nativeEvent, window.location);
+  if (destination) announceNavigation(destination.href);
 }
 
 /**

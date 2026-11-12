@@ -12,6 +12,8 @@ import { STORAGE_STATE, clickNavLink, waitForPageReady } from './helpers/e2e-uti
  */
 
 const INDICATOR = 'navigation-progress';
+const SPINNER = 'navigation-progress-spinner';
+const STATUS = 'navigation-progress-status';
 const RELEASE_FALLBACK_MS = 20_000;
 
 /** Holds the next navigation answers for `url` until `release()` is called (or a fallback timer, so a failed test cannot hang). */
@@ -38,6 +40,9 @@ async function holdNavigation(page: Page, url: RegExp, options: { documents: boo
 }
 
 test.describe('Page loading indicator', () => {
+  // The header navigation and the admin sidebar are hidden on the mobile projects.
+  test.skip(({ isMobile }) => isMobile, 'Desktop navigation only');
+
   test.describe('Public pages', () => {
     test('shows while a public page loads and goes away when it has rendered', async ({ page }) => {
       await page.goto('/');
@@ -53,9 +58,12 @@ test.describe('Page loading indicator', () => {
         page.locator('header').getByRole('link', { name: 'All freebies' }).first()
       );
 
-      // the server has not answered yet: still on the home page, with the indicator and its spinner
+      // the server has not answered yet: still on the home page, with the bar, the spinner and one
+      // screen-reader status that says "Loading"
       await expect(indicator).toBeVisible();
-      await expect(page.getByRole('status', { name: 'Loading' }).first()).toBeAttached();
+      await expect(page.getByTestId(SPINNER)).toBeVisible();
+      await expect(page.getByTestId(STATUS)).toHaveCount(1);
+      await expect(page.getByTestId(STATUS)).toHaveText('Loading');
       await expect(page).toHaveURL(/\/$/);
 
       release();
@@ -87,8 +95,10 @@ test.describe('Page loading indicator', () => {
       const indicator = page.getByTestId(INDICATOR);
       await expect(indicator).toBeVisible();
 
-      await expect(indicator).toHaveCSS('pointer-events', 'none');
-      await expect(indicator).toHaveCSS('position', 'fixed');
+      for (const element of [indicator, page.getByTestId(SPINNER)]) {
+        await expect(element).toHaveCSS('pointer-events', 'none');
+        await expect(element).toHaveCSS('position', 'fixed');
+      }
       expect(await link.boundingBox()).toEqual(before);
 
       release();

@@ -12,7 +12,7 @@ export type SpinnerSize = keyof typeof SIZE_CLASSES;
 
 type SpinnerProps = Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> & {
   size?: SpinnerSize;
-  /** Accessible name and screen-reader text. */
+  /** Screen-reader text (a `status` region is named by what it says, not by an aria-label). */
   label?: string;
   /**
    * Draws the ring only: no role, no name, hidden from assistive technology. Use it inside a container
@@ -22,9 +22,10 @@ type SpinnerProps = Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> & {
 };
 
 /**
- * Loading spinner: a ring with a gap, drawn in `currentColor` (the theme's `--accent-ink`, readable on both
- * the light and the dark surfaces). It spins only under `motion-safe`; with reduced motion it stays a static
- * ring, still visible. The size comes from the `size` prop and never changes while it is shown.
+ * Loading spinner: a `role="status"` region (implicitly polite) whose sr-only text is announced, around a ring
+ * with a gap drawn in `currentColor` (the theme's `--accent-ink`, readable on both the light and the dark
+ * surfaces). It spins only under `motion-safe`; with reduced motion it stays a static ring, still visible.
+ * The size comes from the `size` prop and never changes while it is shown.
  */
 function Spinner({
   size = 'md',
@@ -55,7 +56,7 @@ function Spinner({
   }
 
   return (
-    <span role="status" aria-live="polite" aria-label={label} className={classes} {...props}>
+    <span role="status" className={classes} {...props}>
       {ring}
       <span className="sr-only">{label}</span>
     </span>

@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 vi.mock('@/config/site', () => ({ siteConfig: { name: 'Acme Shop' } }));
 import { getFirebaseErrorMessage } from '@/lib/utils/firebase-errors';
 
@@ -88,14 +89,17 @@ describe('SignupForm', () => {
       error: 'Sign-in service unavailable',
       data: { serviceUnavailable: true },
     });
+    const announced = recordNavigationAnnouncements();
     render(<SignupForm />);
 
     await fill(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/sign-in is unavailable right now/i);
+    expect(announced.hrefs).toEqual([]);
   });
 
   it('goes to verify-email on success', async () => {
+    const announced = recordNavigationAnnouncements();
     const user = setupUser();
     mocks.signUpWithEmail.mockResolvedValue({ user: {}, idToken: 't', error: null });
     mocks.verifyTokenAction.mockResolvedValue({ success: true });
@@ -104,5 +108,6 @@ describe('SignupForm', () => {
     await fill(user);
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/verify-email'));
+    expect(announced.hrefs).toEqual(['/verify-email']);
   });
 });

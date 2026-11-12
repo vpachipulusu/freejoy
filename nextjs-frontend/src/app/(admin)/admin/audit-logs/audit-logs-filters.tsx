@@ -1,4 +1,4 @@
-import Form from 'next/form';
+import { AnnouncingForm as Form } from '@/components/site/announcing-form';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

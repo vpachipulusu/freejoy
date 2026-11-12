@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 
 /**
  * the password change re-authenticates with the CURRENT password, forwards that fresh ID token and the
@@ -121,11 +122,13 @@ describe('SecurityPage password change', () => {
   });
 
   it('signs out and sends the user to /login when the new session cannot be restored', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.restoreSessionWithNewPassword.mockResolvedValue(false);
 
     await submitPasswordChange();
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/login'));
+    expect(announced.hrefs).toEqual(['/login']);
     expect(mocks.signOut).toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({ description: 'Please sign in again with your new password.' })

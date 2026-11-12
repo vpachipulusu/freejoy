@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Clock, Loader2 } from 'lucide-react';
@@ -39,10 +40,12 @@ export function SubscriptionSuccessHandler() {
         } else {
           // Invalid or fake session - remove query param immediately
           console.warn('Invalid checkout session:', result.data?.reason);
+          announceNavigation('/dashboard');
           router.replace('/dashboard');
         }
       } catch (error) {
         console.error('Error verifying checkout session:', error);
+        announceNavigation('/dashboard');
         router.replace('/dashboard');
       } finally {
         setIsVerifying(false);
@@ -123,6 +126,7 @@ export function SubscriptionSuccessHandler() {
     if (!subscriptionUpdated) return;
 
     const redirect = setTimeout(() => {
+      announceNavigation('/dashboard');
       router.replace('/dashboard');
       router.refresh();
     }, ACTIVATED_REDIRECT_MS);
@@ -149,7 +153,10 @@ export function SubscriptionSuccessHandler() {
               variant="outline"
               size="sm"
               className="mt-3"
-              onClick={() => router.replace('/dashboard')}
+              onClick={() => {
+                announceNavigation('/dashboard');
+                router.replace('/dashboard');
+              }}
             >
               Dismiss
             </Button>

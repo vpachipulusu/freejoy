@@ -5,19 +5,26 @@ import { Spinner } from '@/components/ui/spinner';
 /** the shared spinner is announced once, uses theme tokens and stops spinning under reduced motion. */
 
 describe('Spinner', () => {
-  it('is a polite status region named "Loading"', () => {
+  it('is a status region (implicitly polite) that says "Loading" in sr-only text', () => {
     render(<Spinner />);
 
-    const status = screen.getByRole('status', { name: 'Loading' });
-    expect(status).toHaveAttribute('aria-live', 'polite');
+    const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Loading');
     expect(screen.getByText('Loading')).toHaveClass('sr-only');
   });
 
-  it('takes another accessible name', () => {
+  it('has no aria-label or aria-live of its own, so the text is announced once', () => {
+    render(<Spinner />);
+
+    const status = screen.getByRole('status');
+    expect(status).not.toHaveAttribute('aria-label');
+    expect(status).not.toHaveAttribute('aria-live');
+  });
+
+  it('takes other screen-reader text', () => {
     render(<Spinner label="Saving offer" />);
 
-    expect(screen.getByRole('status', { name: 'Saving offer' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Saving offer');
   });
 
   it('spins only under motion-safe and is static under reduced motion', () => {
