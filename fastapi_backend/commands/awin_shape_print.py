@@ -14,7 +14,12 @@ from app.core.awin_client import (
     PromotionsPage,
     TransactionsPage,
 )
-from app.services.awin_shape_report import NameList, ShapeCollector, ShapeReport
+from app.services.awin_shape_report import (
+    NameList,
+    OutlineCounts,
+    ShapeCollector,
+    ShapeReport,
+)
 
 PROG = "import-awin-offers"
 
@@ -67,6 +72,19 @@ def _names_text(names: NameList) -> str:
     )
 
 
+def _outlines_text(outlines: OutlineCounts) -> str:
+    if not outlines.entries:
+        return "(none)"
+    text = ", ".join(f"{outline} x{count}" for outline, count in outlines.entries)
+    if not outlines.more:
+        return text
+    return (
+        f"{text} (+{outlines.more} or more)"
+        if outlines.capped
+        else f"{text} (+{outlines.more} more)"
+    )
+
+
 def _name_facts(label: str, names: NameList) -> list[tuple[str, str]]:
     facts = [(label, _names_text(names))]
     if names.other:
@@ -114,6 +132,10 @@ def _facts(report: ShapeReport) -> list[tuple[str, str]]:
         ("urlTracking schemes", report.tracking_schemes),
     ):
         facts += _name_facts(label, names)
+    date_facts = [
+        ("startDate outlines", _outlines_text(report.start_date_outlines)),
+        ("endDate outlines", _outlines_text(report.end_date_outlines)),
+    ]
     joined = (
         f"true {report.joined_true}, false {report.joined_false}, "
         f"missing or not a boolean {report.joined_other}"
@@ -135,6 +157,7 @@ def _facts(report: ShapeReport) -> list[tuple[str, str]]:
         ("urlTracking importer check, as if joined", _outcomes_text(report)),
         *_name_facts("url hosts", report.url_hosts),
         ("url missing, too long or without a valid host", str(report.url_unreadable)),
+        *date_facts,
         ("advertiser.joined", joined),
     ]
     return facts
