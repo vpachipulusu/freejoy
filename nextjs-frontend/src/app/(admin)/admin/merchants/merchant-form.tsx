@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createMerchantAction, updateMerchantAction } from '@/app/actions/admin/merchant-actions';
@@ -56,6 +57,7 @@ export function MerchantForm({ mode, merchantId, initialValues }: MerchantFormPr
     }
     if (mode === 'create') {
       toast({ title: 'Merchant created', description: values.name });
+      announceNavigation('/admin/merchants');
       router.push('/admin/merchants');
       return;
     }

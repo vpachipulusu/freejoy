@@ -449,6 +449,27 @@
   animation: slide-in-from-right 0.3s ease-out;
 }
 
+/* Global navigation indicator (src/components/site/navigation-progress.tsx). The fade-in delay keeps a navigation
+   that finishes at once (a prefetched page) from flashing the bar. Under reduced motion the bar is simply drawn
+   at its end width (the reduced-motion block below sets the animation duration to 0.01ms). */
+.nav-progress-fade {
+  animation: fade-in 150ms ease-out 100ms both;
+}
+
+.nav-progress-bar {
+  transform-origin: left center;
+  animation: nav-progress-grow 8s cubic-bezier(0.1, 0.6, 0.3, 1) forwards;
+}
+
+@keyframes nav-progress-grow {
+  from {
+    transform: scaleX(0.04);
+  }
+  to {
+    transform: scaleX(0.85);
+  }
+}
+
 /* Reduced motion: no reveal, shimmer or transitions; content stays visible */
 @media (prefers-reduced-motion: reduce) {
   html {
