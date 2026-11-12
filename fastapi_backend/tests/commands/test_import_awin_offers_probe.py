@@ -331,6 +331,51 @@ def test_show_shape_prints_the_report_after_the_counts(
     assert "advertiser.joined: true 2, false 0, missing or not a boolean 0" in shape
 
 
+def test_show_shape_prints_the_date_outlines_and_never_a_date(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    items = [
+        raw_item(1, startDate="2026-11-01T00:00:00.000", endDate="2026-12-05"),
+        raw_item(2, startDate="2026-11-02 08:30:00+01:00", endDate=None),
+        {k: v for k, v in raw_item(3).items() if k != "endDate"},
+    ]
+
+    run(["--dry-run", "--show-shape"], FakeAwinClient([items]))
+
+    out = capsys.readouterr().out
+    assert (
+        f"{SHAPE}: startDate outlines: 9999-99-99?99:99:99?99:99 x1, "
+        "9999-99-99T99:99:99.999 x2"
+    ) in out
+    assert f"{SHAPE}: endDate outlines: 9999-99-99 x1, <missing> x1, <null> x1" in out
+    assert "2026" not in out.split(SHAPE, 1)[1]
+
+
+def test_show_shape_prints_none_for_the_date_outlines_when_there_are_no_items(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run(["--dry-run", "--show-shape"], FakeAwinClient([[]]))
+
+    out = capsys.readouterr().out
+    assert f"{SHAPE}: startDate outlines: (none)" in out
+    assert f"{SHAPE}: endDate outlines: (none)" in out
+
+
+def test_show_shape_says_how_many_more_date_outlines_there_were(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    items = [raw_item(n, startDate="x" * n) for n in range(1, 50)]
+
+    run(["--dry-run", "--show-shape"], FakeAwinClient([items]))
+
+    line = next(
+        x
+        for x in capsys.readouterr().out.splitlines()
+        if "shape: startDate outlines:" in x
+    )
+    assert line.endswith("(+9 more)")
+
+
 def test_show_shape_on_a_bare_list_says_so(capsys: pytest.CaptureFixture[str]) -> None:
     run(["--dry-run", "--show-shape"], FakeAwinClient([[raw_item(1)]]))
 

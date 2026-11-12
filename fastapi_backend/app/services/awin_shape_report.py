@@ -21,6 +21,14 @@ print, exactly:
   and any run of five or more digits is masked as ``#`` before the length cut. A host can still name a
   merchant or a network: that is the point of printing it.
 * **Schemes** of ``urlTracking``, through the name rule above.
+* **Date outlines** (FREEJ-66) of ``startDate`` and ``endDate``, each with a count: every digit becomes
+  ``9``, every other character is kept only if it is in the label set below (else ``?``), the result is cut
+  to ``MAX_NAME_LENGTH``. ``2026-11-01T00:00:00.000`` prints as ``9999-99-99T99:99:99.999``. A value that is
+  not a string prints as ``<null>``, ``<int>``, ``<float>``, ``<bool>``, ``<object>`` or ``<array>``, an
+  absent key as ``<missing>``, an empty string as ``<empty>`` (``<`` and ``>`` cannot come from a value, so
+  none of these can be forged). The letters of a string stay (a ``T``, a ``Z``, a month name), so a date
+  field that holds prose would print its letters: that is the residual risk of an outline, bounded by the
+  length cut and the ``MAX_ENTRIES`` limit.
 
 Never printed: a query value, a fragment, user info, a port, a voucher code, a title, a description, terms, a
 full URL, the publisher id or the token. Every label is built from the characters ``A-Z a-z 0-9 . _ - / [ ]
@@ -61,6 +69,17 @@ _LONG_DIGITS = re.compile(r"[0-9]{5,}")
 _OUTLINE = re.compile(r"([A-Za-z]+)|([0-9]+)|(.)", re.DOTALL)
 _OUTLINE_KEPT = frozenset("/.-_")
 _ALLOWED = frozenset(string.ascii_letters + string.digits + "._-/[]%:")
+_DIGIT = re.compile(r"[0-9]")
+DATE_KEYS = ("startDate", "endDate")
+MISSING, EMPTY = "<missing>", "<empty>"
+_JSON_KINDS: tuple[tuple[type, str], ...] = (
+    (bool, "<bool>"),  # before int: a bool is an int in Python
+    (int, "<int>"),
+    (float, "<float>"),
+    (dict, "<object>"),
+    (list, "<array>"),
+)
+OTHER_KIND = "<other>"
 
 
 @dataclass(frozen=True)
@@ -71,6 +90,15 @@ class NameList:
     more: int = 0
     other: int = 0  # distinct names that failed the name rule: counted, never printed
     capped: bool = False  # the tracked set hit ``NAME_CAP``: ``more`` and ``other`` are lower bounds
+
+
+@dataclass(frozen=True)
+class OutlineCounts:
+    """Up to ``MAX_ENTRIES`` (outline, count) pairs sorted by outline, and how many outlines were left out."""
+
+    entries: tuple[tuple[str, int], ...] = ()
+    more: int = 0
+    capped: bool = False  # the tracked set hit ``NAME_CAP``: ``more`` is a lower bound and counts may be short
 
 
 @dataclass(frozen=True)
@@ -103,6 +131,8 @@ class ShapeReport:
     ]  # importer reason code (or accepted) and count
     url_hosts: NameList
     url_unreadable: int
+    start_date_outlines: OutlineCounts
+    end_date_outlines: OutlineCounts
     joined_true: int
     joined_false: int
     joined_other: int  # advertiser.joined missing or not a boolean
@@ -139,6 +169,22 @@ def _outline(path: str) -> str:
         return match[3] if match[3] in _OUTLINE_KEPT else REPLACEMENT
 
     return _cut(_OUTLINE.sub(collapse, path))
+
+
+def date_outline(value: object) -> str:
+    """What a date field looks like, never what it says: digits as ``9``, see the module docstring.
+
+    The string is cut to one character past the limit before anything is read, so a huge one stays cheap.
+    """
+    if value == "":
+        return EMPTY
+    if value is None:
+        return "<null>"
+    if isinstance(value, str):
+        return sanitise_name(_DIGIT.sub("9", value[: MAX_NAME_LENGTH + 1]))
+    return next(
+        (label for kind, label in _JSON_KINDS if isinstance(value, kind)), OTHER_KIND
+    )
 
 
 def _path_label(path: str) -> str:
@@ -182,6 +228,28 @@ class _Names:
             tuple(ordered[:MAX_ENTRIES]),
             max(0, len(ordered) - MAX_ENTRIES),
             len(self._other),
+            self._capped,
+        )
+
+
+class _Outlines:
+    """A bounded count of outlines: at most ``NAME_CAP`` distinct ones are tracked."""
+
+    def __init__(self) -> None:
+        self._counts: Counter[str] = Counter()
+        self._capped = False
+
+    def add(self, outline: str) -> None:
+        if outline not in self._counts and len(self._counts) >= NAME_CAP:
+            self._capped = True
+            return
+        self._counts[outline] += 1
+
+    def result(self) -> OutlineCounts:
+        ordered = sorted(self._counts.items())
+        return OutlineCounts(
+            tuple(ordered[:MAX_ENTRIES]),
+            max(0, len(ordered) - MAX_ENTRIES),
             self._capped,
         )
 
@@ -241,6 +309,7 @@ class ShapeCollector:
         self._tracking_hosts, self._tracking_paths = _Names(), _Names()
         self._tracking_params, self._tracking_schemes = _Names(), _Names()
         self._url_hosts = _Names()
+        self._date_outlines = {key: _Outlines() for key in DATE_KEYS}
         self._outcomes: Counter[str] = Counter()
         self._joined: dict[bool | None, int] = {True: 0, False: 0, None: 0}
         self._counts: Counter[str] = Counter()
@@ -277,6 +346,8 @@ class ShapeCollector:
         self._joined[joined if isinstance(joined, bool) else None] += 1
         self._add_tracking(item)
         self._add_url(item.get("url"))
+        for key, outlines in self._date_outlines.items():
+            outlines.add(date_outline(item[key]) if key in item else MISSING)
 
     def _host(self, link: _Link) -> str | None:
         return None if link.host is None else _host_label(link.host, self._publisher_id)
@@ -334,6 +405,8 @@ class ShapeCollector:
             tracking_outcomes=tuple(sorted(self._outcomes.items())),
             url_hosts=self._url_hosts.result(),
             url_unreadable=counts["url_unreadable"],
+            start_date_outlines=self._date_outlines["startDate"].result(),
+            end_date_outlines=self._date_outlines["endDate"].result(),
             joined_true=self._joined[True],
             joined_false=self._joined[False],
             joined_other=self._joined[None],

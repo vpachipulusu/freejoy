@@ -15,7 +15,9 @@ from app.services.awin_promotions import (
     Promotion,
     Rejected,
     SkipReason,
+    parse_instant,
     parse_promotion,
+    parse_utc_timestamp,
     source_hash,
 )
 
@@ -113,19 +115,179 @@ def test_dates_without_a_value_are_open_ended() -> None:
     assert promotion.start_at is None and promotion.end_at is None
 
 
+def utc(
+    year: int,
+    month: int,
+    day: int,
+    hour: int = 0,
+    minute: int = 0,
+    second: int = 0,
+    micro: int = 0,
+) -> datetime:
+    return datetime(year, month, day, hour, minute, second, micro, tzinfo=UTC)
+
+
+ACCEPTED_SHAPES = [
+    ("2026-12-01T00:00:00.000", utc(2026, 12, 1)),
+    ("2026-12-01T23:59:59", utc(2026, 12, 1, 23, 59, 59)),
+    ("2026-12-01T23:59:59.5Z", utc(2026, 12, 1, 23, 59, 59, micro=500000)),
+    ("2026-12-01T23:59:59Z", utc(2026, 12, 1, 23, 59, 59)),
+    ("2026-12-01 23:59:59", utc(2026, 12, 1, 23, 59, 59)),
+    ("2026-12-01 23:59:59.250", utc(2026, 12, 1, 23, 59, 59, micro=250000)),
+    ("2026-12-01 23:59:59Z", utc(2026, 12, 1, 23, 59, 59)),
+    ("2026-12-01T23:59:59.123456Z", utc(2026, 12, 1, 23, 59, 59, micro=123456)),
+    ("2026-12-01T23:59:59.1234567", utc(2026, 12, 1, 23, 59, 59, micro=123456)),
+    (
+        "2026-12-01T23:59:59.123456789Z",
+        utc(2026, 12, 1, 23, 59, 59, micro=123456),
+    ),
+    ("2026-12-01T10:00:00+00:00", utc(2026, 12, 1, 10)),
+    ("2026-12-01T10:00:00-00:00", utc(2026, 12, 1, 10)),
+    ("2026-12-01T10:00:00+02:00", utc(2026, 12, 1, 8)),
+    ("2026-12-01T10:00:00+0200", utc(2026, 12, 1, 8)),
+    ("2026-12-01T10:00:00-05:00", utc(2026, 12, 1, 15)),
+    ("2026-12-01T10:00:00-0530", utc(2026, 12, 1, 15, 30)),
+    ("2026-12-01 10:00:00+05:45", utc(2026, 12, 1, 4, 15)),
+    ("2026-12-01T10:00:00.5+02:00", utc(2026, 12, 1, 8, micro=500000)),
+    ("2026-12-01T00:30:00+01:00", utc(2026, 11, 30, 23, 30)),
+    ("2026-12-31T23:30:00-01:00", utc(2027, 1, 1, 0, 30)),
+]
+
+
+@pytest.mark.parametrize(("raw", "expected"), ACCEPTED_SHAPES)
+def test_an_unambiguous_instant_is_read_as_utc(raw: str, expected: datetime) -> None:
+    assert parsed(endDate=raw).end_at == expected
+    assert parsed(startDate=raw, endDate=None).start_at == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), ACCEPTED_SHAPES)
+def test_parse_instant_gives_the_same_instant_with_a_utc_zone(
+    raw: str, expected: datetime
+) -> None:
+    result = parse_instant(raw)
+
+    assert result == expected and result is not None and result.tzinfo is UTC
+
+
+REFUSED_SHAPES: list[Any] = [
+    "2026-12-01",
+    "2026-12-01T10:00",
+    "2026-12-01 10:00",
+    "2026-12-01T10",
+    "20261201T100000Z",
+    "11/01/2026",
+    "01-12-2026 10:00:00",
+    "1796119200",
+    "1796119200000",
+    1796119200,
+    1796119200.5,
+    True,
+    [],
+    {},
+    "tomorrow",
+    "x" * 100,
+    "2026-12-01T10:00:00z",
+    "2026-12-01t10:00:00",
+    "2026-12-01T10:00:00 UTC",
+    "2026-12-01T10:00:00 +02:00",
+    "2026-12-01  10:00:00",
+    "2026-12-01" + chr(9) + "10:00:00",
+    "2026-12-01T10:00:00+02",
+    "2026-12-01T10:00:00+2:00",
+    "2026-12-01T10:00:00+02:0",
+    "2026-12-01T10:00:00+02:00:00",
+    "2026-12-01T10:00:00+02:00Z",
+    "2026-12-01T10:00:00.",
+    "2026-12-01T10:00:00.Z",
+    "2026-12-01T10:00:00.1234567890",
+    "2026-12-01T10:00:00" + chr(10),
+    " 2026-12-01T10:00:00",
+    chr(0xFF12) + "026-12-01T10:00:00",  # a full-width digit
+    "2026-13-01T10:00:00",
+    "2026-00-01T10:00:00",
+    "2026-02-30T10:00:00",
+    "2026-12-32T10:00:00",
+    "2026-12-01T24:00:00",
+    "2026-12-01T10:60:00",
+    "2026-12-01T10:00:60",
+    "2026-12-01T10:00:00+24:00",
+    "2026-12-01T10:00:00+01:60",
+    "2026-12-01T10:00:00-99:99",
+    "1999-12-31T23:59:59",
+    "2101-01-01T00:00:00",
+    "2000-01-01T00:00:00+01:00",
+    "2100-12-31T23:59:59-01:00",
+]
+
+
+@pytest.mark.parametrize("value", REFUSED_SHAPES)
+def test_parse_instant_refuses_everything_that_is_not_an_unambiguous_instant(
+    value: Any,
+) -> None:
+    assert parse_instant(value) is None
+
+
+def test_the_years_2000_and_2100_are_the_inclusive_limits() -> None:
+    assert parse_instant("2000-01-01T00:00:00") == utc(2000, 1, 1)
+    assert parse_instant("2100-12-31T23:59:59") == utc(2100, 12, 31, 23, 59, 59)
+
+
+@pytest.mark.parametrize("value", REFUSED_SHAPES)
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    ("field", "reason"),
     [
-        ("2026-12-01T00:00:00.000", datetime(2026, 12, 1, tzinfo=UTC)),
-        ("2026-12-01T23:59:59", datetime(2026, 12, 1, 23, 59, 59, tzinfo=UTC)),
-        (
-            "2026-12-01T23:59:59.5Z",
-            datetime(2026, 12, 1, 23, 59, 59, 500000, tzinfo=UTC),
-        ),
+        ("startDate", SkipReason.INVALID_START_DATE),
+        ("endDate", SkipReason.INVALID_END_DATE),
     ],
 )
-def test_dates_are_read_strictly_as_utc(raw: str, expected: datetime) -> None:
-    assert parsed(endDate=raw).end_at == expected
+def test_a_date_that_is_not_an_unambiguous_instant_names_the_field_that_failed(
+    field: str, reason: SkipReason, value: Any
+) -> None:
+    assert rejected(make_item(**{field: value})) is reason
+
+
+def test_the_start_is_reported_when_both_dates_are_bad() -> None:
+    item = make_item(startDate="2026-11-01", endDate="2026-12-01")
+
+    assert rejected(item) is SkipReason.INVALID_START_DATE
+
+
+def test_a_bad_end_is_reported_as_the_end_when_the_start_is_good() -> None:
+    item = make_item(startDate="2026-11-01T00:00:00.000", endDate="soon")
+
+    assert rejected(item) is SkipReason.INVALID_END_DATE
+
+
+def test_the_one_invalid_date_reason_no_longer_exists() -> None:
+    assert "invalid_date" not in {reason.value for reason in SkipReason}
+
+
+def test_the_window_is_judged_after_offsets_are_converted_to_utc() -> None:
+    item = make_item(
+        startDate="2026-12-01T10:00:00+02:00", endDate="2026-12-01T08:00:00Z"
+    )
+
+    assert rejected(item) is SkipReason.INVALID_WINDOW
+
+
+def test_a_promotion_ending_by_an_offset_instant_is_judged_as_ended_in_utc() -> None:
+    item = make_item(startDate=None, endDate="2026-11-09T14:00:00+02:00")
+
+    assert rejected(item) is SkipReason.ENDED
+
+
+def test_parse_utc_timestamp_stays_strict_for_the_transaction_reports() -> None:
+    assert parse_utc_timestamp("2026-11-03T10:15:00.123Z") == utc(
+        2026, 11, 3, 10, 15, micro=123000
+    )
+    for value in (
+        "2026-11-03 10:15:00",
+        "2026-11-03T10:15:00+01:00",
+        "2026-11-03T10:15:00-0100",
+        "2026-11-03",
+        1762164900,
+    ):
+        assert parse_utc_timestamp(value) is None
 
 
 def test_a_missing_url_leaves_no_source_url() -> None:
@@ -230,29 +392,6 @@ def test_an_advertiser_the_publisher_has_not_joined_is_skipped() -> None:
 def test_a_title_must_survive_cleaning(title: Any) -> None:
     assert rejected(make_item(title=title)) is SkipReason.INVALID_TITLE
     assert rejected(without("title")) is SkipReason.INVALID_TITLE
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "2026-11-01",
-        "11/01/2026",
-        "2026-13-01T00:00:00.000",
-        "2026-02-30T00:00:00.000",
-        "2026-11-01T00:00:00+02:00",
-        "2026-11-01 00:00:00",
-        "1999-01-01T00:00:00.000",
-        "2101-01-01T00:00:00.000",
-        20261101,
-        True,
-        "x" * 100,
-    ],
-)
-@pytest.mark.parametrize("field", ["startDate", "endDate"])
-def test_a_date_that_is_not_the_documented_shape_is_refused(
-    field: str, value: Any
-) -> None:
-    assert rejected(make_item(**{field: value})) is SkipReason.INVALID_DATE
 
 
 def test_an_end_before_the_start_is_refused() -> None:

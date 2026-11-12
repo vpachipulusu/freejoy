@@ -11,9 +11,12 @@ field value, URL or copy ever leaves this module in a rejection. Nothing is trus
   invisible characters dropped, whitespace collapsed, lengths bounded (the limits are the admin
   API's). A title or name that is empty after cleaning rejects the item; anything over
   ``MAX_RAW_LENGTH`` rejects it as ``field_too_long``.
-* **Dates** are ``YYYY-MM-DDTHH:MM:SS[.fraction][Z]`` read as UTC and nothing else (no offsets, no
-  date-only, years 2000 to 2100); an end that is not after the start, or is already past, rejects the
-  item. A missing or empty date is open-ended.
+* **Dates** are ISO 8601 instants and nothing else: ``YYYY-MM-DD``, ``T`` or one space, ``HH:MM:SS``
+  (seconds required), an optional fraction, then no zone (read as UTC), ``Z`` or an explicit offset
+  (``+HH:MM``, ``+HHMM``, ``-HH:MM``, ``-HHMM``, converted to UTC). No date-only, no minutes-only time,
+  no number or epoch, years 2000 to 2100. A start that fails is ``invalid_start_date``, an end that
+  fails ``invalid_end_date``; an end that is not after the start, or is already past, rejects the item.
+  A missing or empty date is open-ended.
 * **URLs.** ``url`` (optional) and ``urlTracking`` (required) go through ``validate_https_url``;
   ``urlTracking`` must also be on an Awin host (``affiliate_hosts``, subdomains included, look-alikes
   such as ``awin1.com.evil.example`` refused) and ``url`` must not be on any network's tracking host.
@@ -30,7 +33,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -55,12 +58,14 @@ MAX_VOUCHER_CODE_LENGTH = 500
 MIN_YEAR, MAX_YEAR = 2000, 2100
 REGION = "GB"
 SUPPORTED_TYPES = frozenset({"promotion", "voucher"})
-_DATE = re.compile(
-    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})"
-    r"(?:\.([0-9]{1,9}))?Z?",
+_INSTANT = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})([T ])([0-9]{2}):([0-9]{2}):([0-9]{2})"
+    r"(?:\.([0-9]{1,9}))?"
+    r"(?:(Z)|([+-])([0-9]{2}):?([0-9]{2}))?",
     re.ASCII,
 )
 MICROSECOND_DIGITS = 6
+MAX_OFFSET_HOURS, MAX_OFFSET_MINUTES = 23, 59
 
 
 class SkipReason(enum.StrEnum):
@@ -74,7 +79,8 @@ class SkipReason(enum.StrEnum):
     INVALID_TITLE = "invalid_title"
     INVALID_TEXT = "invalid_text"
     FIELD_TOO_LONG = "field_too_long"
-    INVALID_DATE = "invalid_date"
+    INVALID_START_DATE = "invalid_start_date"
+    INVALID_END_DATE = "invalid_end_date"
     INVALID_WINDOW = "invalid_window"
     ENDED = "ended"
     INVALID_URL = "invalid_url"
@@ -181,37 +187,64 @@ def _advertiser(item: dict[str, Any]) -> tuple[int, str]:
     return advertiser_id, name
 
 
+def _instant(match: re.Match[str]) -> datetime | None:
+    """The UTC instant a matched timestamp names, or ``None`` when a component is out of range."""
+    year, month, day = int(match[1]), int(match[2]), int(match[3])
+    hour, minute, second = int(match[5]), int(match[6]), int(match[7])
+    micro = int((match[8] or "0").ljust(MICROSECOND_DIGITS, "0")[:MICROSECOND_DIGITS])
+    zone: timezone = UTC
+    if match[10] is not None:
+        offset_hours, offset_minutes = int(match[11]), int(match[12])
+        if offset_hours > MAX_OFFSET_HOURS or offset_minutes > MAX_OFFSET_MINUTES:
+            return None
+        delta = timedelta(hours=offset_hours, minutes=offset_minutes)
+        zone = timezone(-delta if match[10] == "-" else delta)
+    try:
+        local = datetime(year, month, day, hour, minute, second, micro, tzinfo=zone)
+    except ValueError:
+        return None
+    utc = local.astimezone(UTC)
+    return utc if MIN_YEAR <= utc.year <= MAX_YEAR else None
+
+
+def parse_instant(value: object) -> datetime | None:
+    """An ISO 8601 instant as UTC (years 2000 to 2100), else ``None``.
+
+    ``YYYY-MM-DD``, ``T`` or one space, ``HH:MM:SS`` (seconds required), an optional fraction of 1 to 9
+    digits (cut to microseconds), then no zone (read as UTC), ``Z`` or ``+HH:MM``, ``+HHMM``, ``-HH:MM``,
+    ``-HHMM`` (converted to UTC). Everything else (a date alone, a time without seconds, a number, text)
+    is ``None``: an instant that could mean two moments is never guessed.
+    """
+    match = _INSTANT.fullmatch(value) if isinstance(value, str) else None
+    return None if match is None else _instant(match)
+
+
 def parse_utc_timestamp(value: object) -> datetime | None:
     """``YYYY-MM-DDTHH:MM:SS[.fraction][Z]`` read as UTC (years 2000 to 2100), else ``None``.
 
-    Shared by every Awin parser (promotions and transactions) so one rule decides what a timestamp is.
+    The strict form the transaction report parser uses (its request says ``timezone=UTC``, so an offset or
+    a space separator means the request was not honoured and is refused). Promotions use ``parse_instant``.
     """
-    match = _DATE.fullmatch(value) if isinstance(value, str) else None
-    if match is None:
+    match = _INSTANT.fullmatch(value) if isinstance(value, str) else None
+    if match is None or match[4] != "T" or match[10] is not None:
         return None
-    year, month, day, hour, minute, second = (int(match[n]) for n in range(1, 7))
-    micro = int((match[7] or "0").ljust(MICROSECOND_DIGITS, "0")[:MICROSECOND_DIGITS])
-    if not MIN_YEAR <= year <= MAX_YEAR:
-        return None
-    try:
-        return datetime(year, month, day, hour, minute, second, micro, tzinfo=UTC)
-    except ValueError:
-        return None
+    return _instant(match)
 
 
-def _date(value: object) -> datetime | None:
+def _date(value: object, reason: SkipReason) -> datetime | None:
     if value is None or value == "":
         return None
-    parsed = parse_utc_timestamp(value)
+    parsed = parse_instant(value)
     if parsed is None:
-        raise _Reject(SkipReason.INVALID_DATE)
+        raise _Reject(reason)
     return parsed
 
 
 def _window(
     item: dict[str, Any], now: datetime
 ) -> tuple[datetime | None, datetime | None]:
-    start, end = _date(item.get("startDate")), _date(item.get("endDate"))
+    start = _date(item.get("startDate"), SkipReason.INVALID_START_DATE)
+    end = _date(item.get("endDate"), SkipReason.INVALID_END_DATE)
     if start is not None and end is not None and end <= start:
         raise _Reject(SkipReason.INVALID_WINDOW)
     if end is not None and end <= now:
