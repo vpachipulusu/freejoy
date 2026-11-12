@@ -211,10 +211,10 @@ These need a human, a public URL or a decision, and were not done in FREEJ-25:
    which exist in `public/` (the first three 404 in Lighthouse). Add real brand assets, then pass the
    logo path to `buildOrganization` and an image to `openGraphFor`.
 3. **Real 410 for gone offers** (Phase 3): replace the 404 described under "Expired offers".
-4. **Unknown `/category/[slug]` and `/freebies/[slug]` answer a real 404.** No `loading.tsx` may sit above the
-   public pages: a loading boundary streams the shell before `notFound()` runs and turns every 404 into a
+4. **Unknown `/category/[slug]` and `/freebies/[slug]` answer a real 404.** No `loading.tsx` may sit above those
+   pages (`(public)`, `freebies`, `category`): a loading boundary streams the shell before `notFound()` runs and turns every 404 into a
    200 soft 404. The root `loading.tsx` was moved into the admin, auth, dashboard and pricing segments
-   (`RouteSkeleton`), and `src/__tests__/unit/config/loading-boundary.test.ts` fails if one returns.
+   (`RouteSkeleton`; FREEJ-67 added it to the public pages that cannot 404, see [loading-states.md](loading-states.md)), and `src/__tests__/unit/config/loading-boundary.test.ts` fails if one returns.
 5. **Re-run Lighthouse** now that the catalogue can be API-backed; the SEO score is capped by the deliberate
    noindex today. Numbers so far: `docs/evidence/phase3/lighthouse.md`.
 6. Decide whether thin categories (no live offers) should stay indexable.

@@ -137,10 +137,10 @@ the admin publish, unpublish and expire actions (FREEJ-22); nothing calls it yet
 
 | State | What the visitor gets |
 |---|---|
-| Loading | `RouteSkeleton` `loading.tsx` for the admin, auth, dashboard and pricing segments only (none above the public pages, see Not found); in-page Suspense skeletons for the home sections and the catalogue results, `role="status" aria-busy="true"` with an accessible name, blocks `aria-hidden` |
+| Loading | A visible spinner (`Spinner`) plus skeleton: `RouteSkeleton` `loading.tsx` for the admin, auth, dashboard and pricing segments and the public pages that cannot 404 (about, alerts, privacy and so on; none above `freebies`, `category` or `(public)` itself, see Not found), and a global navigation indicator for every other move ([loading-states.md](loading-states.md)); in-page Suspense skeletons for the home sections and the catalogue results, `role="status" aria-busy="true"` with an accessible name, blocks `aria-hidden` |
 | Empty | "No freebies match that yet" with a Clear filters link; "no featured freebies right now" on the home page |
 | Error | `InlineError` (`role="alert"`, curated copy) with a "Try again" button (`RetryButton`, a real `button` that calls `router.refresh()`, `aria-disabled` while it runs so focus stays). The page answers **HTTP 200** for the duration of the outage and keeps its normal robots (a 5xx is a follow-up, see [freejoy-seo.md](freejoy-seo.md#when-the-catalogue-cannot-be-read)); it is never cached: dynamic responses carry `Cache-Control: private, no-cache, no-store`. |
-| Not found | `notFound()` for an unknown, unpublished or non-slug offer or category answers a real **HTTP 404**. This holds only because no `loading.tsx` sits above the public pages; `loading-boundary.test.ts` guards it. |
+| Not found | `notFound()` for an unknown, unpublished or non-slug offer or category answers a real **HTTP 404**. This holds only because no `loading.tsx` sits above those two pages (a loading file in `(public)`, `freebies` or `category` would stream a 200 shell first); `loading-boundary.test.ts` guards it. |
 | Ended | The API's 410 renders "This offer has ended" with the title, the end date and two ways onward (no call to action, claim steps or terms). `noindex, follow` for 30 days after the end date, then not found. |
 
 ## Trust rules the UI follows
@@ -366,8 +366,9 @@ it. The filter drawer and sort control render outside the keyed Suspense boundar
   pagination work without it.
 - An outage answers HTTP 200 (error state, normal robots) for as long as it lasts; a 5xx is a follow-up.
 - The offer page has no route-level loading skeleton: a `loading.tsx` there would turn every unknown offer into
-  a 200 soft 404. The root skeleton lives in `components/site/route-skeleton.tsx` and is re-exported by the
-  admin, auth, dashboard and pricing segments.
+  a 200 soft 404. The skeleton (with the spinner) lives in `components/site/route-skeleton.tsx` and is re-exported by the
+  admin, auth, dashboard and pricing segments and the public pages that cannot 404; the offer page, `/category/[slug]`,
+  `/freebies` and the home page rely on the global navigation indicator ([loading-states.md](loading-states.md)).
 
 ## Error monitoring and addresses (FREEJ-31)
 

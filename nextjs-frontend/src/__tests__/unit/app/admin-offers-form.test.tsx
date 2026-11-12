@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { setupUser } from '@/__tests__/unit/helpers/user';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 
 // Typing into a long form is slow under coverage instrumentation: the typing-heavy suites get more time.
 const SLOW = { timeout: 30_000 };
@@ -147,6 +148,7 @@ describe('OfferForm validation', SLOW, () => {
 
 describe('OfferForm submit', SLOW, () => {
   it('creates a draft with the typed values and opens its edit page', async () => {
+    const announced = recordNavigationAnnouncements();
     const user = setupUser();
     renderForm({ initialValues: filled });
 
@@ -160,6 +162,7 @@ describe('OfferForm submit', SLOW, () => {
       offerType: 'FREE_SAMPLE',
     });
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/admin/offers/o9'));
+    expect(announced.hrefs).toEqual(['/admin/offers/o9']);
     expect(mocks.toast).toHaveBeenCalledWith({
       title: 'Draft created',
       description: 'Free coffee sample',
@@ -188,6 +191,7 @@ describe('OfferForm submit', SLOW, () => {
   });
 
   it('focuses a summary for a failure that belongs to no field', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.createOfferAction.mockResolvedValue({
       success: false,
       error: 'That slug is already in use. Choose another.',
@@ -200,6 +204,7 @@ describe('OfferForm submit', SLOW, () => {
     const summary = await screen.findByText('That slug is already in use. Choose another.');
     await waitFor(() => expect(summary.closest('[role="group"]')).toHaveFocus());
     expect(mocks.push).not.toHaveBeenCalled();
+    expect(announced.hrefs).toEqual([]);
   });
 
   it('shows a curated message and focuses it when the action call itself throws', async () => {
@@ -408,6 +413,7 @@ describe('preview card', () => {
 
 describe('CategoryForm', SLOW, () => {
   it('validates and then creates a category', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.createCategoryAction.mockResolvedValue({
       success: true,
       data: { id: 'c9', slug: 'pets', enabled: true },
@@ -432,6 +438,7 @@ describe('CategoryForm', SLOW, () => {
       enabled: true,
     });
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/admin/categories'));
+    expect(announced.hrefs).toEqual(['/admin/categories']);
   });
 
   it('keeps the slug read only when editing and shows a server message', async () => {
@@ -466,6 +473,7 @@ describe('CategoryForm', SLOW, () => {
 
 describe('MerchantForm', SLOW, () => {
   it('rejects a non-https website, then creates a merchant', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.createMerchantAction.mockResolvedValue({
       success: true,
       data: { id: 'm9', slug: 'acme', active: true },
@@ -490,6 +498,7 @@ describe('MerchantForm', SLOW, () => {
       active: true,
     });
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/admin/merchants'));
+    expect(announced.hrefs).toEqual(['/admin/merchants']);
   });
 
   it('saves an edit and announces it', async () => {

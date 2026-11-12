@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import Link from 'next/link';
 import { MailCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,8 +23,10 @@ export default function VerifyEmailPage() {
     const idToken = await user.getIdToken(true);
     const result = await refreshSessionAction(idToken);
     if (result.success && result.data?.claimsEmailVerified === true) {
+      announceNavigation('/dashboard');
       router.push('/dashboard');
     } else if (result.data?.signInRequired === true) {
+      announceNavigation('/login');
       router.push('/login');
     } else {
       setError('Could not confirm your verified email yet. Please try again in a moment.');
@@ -34,6 +37,7 @@ export default function VerifyEmailPage() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         // User not logged in, redirect to login
+        announceNavigation('/login');
         router.push('/login');
         return;
       }

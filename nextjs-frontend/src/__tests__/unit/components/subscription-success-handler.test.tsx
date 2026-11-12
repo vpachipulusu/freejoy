@@ -29,6 +29,7 @@ vi.mock('@/app/actions/subscription-actions', () => ({
 }));
 
 import { SubscriptionSuccessHandler } from '@/components/dashboard/subscription-success-handler';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 
 const FREE = { success: true, data: { subscriptionTier: 'free', subscriptionStatus: 'inactive' } };
 const PRO = { success: true, data: { subscriptionTier: 'pro', subscriptionStatus: 'active' } };
@@ -60,6 +61,7 @@ describe('SubscriptionSuccessHandler', () => {
   });
 
   it('tells the user the payment was received and keeps the banner when the plan never flips', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.getSubscriptionStatusAction.mockResolvedValue(FREE);
 
     await renderAndAdvance(40_000);
@@ -67,6 +69,7 @@ describe('SubscriptionSuccessHandler', () => {
     expect(screen.getByText(/payment received/i)).toBeInTheDocument();
     expect(screen.getByText(/contact support/i)).toBeInTheDocument();
     expect(mocks.replace).not.toHaveBeenCalledWith('/dashboard');
+    expect(announced.hrefs).toEqual([]);
   });
 
   it('shows the processing state while it is still polling', async () => {
@@ -78,15 +81,18 @@ describe('SubscriptionSuccessHandler', () => {
   });
 
   it('activates and refreshes the dashboard once the plan is Pro', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.getSubscriptionStatusAction.mockResolvedValue(PRO);
 
     await renderAndAdvance(5_000);
 
     expect(screen.getByText(/subscription activated/i)).toBeInTheDocument();
     expect(mocks.replace).toHaveBeenCalledWith('/dashboard');
+    expect(announced.hrefs).toEqual(['/dashboard']);
   });
 
   it('removes a forged ?upgrade=success straight away', async () => {
+    const announced = recordNavigationAnnouncements();
     mocks.verifyUpgradeSessionAction.mockResolvedValue({
       success: true,
       data: { valid: false, reason: 'No valid checkout session found' },
@@ -95,6 +101,7 @@ describe('SubscriptionSuccessHandler', () => {
     await renderAndAdvance(100);
 
     expect(mocks.replace).toHaveBeenCalledWith('/dashboard');
+    expect(announced.hrefs).toEqual(['/dashboard']);
     expect(mocks.getSubscriptionStatusAction).not.toHaveBeenCalled();
   });
 

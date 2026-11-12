@@ -3,6 +3,7 @@ import './globals.css';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { QueryProvider } from '@/components/providers/query-provider';
 import { ToastProvider } from '@/components/providers/toast-provider';
+import { NavigationProgress } from '@/components/site/navigation-progress';
 import { cn } from '@/lib/utils';
 import { getActiveTheme } from '@/app/actions/theme-actions';
 import { getActiveFont } from '@/app/actions/font-actions';
@@ -97,6 +98,7 @@ export const viewport: Viewport = {
  * - Theme provider for dark/light mode
  * - React Query provider for data fetching
  * - Toast provider for notifications
+ * - Global navigation indicator (top bar and spinner while a page loads)
  * - Font optimization with next/font
  * - Proper HTML semantics and accessibility
  *
@@ -129,6 +131,7 @@ export default async function RootLayout({
         >
           <QueryProvider>
             <ToastProvider>
+              <NavigationProgress />
               <div className="relative flex min-h-screen flex-col">
                 <div className="flex-1">{children}</div>
               </div>

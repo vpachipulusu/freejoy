@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import {
   changePasswordAction,
   deleteAccountAction,
@@ -154,6 +155,7 @@ export default function SecurityPage() {
           description: 'Please sign in again with your new password.',
         });
         await signOut(auth).catch(() => undefined);
+        announceNavigation('/login');
         router.push('/login');
         return;
       }
@@ -248,6 +250,7 @@ export default function SecurityPage() {
     const result = await deleteAccountAction(idToken);
     if (!result.success) return result.error || 'Failed to delete account';
     await signOut(auth).catch(() => undefined);
+    announceNavigation('/');
     router.push('/');
     return null;
   }

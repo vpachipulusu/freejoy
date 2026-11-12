@@ -103,7 +103,7 @@ describe('global-error', () => {
 });
 
 describe('loading', () => {
-  it('is a busy region with skeleton blocks and no spinner', () => {
+  it('is a busy region with a visible spinner above skeleton blocks', () => {
     const { container } = render(<Loading />);
 
     const region = screen.getByRole('status');
@@ -115,7 +115,10 @@ describe('loading', () => {
     expect(container.querySelectorAll('[aria-hidden="true"].bg-secondary').length).toBeGreaterThan(
       1
     );
-    expect(container.innerHTML).not.toMatch(/animate-spin/);
+    // the spinner is the visible cue; it is decorative so the region announces "Loading" once
+    const spinner = container.querySelector('svg[class~="motion-safe:animate-spin"]');
+    expect(spinner).not.toBeNull();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 });
 

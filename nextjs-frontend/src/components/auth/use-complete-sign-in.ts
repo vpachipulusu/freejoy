@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { resolveSafeRedirect } from '@/lib/auth/safe-redirect';
 
 /**
@@ -15,7 +16,9 @@ import { resolveSafeRedirect } from '@/lib/auth/safe-redirect';
 export function useCompleteSignIn(redirectTo?: string): () => void {
   const router = useRouter();
   return useCallback(() => {
-    router.push(resolveSafeRedirect(redirectTo));
+    const destination = resolveSafeRedirect(redirectTo);
+    announceNavigation(destination);
+    router.push(destination);
     router.refresh();
   }, [router, redirectTo]);
 }

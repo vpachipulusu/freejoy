@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createCategoryAction, updateCategoryAction } from '@/app/actions/admin/category-actions';
@@ -60,6 +61,7 @@ export function CategoryForm({ mode, categoryId, initialValues }: CategoryFormPr
     }
     if (mode === 'create') {
       toast({ title: 'Category created', description: values.name });
+      announceNavigation('/admin/categories');
       router.push('/admin/categories');
       return;
     }

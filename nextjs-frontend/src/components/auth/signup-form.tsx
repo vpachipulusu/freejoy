@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -103,6 +104,7 @@ export function SignupForm({ selectedPlan }: SignupFormProps) {
         redirected = true;
         // If navigation fails or stalls, give the form back instead of leaving it locked.
         setTimeout(release, REDIRECT_RECOVERY_MS);
+        announceNavigation('/verify-email');
         router.push('/verify-email');
       }
     } catch (error) {

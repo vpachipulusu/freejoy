@@ -2,6 +2,7 @@
 
 import { useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { announceNavigation } from '@/components/site/navigation-events';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -114,7 +115,9 @@ export function OfferForm({
     }
     if (mode === 'create') {
       toast({ title: 'Draft created', description: values.title });
-      router.push(`/admin/offers/${outcome.data.id}`);
+      const destination = `/admin/offers/${outcome.data.id}`;
+      announceNavigation(destination);
+      router.push(destination);
       return;
     }
     const written: Partial<OfferWrittenData> = outcome.data;

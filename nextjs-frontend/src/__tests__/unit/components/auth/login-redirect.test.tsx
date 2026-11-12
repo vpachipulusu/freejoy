@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { setupUser, type TestUser } from '@/__tests__/unit/helpers/user';
+import { recordNavigationAnnouncements } from '@/__tests__/unit/helpers/navigation-announcements';
 
 const mocks = vi.hoisted(() => ({
   signInWithEmail: vi.fn(),
@@ -79,6 +80,7 @@ afterEach(async () => {
 
 describe('email and password sign-in', () => {
   it('goes to the redirect target, then refreshes', async () => {
+    const announced = recordNavigationAnnouncements();
     const user = setupUser();
     render(<LoginForm onTotpRequired={vi.fn()} redirectTo={TARGET} />);
 
@@ -86,6 +88,7 @@ describe('email and password sign-in', () => {
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(TARGET));
     expect(mocks.push).toHaveBeenCalledTimes(1);
+    expect(announced.hrefs).toEqual([TARGET]);
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
